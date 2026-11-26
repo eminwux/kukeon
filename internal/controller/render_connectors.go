@@ -757,7 +757,7 @@ func loginVolumeStatus(
 	if other := applypkg.OtherRoleOnStateVolume(r, *ref, hs.cfg, hs.self); other != "" {
 		fail("volume %s is the login identity of role %s; role %s cannot share it "+
 			"(the harness keeps role content in its state directory)",
-			where, other, applypkg.RoleName(hs.cfg.Labels))
+			where, other, applypkg.RoleName(hs.cfg.Labels, hs.cfg.Annotations))
 	}
 }
 

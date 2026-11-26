@@ -17,6 +17,7 @@
 package controller
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -159,7 +160,8 @@ func (b *Exec) GetTeamDefaults(realm string) (intmodel.TeamDefaults, bool, error
 // DeleteTeam deletes a team (issue #1618, D11): its Configs, the shared
 // blueprints no other Config references, and then the Team document. Cells
 // and volumes stay; the result names the cells still running from a removed
-// Config and the state volumes kept. The kuke system team is refused.
+// Config and the state volumes kept. The system teams (kuke, and the system
+// default team) are refused.
 func (b *Exec) DeleteTeam(name, realm string) (DeleteTeamResult, error) {
 	var res DeleteTeamResult
 	realm = teamRealm(realm)
@@ -167,14 +169,24 @@ func (b *Exec) DeleteTeam(name, realm string) (DeleteTeamResult, error) {
 		return res, err
 	}
 	if name == config.SystemTeamName {
-		return res, errdefs.ErrTeamReserved
+		return res, fmt.Errorf("team %s is a %w", name, errdefs.ErrTeamReserved)
 	}
 	stored := intmodel.Team{Metadata: intmodel.TeamMetadata{Name: name, Realm: realm}}
-	if _, err := b.runner.GetTeam(stored); err != nil {
+	got, err := b.runner.GetTeam(stored)
+	if err != nil {
 		if errors.Is(err, errdefs.ErrTeamNotFound) {
 			return res, fmt.Errorf("%w: %q in realm %q", errdefs.ErrTeamNotFound, name, realm)
 		}
 		return res, err
+	}
+	// The system default team (issue #1692) is reserved too. A user team
+	// stored as default before it became a system team is not: deleting
+	// it is how it is renamed.
+	if name == config.DefaultTeamName {
+		team, decodeErr := config.DecodeTeam(bytes.NewReader(got.Document))
+		if decodeErr != nil || config.IsSystemDefaultTeam(team) {
+			return res, fmt.Errorf("team %s is a %w", name, errdefs.ErrTeamReserved)
+		}
 	}
 	previousShared, err := b.teamBlueprintRefs(name)
 	if err != nil {

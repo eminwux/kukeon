@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { useResource, ErrorNotice, failureTitle, type Resource } from "./request";
@@ -15,9 +15,11 @@ import { UserMenu } from "./user-menu";
 import { gridGroupingKey, sidebarGroupingKey, useCellFilter } from "./cell-filter";
 import { SettingsNav } from "./settings-nav";
 import { SettingsPage } from "./settings-page";
-import { matchesState } from "./cells.mjs";
+import { configDisplayName, instanceLabels, matchesState, ownDisplayName } from "./cells.mjs";
+import { RenameControl, renameCell, renameConfig } from "./display-name";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newCellLink, settingsLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newAgentLink, newCellLink, settingsLink, workspaceLink, type Route } from "./routes";
+import type { CreatedAgent } from "./new-agent";
 import { manageAttention, viewOf } from "./views.mjs";
 import { ManageNav } from "./manage-nav";
 import { WorkbenchGrid } from "./workbench";
@@ -45,6 +47,7 @@ import { NewSecretPage } from "./secret-form";
 const failureStates = ["Failed", "Error", "Degraded"];
 
 const NewCellPage = lazy(async () => ({ default: (await import("./new-cell")).NewCellPage }));
+const NewAgentPage = lazy(async () => ({ default: (await import("./new-agent")).NewAgentPage }));
 const NewConfigPage = lazy(async () => ({ default: (await import("./new-config")).NewConfigPage }));
 const ConnectorsPage = lazy(async () => ({ default: (await import("./connectors-page")).ConnectorsPage }));
 const TeamsPage = lazy(async () => ({ default: (await import("./teams-page")).TeamsPage }));
@@ -207,7 +210,8 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
 
 // cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
 // between them keeps the TerminalWorkspace, and therefore every attached session, alive.
-function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCells, onOpenDock }: {
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCells, onOpenDock, onChanged }: {
+  onChanged: () => void;
   dockedCells: string[];
   onOpenDock: () => void;
   title: string;
@@ -265,6 +269,15 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   // this Config" panel reads it the other way.
   const sourceConfig = detail.data ? configForCell(detail.data) : null;
   const sourceConfigScope = sourceConfig ? referenceScope(sourceConfig) : [];
+  // Display names (#1692): the instance label the agent lists show, the cell's own name and its agent's.
+  const allCells = inventory.data?.rows[3];
+  const configs = inventory.data?.configs;
+  const labels = useMemo(() => instanceLabels(allCells ?? [], configs), [allCells, configs]);
+  const instanceLabel = scope ? labels.get(scopeKey) : undefined;
+  const inventoryDoc = scope ? allCells?.find(row => JSON.stringify(row.scope) === scopeKey)?.doc : undefined;
+  const cellDisplayName = ownDisplayName(inventoryDoc ?? detail.data);
+  const agentConfig = sourceConfig ? configs?.find(doc => doc.metadata.name === sourceConfig.name && (doc.metadata.realm ?? "") === (sourceConfig.realm ?? "") && (doc.metadata.space ?? "") === (sourceConfig.space ?? "") && (doc.metadata.stack ?? "") === (sourceConfig.stack ?? "")) : undefined;
+  const agentName = configDisplayName(agentConfig).name;
   // A scheduled run names its Config by label and its fire time by name; the Config itself is read only
   // on cellRead, for its schedule.
   const run = detail.data ? scheduledRun(detail.data) : null;
@@ -285,11 +298,13 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   const overview = detail.data && scope && <section className="panel resource-overview">
     <div className="panel-heading"><h2>Resource overview</h2><div className="cell-overview-actions"><StateBadge state={detail.data.status?.state} /><a className="document-action" href={resourceLink(scope, true)} target="_blank" rel="noopener noreferrer">View document</a></div></div>
     <div className="panel-body"><dl className="details-grid">
-      <dt>Config</dt><dd>{sourceConfig ? <a className="resource-name" href={catalogLink("configs", sourceConfigScope)}>{sourceConfigScope.join(" / ")}</a> : "Not created from a Config"}</dd>
+      {/* The agent's and the instance's display names (#1692) ride on the Config and Name rows, so the
+          overview keeps its height. */}
+      <dt>Config</dt><dd className={sourceConfig ? "display-name-row" : undefined}>{sourceConfig ? <><a className="resource-name" href={catalogLink("configs", sourceConfigScope)}>{sourceConfigScope.join(" / ")}</a>{agentName && <span className="badge agent-display-name">Agent: {agentName}</span>}<RenameControl subject={`agent ${sourceConfigScope.join(" / ")}`} current={ownDisplayName(agentConfig)} onSave={async value => { const ref = { name: sourceConfig.name ?? "", realm: sourceConfig.realm ?? scope[0], space: sourceConfig.space, stack: sourceConfig.stack }; inventory.setConfigAnnotations(ref, await renameConfig(ref, value)); onChanged(); }} /></> : "Not created from a Config"}</dd>
       {ipRow}
       {scheduleRow}
       <dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([key, value]) => <span className="badge label-badge" key={key}>{key}: {value}</span>)}{!Object.keys(detail.data.metadata.labels ?? {}).length && "No labels"}</dd>
-      <dt>Name</dt><dd>{detail.data.metadata.name}</dd>
+      <dt>Name</dt><dd className="display-name-row"><span>{detail.data.metadata.name}</span>{cellDisplayName ? <span className="badge instance-display-name">Display name: {cellDisplayName}</span> : instanceLabel && <span className="badge instance-display-name">Listed as {instanceLabel}</span>}<RenameControl subject={`instance ${scope.join(" / ")}`} current={cellDisplayName} onSave={async value => { inventory.setCellAnnotations(scope, await renameCell(scope, value)); onChanged(); }} /></dd>
       <dt>Kind</dt><dd>{detail.data.kind ?? "cell"}</dd>
       <dt>Scope</dt><dd className="mono-id">{scope.join(" / ")}</dd>
       <dt>API version</dt><dd>{detail.data.apiVersion ?? "Not reported"}</dd>
@@ -312,7 +327,8 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     {scope && <div className="page-heading cell-page-heading">
       {/* cellTerminal keeps one action row: title, view switch, terminal tools, then lifecycle actions. */}
       <div ref={terminalBar} className={`cell-page-title-row${terminalView ? " cell-terminal-bar" : ""}${terminalExpanded ? " is-terminal-expanded" : ""}`}>
-        <h1 tabIndex={-1} title={title}>{title}</h1>
+        <h1 tabIndex={-1} title={instanceLabel ? scope.join(" / ") : title}>{instanceLabel ?? title}</h1>
+        {instanceLabel && <span className="cell-page-name mono-id" title={scope.join(" / ")}>{scope[3]}</span>}
         <span className={`cell-detail-state ${detailState?.tone ?? "is-idle"}`} aria-hidden={!detailState} tabIndex={detailState ? 0 : -1} aria-label={detailState ? `Cell details: ${detailState.label}` : undefined} data-tooltip={detailState?.label}><span className="dot" aria-hidden="true" /></span>
         <a className="icon-button cell-view-switch" href={terminalView ? resourceLink(scope) : workspaceLink(scope)} aria-label={switchLabel} title={terminalView ? "View cell details" : "Open cell terminal"}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -653,6 +669,15 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       notify({ key, tone: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}`, link });
     } finally { setRevision(value => value + 1); }
   }
+  // A new agent (#1692) is stored and started by the server; the page then opens its cell's terminal.
+  function handleAgentCreated(agent: CreatedAgent) {
+    const { cell, config } = agent;
+    const scope = [cell.realm, cell.space ?? "", cell.stack ?? "", cell.name];
+    setRevision(value => value + 1);
+    const named = config.annotations?.["kukeon.io/display-name"];
+    notify({ key: `agent:${JSON.stringify(scope)}`, tone: "success", message: `Agent ${named ? `${named} ` : ""}created: cell ${scope.join(" / ")} started.`, link: { href: resourceLink(scope), label: "View cell details" } });
+    window.location.hash = workspaceLink(scope);
+  }
   // Workbench (terminals) or Manage (resources), derived from the route and never stored (#1635).
   const view = viewOf(route);
   const isWorkspace = route.view === "workspace";
@@ -675,7 +700,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const connectorHeading = connectorsView && route.scope[0] ? connectorTitle?.name === route.scope[0] ? connectorTitle.title : route.scope[0] : undefined;
   // The identity pages of a connector: #/connectors/<name>/new-identity and …/rotate-identity.
   const identityAction = connectorsView && route.scope[0] && route.action ? route.action === "rotate-identity" ? "Rotate identity" : "New identity" : undefined;
-  const heading = route.view === "settings" ? "Settings" : connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? teamAction ?? route.scope[0] ?? "Teams" : route.view === "new-team" ? "New team" : sourcesView ? route.scope[0] ?? "Sources" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : route.view === "workbench" ? "Workbench" : "Overview";
+  const heading = route.view === "settings" ? "Settings" : connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? teamAction ?? route.scope[0] ?? "Teams" : route.view === "new-team" ? "New team" : sourcesView ? route.scope[0] ?? "Sources" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-agent" ? "New agent" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : route.view === "workbench" ? "Workbench" : "Overview";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = teamAction ? route.scope[0] : connectorsView ? identityAction ? connectorHeading ?? "" : connectorHeading && connectorHeading !== route.scope[0] ? route.scope[0] : "" : isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
@@ -745,9 +770,9 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
-        {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}</div>}
-        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} />
-        {isWorkspace ? null : route.view === "settings" ? <SettingsPage section={route.scope[0] === "profile" ? "profile" : "general"} inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
+        {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{route.view === "workbench" && <a className="header-action page-heading-action" href={newAgentLink()}>New agent</a>}</div>}
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} onChanged={() => setRevision(value => value + 1)} />
+        {isWorkspace ? null : route.view === "settings" ? <SettingsPage section={route.scope[0] === "profile" ? "profile" : "general"} inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} /> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refresh to retrieve the latest state.</footer>
       </div>
     </main>

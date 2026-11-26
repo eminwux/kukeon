@@ -4,7 +4,7 @@ import { homeLink, workspaceLink } from "./routes";
 import { stateTone } from "./status";
 import { Icon } from "./icons";
 import type { View } from "./views.mjs";
-import { activeCells, agentGroups, rollupState } from "./cells.mjs";
+import { activeCells, agentGroups, instanceLabels, rollupState } from "./cells.mjs";
 import type { Row } from "./inventory";
 import type { CellListStyle } from "./settings";
 
@@ -125,12 +125,16 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
 }): ReactNode {
   // Like the Workbench sidebar, the rail lists active cells and the open one (#1635).
   const cells = activeCells(inventory.data?.rows[3] ?? [], selectedScope);
-  const { agents, others } = agentGroups(cells);
+  const configs = inventory.data?.configs;
+  const { agents, others } = agentGroups(cells, configs);
+  // Instance labels (#1692) are counted over every cell, like the sidebar's.
+  const labels = listStyle === "agent" ? instanceLabels(inventory.data?.rows[3] ?? [], configs) : new Map<string, string>();
   const tooltip = `Daemon: ${connection.status} · ${connection.info.summary}`;
   const isCurrent = (row: Row) => selectedScope.length === 4 && row.scope.every((part, i) => part === selectedScope[i]);
   const dot = (row: Row) => {
     const state = row.doc.status?.state;
-    const label = `Open ${row.scope.join(" / ")} (${state || "state not reported"})`;
+    const instance = labels.get(JSON.stringify(row.scope));
+    const label = `Open ${instance ? `${instance} (${row.scope.join(" / ")})` : row.scope.join(" / ")} (${state || "state not reported"})`;
     return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
   };
   return <div className="sidebar-rail">
@@ -141,7 +145,7 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
       {listStyle === "agent" ? <ul>
         {agents.map(agent => {
           const count = `${agent.rows.length} ${agent.rows.length === 1 ? "instance" : "instances"}`;
-          const named = `Agent ${agent.name}${agent.context ? ` (${agent.context})` : ""}, ${count}`;
+          const named = `Agent ${agent.displayName}${agent.context ? ` (${agent.context})` : ""}, ${count}`;
           const tone = `rail-agent-glyph tone-${stateTone(rollupState(agent.rows))}`;
           if (agent.rows.length === 1) {
             const row = agent.rows[0];

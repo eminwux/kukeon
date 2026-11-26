@@ -162,3 +162,19 @@ func TestExecErrorKinds(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentErrorKinds pins the wire kinds of the issue #1692 sentinels.
+func TestAgentErrorKinds(t *testing.T) {
+	for kind, sentinel := range map[string]error{
+		"InvalidDisplayName":    errdefs.ErrInvalidDisplayName,
+		"AgentTemplateNotFound": errdefs.ErrAgentTemplateNotFound,
+	} {
+		apiErr := kukeonv1.ToAPIError(fmt.Errorf("%w: too long", sentinel))
+		if apiErr.Kind != kind {
+			t.Errorf("Kind = %q, want %q", apiErr.Kind, kind)
+		}
+		if clientErr := kukeonv1.FromAPIError(apiErr); !errors.Is(clientErr, sentinel) {
+			t.Errorf("round-tripped error %v lost %s", clientErr, kind)
+		}
+	}
+}

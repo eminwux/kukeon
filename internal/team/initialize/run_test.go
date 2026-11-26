@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 )
 
@@ -59,10 +60,10 @@ func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	if out.Result == nil || out.Result.Resources != 7 || out.Result.Team != "kuke" {
 		t.Fatalf("result = %+v", out.Result)
 	}
-	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
-		t.Fatalf("writes = %v, want one team apply", f.writes)
+	if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) {
+		t.Fatalf("writes = %v, want the kuke team's apply, then the default team's", f.writes)
 	}
-	kinds, _ := appliedDocs(t, f.raw)
+	kinds, _ := appliedDocs(t, f.byTeam["kuke"])
 	if kinds[0] != "TeamDefaults" || kinds[len(kinds)-1] != "Team" {
 		t.Fatalf("apply stream kinds = %v", kinds)
 	}
@@ -92,6 +93,168 @@ func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	if f.creates != 0 || f.stackDefaults != nil {
 		t.Fatalf("init stored a secret or stack git defaults: creates=%d stack=%+v", f.creates, f.stackDefaults)
 	}
+}
+
+// TestInitAppliesTheDefaultTeam (issue #1692): after the kuke team, init
+// applies the system default team in its own team apply: the agent role on
+// claude and codex, as the two agent templates.
+func TestInitAppliesTheDefaultTeam(t *testing.T) {
+	opts, f := setupInit(t)
+	out, err := Init(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Also) != 1 || out.Also[0].Result == nil || out.Also[0].Result.Team != "default" {
+		t.Fatalf("also = %+v", out.Also)
+	}
+	team := storedTeam(t, f, "default")
+	if !config.IsSystemDefaultTeam(team) || len(team.Spec.Roles) != 1 || team.Spec.Roles[0].Name != "agent" ||
+		team.Spec.ProjectSource != nil {
+		t.Fatalf("stored default team = %+v", team.Spec)
+	}
+	_, names := appliedDocs(t, f.byTeam["default"])
+	if !slices.Equal(names["CellConfig"], []string{"default-agent-codex", "default-agent-claude"}) {
+		t.Fatalf("default team configs = %v", names["CellConfig"])
+	}
+	templates := 0
+	for _, cfg := range f.configs {
+		if !strings.HasPrefix(cfg.Metadata.Name, "default-agent-") {
+			if _, ok := cfg.Metadata.Labels[api.LabelTemplate]; ok {
+				t.Fatalf("%s is stamped as a template", cfg.Metadata.Name)
+			}
+			continue
+		}
+		templates++
+		if cfg.Metadata.Labels[api.LabelTemplate] != "true" || cfg.Metadata.Labels[api.LabelTeam] != "default" ||
+			cfg.Metadata.Labels[api.LabelRole] != "agent" {
+			t.Fatalf("%s labels = %v", cfg.Metadata.Name, cfg.Metadata.Labels)
+		}
+	}
+	if templates != 2 {
+		t.Fatalf("stored %d agent templates, want 2", templates)
+	}
+}
+
+// TestInitLeavesAUserDefaultTeam (issue #1692): a team named default the
+// user added before default became a system team is left untouched, with how
+// to rename it, and the kuke team is still applied; with --force too.
+func TestInitLeavesAUserDefaultTeam(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		opts, f := setupInit(t)
+		mine := inheritingTeam("default")
+		storeTeam(t, f, mine)
+		before := slices.Clone(f.teams["default"])
+		opts.Force = force
+		out, err := Init(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(f.writes, []string{"apply-team kuke"}) || storedTeam(t, f, "kuke") == nil {
+			t.Fatalf("force=%v writes = %v, want the kuke team only", force, f.writes)
+		}
+		if !bytes.Equal(before, f.teams["default"]) {
+			t.Fatalf("force=%v: the user's default team was changed", force)
+		}
+		if len(out.Also) != 1 || !hasNote(out.Also[0].Notes, "kuke team export default") ||
+			!hasNote(out.Also[0].Notes, "kuke delete team default") {
+			t.Fatalf("force=%v also = %+v", force, out.Also)
+		}
+	}
+}
+
+// TestInitKeepsAStoredDefaultTeam: a plain init (kuke not stored yet) keeps a
+// stored system default team; --force resets it to the initial declaration.
+func TestInitKeepsAStoredDefaultTeam(t *testing.T) {
+	opts, f := setupInit(t)
+	edited := config.DefaultTeam()
+	edited.Spec.Harnesses = config.MajordomoHarnesses()[:1]
+	storeTeam(t, f, edited)
+	out, err := Init(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.writes, []string{"apply-team kuke"}) || !hasNote(out.Also[0].Notes, "--reapply") {
+		t.Fatalf("writes = %v also = %+v", f.writes, out.Also)
+	}
+	opts.Force = true
+	if _, err = Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if team := storedTeam(t, f, "default"); len(team.Spec.Harnesses) != 2 {
+		t.Fatalf("--force did not reset the default team: %+v", team.Spec.Harnesses)
+	}
+}
+
+// TestInitReappliesAndUpgradesTheDefaultTeam: --reapply recomposes the
+// stored default team after the kuke team; --reapply and --upgrade create it
+// on an install that has only the kuke team.
+func TestInitReappliesAndUpgradesTheDefaultTeam(t *testing.T) {
+	t.Run("reapply recomposes the stored team", func(t *testing.T) {
+		opts, f := setupInit(t)
+		if _, err := Init(t.Context(), opts); err != nil {
+			t.Fatal(err)
+		}
+		f.writes = nil
+		opts.Reapply = true
+		out, err := Init(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) ||
+			out.Also[0].Plan.Origin.Kind != OriginStored {
+			t.Fatalf("writes = %v also = %+v", f.writes, out.Also)
+		}
+	})
+	for _, mode := range []string{"reapply", "upgrade"} {
+		t.Run(mode+" creates a missing team", func(t *testing.T) {
+			var opts InitOptions
+			var f *fakeClient
+			if mode == "upgrade" {
+				a := kukeonAt(commitA, "")
+				opts, f = setupUpgrade(t, true, &a)
+				delete(f.teams, "default")
+			} else {
+				opts, f = setupInit(t)
+				if _, err := Init(t.Context(), opts); err != nil {
+					t.Fatal(err)
+				}
+				delete(f.teams, "default")
+				opts.Reapply = true
+			}
+			f.writes = nil
+			out, err := Init(t.Context(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) ||
+				out.Also[0].Plan.Origin.Kind != OriginInitial || !config.IsSystemDefaultTeam(storedTeam(t, f, "default")) {
+				t.Fatalf("writes = %v also = %+v", f.writes, out.Also)
+			}
+		})
+	}
+	t.Run("upgrade at the pin creates a missing team", func(t *testing.T) {
+		b := kukeonAt(commitB, "")
+		opts, f := setupUpgrade(t, true, &b)
+		delete(f.teams, "default")
+		if _, err := Init(t.Context(), opts); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(f.writes, []string{"apply-team default"}) {
+			t.Fatalf("writes = %v, want the default team only", f.writes)
+		}
+	})
+	t.Run("upgrade without the kuke team applies neither", func(t *testing.T) {
+		a := kukeonAt(commitA, "")
+		opts, f := setupUpgrade(t, false, &a)
+		out, err := Init(t.Context(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(f.writes, func(w string) bool { return strings.HasPrefix(w, "apply-team") }) ||
+			!hasNote(out.Also[0].Notes, "kuke team init applies both") {
+			t.Fatalf("writes = %v also = %+v", f.writes, out.Also)
+		}
+	})
 }
 
 // TestInitAlreadyInitialized: "already initialized" is the stored kuke Team.
@@ -135,10 +298,12 @@ func TestInitForceResetsTheTeamAndNeverTheDefaults(t *testing.T) {
 		if out.Result.Resources != 5 {
 			t.Fatalf("resources = %d, want 2 blueprints, 2 configs and the Team", out.Result.Resources)
 		}
-		if kinds, _ := appliedDocs(t, f.raw); slices.Contains(kinds, "TeamDefaults") {
+		kukeKinds, _ := appliedDocs(t, f.byTeam["kuke"])
+		defaultKinds, _ := appliedDocs(t, f.byTeam["default"])
+		if slices.Contains(kukeKinds, "TeamDefaults") || slices.Contains(defaultKinds, "TeamDefaults") {
 			t.Fatal("init re-sent an existing TeamDefaults")
 		}
-		if bytes.Contains(f.raw, []byte("kuke-custom-codex")) {
+		if bytes.Contains(f.byTeam["kuke"], []byte("kuke-custom-codex")) {
 			t.Fatal("authored majordomo selection retained")
 		}
 		if team := storedTeam(t, f, "kuke"); team.Spec.Roles[0].Name != "majordomo" {
@@ -148,7 +313,8 @@ func TestInitForceResetsTheTeamAndNeverTheDefaults(t *testing.T) {
 			t.Fatal("init changed the TeamDefaults")
 		}
 	}
-	if f.applies != 2 || f.team != "kuke" || len(f.plain) != 0 {
+	// Each forced init applies the kuke team, then the default team.
+	if f.applies != 4 || f.byTeam["kuke"] == nil || f.team != "default" || len(f.plain) != 0 {
 		t.Fatalf("applies=%d team=%q plain=%d", f.applies, f.team, len(f.plain))
 	}
 }
@@ -250,5 +416,9 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 		!slices.Equal(p.Create, []string{"kuke-majordomo-claude", "kuke-majordomo-codex"}) ||
 		len(p.Rerender) != 0 || len(p.Prune) != 0 {
 		t.Fatalf("plan = %+v", p)
+	}
+	if len(out.Also) != 1 || out.Also[0].Result != nil || out.Also[0].Plan == nil ||
+		!slices.Equal(out.Also[0].Plan.Create, []string{"default-agent-claude", "default-agent-codex"}) {
+		t.Fatalf("default team plan = %+v", out.Also)
 	}
 }

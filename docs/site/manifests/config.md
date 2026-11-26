@@ -32,13 +32,25 @@ See [`kuke run --from-config`](../cli/kuke-run.md) for the fused create + start 
 
 A Config is scopable at realm, space, or stack — never cell. A Config materializes a cell; scoping it to a single cell is nonsensical. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.
 
-| Field    | Type              | Required | Description                                                                                                                                                                             |
-| -------- | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`   | string            | yes      | The config's name, unique within its scope. Stamped cells carry it as the `kukeon.io/config` lineage label, **not** as their name — see [Lineage, not identity](#lineage-not-identity). |
-| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                                                                                         |
-| `space`  | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                                                  |
-| `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                                                 |
-| `labels` | map[string]string | no       | Copied onto every stamped cell, in addition to the `kukeon.io/config` lineage label.                                                                                                    |
+| Field         | Type              | Required | Description                                                                                                                                                                             |
+| ------------- | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | string            | yes      | The config's name, unique within its scope. Stamped cells carry it as the `kukeon.io/config` lineage label, **not** as their name — see [Lineage, not identity](#lineage-not-identity). |
+| `realm`       | string            | yes      | The always-required top-level scope coordinate.                                                                                                                                         |
+| `space`       | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                                                  |
+| `stack`       | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                                                 |
+| `labels`      | map[string]string | no       | Copied onto every stamped cell, in addition to the `kukeon.io/config` lineage label.                                                                                                    |
+| `annotations` | map[string]string | no       | Non-identifying metadata. Never copied onto cells, never compared for OutOfSync. Listed with the Config (`kuke get configs`, `/api/catalog/configs`).                                   |
+
+Well-known keys of a Config's metadata (issue #1692):
+
+| Key                        | Kind       | Set by                         | Meaning                                                                                                                                                                              |
+| -------------------------- | ---------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kukeon.io/template`       | label      | composition of a template team | `"true"` on an agent template, a Config the system `default` team composes; New agent copies it. A template is not run itself.                                                       |
+| `kukeon.io/agent-template` | annotation | New agent                      | The name of the agent template a Config was copied from.                                                                                                                             |
+| `kukeon.io/agent-team`     | annotation | New agent                      | The team of that template. A copy has no `kukeon.io/team` label, so no team prunes it; this names the role it runs (`<team>/<role>`), so it may share the template's login identity. |
+| `kukeon.io/display-name`   | annotation | New agent, rename              | The name a person gave the agent, apart from the generated Config name. Left out of the config revision, so a rename never marks a cell OutOfSync.                                   |
+
+A cell may carry `kukeon.io/display-name` too, set by renaming that instance; like every cell annotation it is never compared.
 
 ## spec
 
@@ -278,7 +290,7 @@ A cell lands in the Config's scope by default, with an open space or stack coord
 
 `kuke create cell <name> --from-config <cfg> --dry-run --explain` prints every resolved value with the level that set it (`realm`, `space`, `stack`, `config`, or `blueprint`) and the rendered cell's digest; the web UI's create preview shows the same values, grouped by the source that set them (scalar values hidden).
 
-Every rendered cell records its render provenance as annotations: `kukeon.io/render-digest`, `kukeon.io/render-config-revision` (a content hash of the Config document, `spec.schedule` left out), `kukeon.io/render-blueprint-revision` (`<blueprint name>@<content hash>`), `kukeon.io/render-{realm,space,stack}-defaults` (`generation=<n> hash=<h>`), `kukeon.io/render-image-digests`, `kukeon.io/render-values-hash`, `kukeon.io/render-origins` and `kukeon.io/render-kukeon-version`. Preview and create of the same inputs (including the cell name) produce the same digest.
+Every rendered cell records its render provenance as annotations: `kukeon.io/render-digest`, `kukeon.io/render-config-revision` (a content hash of the Config document, `spec.schedule` and the `kukeon.io/display-name` annotation left out), `kukeon.io/render-blueprint-revision` (`<blueprint name>@<content hash>`), `kukeon.io/render-{realm,space,stack}-defaults` (`generation=<n> hash=<h>`), `kukeon.io/render-image-digests`, `kukeon.io/render-values-hash`, `kukeon.io/render-origins` and `kukeon.io/render-kukeon-version`. Preview and create of the same inputs (including the cell name) produce the same digest.
 
 Editing a level's `spec.defaults` marks every dependent cell `OutOfSync` with `outOfSyncReason` naming the level (`realm defaults changed`, …), and a rebuilt realm image does the same (`image <name> digest changed`). The reason also names a changed blueprint (`blueprint <name> changed` — new content under the same name, or the Config pointed at another blueprint), a changed Config document (`config changed`) and changed fill values (`values changed`). Reasons come in a fixed order — blueprint, config, values, realm/space/stack defaults, images, then `spec differs at …` — so the status is stable between ticks. A cell is only compared on the inputs it carries a stamp for; a Synced cell rendered before the blueprint revision existed has it back-filled. `kuke restart <cell>` applies the change: an input change that leaves the rendered spec untouched only records the new provenance; a rebuilt image recreates the cell.
 

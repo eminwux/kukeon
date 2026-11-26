@@ -28,6 +28,18 @@ import (
 // PrintOutcome reports a team application: the plan for a dry run, the result
 // otherwise. `kuke apply -f` prints a Team document's outcome with it.
 func PrintOutcome(w io.Writer, out initialize.Outcome) error {
+	if err := printOutcome(w, out); err != nil {
+		return err
+	}
+	for _, also := range out.Also {
+		if err := printOutcome(w, also); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printOutcome(w io.Writer, out initialize.Outcome) error {
 	p := &printer{w: w}
 	if out.Result == nil && out.Plan == nil {
 		for _, note := range out.Notes {

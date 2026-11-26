@@ -634,3 +634,50 @@ func TestNewConfigCmd_ConnectorsColumn(t *testing.T) {
 		t.Errorf("-o wide = \n%s\nwant the CONNECTORS column to read %q", wide, want)
 	}
 }
+
+// TestNewConfigCmd_DisplayNameColumn (issue #1692): `-o wide` shows a
+// Config's kukeon.io/display-name, "-" for one without, and the default
+// table does not.
+func TestNewConfigCmd_DisplayNameColumn(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	configs := []v1beta1.CellConfigDoc{
+		{Metadata: v1beta1.CellConfigMetadata{
+			Name: "default-agent-claude-1a2b3c", Realm: "default",
+			Annotations: map[string]string{v1beta1.AnnotationDisplayName: "Reviewer"},
+		}},
+		{Metadata: v1beta1.CellConfigMetadata{Name: "plain", Realm: "default"}},
+	}
+	fake := &fakeClient{listConfigsFn: func(_, _, _ string) ([]v1beta1.CellConfigDoc, error) { return configs, nil }}
+	run := func(args ...string) string {
+		t.Helper()
+		t.Cleanup(viper.Reset)
+		cmd := configcmd.NewConfigCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		cmd.SetContext(context.WithValue(context.Background(), configcmd.MockControllerKey{}, kukeonv1.Client(fake)))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return buf.String()
+	}
+	wide := run("--realm", "default", "-o", "wide")
+	lines := strings.Split(wide, "\n")
+	if !strings.Contains(lines[0], "DISPLAY NAME") {
+		t.Fatalf("-o wide header lacks DISPLAY NAME:\n%s", wide)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "default-agent-claude-1a2b3c") &&
+			!strings.HasSuffix(strings.TrimSpace(line), "Reviewer") {
+			t.Errorf("named row = %q", line)
+		}
+		if strings.HasPrefix(line, "plain ") && !strings.HasSuffix(strings.TrimSpace(line), "-") {
+			t.Errorf("unnamed row = %q", line)
+		}
+	}
+	if plain := run("--realm", "default"); strings.Contains(plain, "DISPLAY NAME") ||
+		strings.Contains(plain, "Reviewer") {
+		t.Errorf("the default table shows the display name:\n%s", plain)
+	}
+}

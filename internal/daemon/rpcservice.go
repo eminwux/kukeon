@@ -619,6 +619,17 @@ func (s *KukeonV1Service) DeleteTeam(args *kukeonv1.DeleteTeamArgs, reply *kukeo
 	return nil
 }
 
+// SetDisplayName sets or clears a Config's or a cell's display name (issue
+// #1692).
+func (s *KukeonV1Service) SetDisplayName(
+	args *kukeonv1.SetDisplayNameArgs, reply *kukeonv1.SetDisplayNameReply,
+) error {
+	result, err := s.core.SetDisplayName(s.ctx, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 func (s *KukeonV1Service) GetTeamDefaults(
 	args *kukeonv1.GetTeamDefaultsArgs, reply *kukeonv1.GetTeamDefaultsReply,
 ) error {

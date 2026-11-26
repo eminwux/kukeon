@@ -50,6 +50,9 @@ type fakeClient struct {
 	resources                                             []kukeonv1.ApplyResourceResult
 	raw                                                   []byte
 	team                                                  string
+	// byTeam is the last apply stream of each team: kuke team init applies
+	// the kuke team and then the default team (issue #1692).
+	byTeam map[string][]byte
 
 	// Daemon state the shared-blueprint flow reads: stored blueprints keyed by
 	// realm/name, stored configs, and the team stack's defaults. A successful
@@ -298,6 +301,10 @@ func (f *fakeClient) ApplyDocumentsForTeam(
 	f.applies++
 	f.raw = raw
 	f.team = team
+	if f.byTeam == nil {
+		f.byTeam = map[string][]byte{}
+	}
+	f.byTeam[team] = raw
 	nodes := decodeStream(raw)
 	// D6: a Team document is accepted only in the team apply for its own name,
 	// and stored only when every other document applied.

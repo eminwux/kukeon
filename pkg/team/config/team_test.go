@@ -722,3 +722,64 @@ func inheritingTeam() *config.Team {
 		Metadata:   config.Metadata{Name: "root", Realm: config.DefaultRealm},
 	}
 }
+
+func TestDefaultTeamDeclaration(t *testing.T) {
+	team := config.DefaultTeam()
+	if team.Metadata.Name != config.DefaultTeamName || team.Metadata.Realm != config.DefaultRealm {
+		t.Fatalf("metadata = %+v", team.Metadata)
+	}
+	if !config.IsSystemDefaultTeam(team) || team.Spec.ProjectSource != nil {
+		t.Fatalf("spec = %+v, want a template team without a project", team.Spec)
+	}
+	if err := config.ValidateTeam(team); err != nil {
+		t.Fatalf("ValidateTeam: %v", err)
+	}
+	want := []config.Role{{Name: "agent", Source: "kukeon", Path: "team/roles/agent", InitialPath: "$HOME"}}
+	if !reflect.DeepEqual(team.Spec.Roles, want) {
+		t.Fatalf("roles = %+v", team.Spec.Roles)
+	}
+	if !reflect.DeepEqual(team.Spec.Harnesses, config.MajordomoHarnesses()) {
+		t.Fatalf("harnesses = %+v", team.Spec.Harnesses)
+	}
+	raw, err := yaml.Marshal(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "configs: template") {
+		t.Fatalf("encoded team lacks spec.configs:\n%s", raw)
+	}
+	back, err := config.DecodeTeam(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := config.Declaration(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.IsSystemDefaultTeam(entry) {
+		t.Fatalf("spec.configs lost on round trip: %+v", entry.Spec)
+	}
+}
+
+func TestTeamConfigsField(t *testing.T) {
+	base := "apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: default\n"
+	legacy, err := config.DecodeTeam(strings.NewReader(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.IsSystemDefaultTeam(legacy) {
+		t.Fatal("a team named default without spec.configs is a user team")
+	}
+	if _, err = config.DecodeTeam(strings.NewReader(base + "spec:\n  configs: agents\n")); err == nil ||
+		!strings.Contains(err.Error(), "spec.configs") {
+		t.Fatalf("unsupported spec.configs: err = %v", err)
+	}
+	other, err := config.DecodeTeam(strings.NewReader(
+		"apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: other\nspec:\n  configs: template\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.IsSystemDefaultTeam(other) {
+		t.Fatal("only the team named default is the system default team")
+	}
+}

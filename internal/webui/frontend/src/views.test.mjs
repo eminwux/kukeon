@@ -8,6 +8,7 @@ test("viewOf puts terminals, cell pages and New Cell in Workbench", () => {
   assert.equal(viewOf(route("workbench")), "workbench");
   assert.equal(viewOf(route("workspace", ["r", "s", "k", "c"])), "workbench");
   assert.equal(viewOf(route("new-cell")), "workbench");
+  assert.equal(viewOf(route("new-agent")), "workbench");
   assert.equal(viewOf(route("resource", ["r", "s", "k", "c"])), "workbench");
   assert.equal(viewOf(route("resource", ["r", "s", "k", "c", "shell"])), "workbench");
   // ?document=1 does not change the view: it looks at the scope length only.

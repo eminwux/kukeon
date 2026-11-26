@@ -4,15 +4,24 @@
 kuke team init [--force | --reapply | --upgrade] [--host ENDPOINT] [--configuration PATH]
 ```
 
-Apply the `kuke` team, whose one role is `majordomo`, to kukeond, which stores
-the `Team` with the Configs composed from it. `init` creates no cells and
-starts nothing; launch a composed cell explicitly with kuke afterwards (for
-example `kuke run --from-config kuke-majordomo-codex`).
+Apply the two system teams to kukeond, which stores each `Team` with the
+Configs composed from it:
+
+- `kuke`, whose one role is `majordomo`, the agent that operates kukeon;
+- `default`, whose one role is `agent`, composed as the agent templates
+  `default-agent-claude` and `default-agent-codex` that
+  [`kuke create agent`](kuke-create.md#kuke-create-agent) copies. See
+  [The default team](#the-default-team).
+
+`init` creates no cells and starts nothing; launch a composed cell explicitly
+with kuke afterwards (for example `kuke run --from-config kuke-majordomo-codex`,
+or `kuke create agent --harness claude`).
 
 `kuke` is the operator's system team, named after the `kuke-` system prefix
-(cf. the `kuke-system` realm). The name is reserved: `kuke create team` refuses it
-and `kuke delete team` refuses to delete it, so a project team — including
-kukeon's own, which is named `kukeon` — can never take over its configs.
+(cf. the `kuke-system` realm). Both names are reserved: `kuke create team`
+refuses them and `kuke delete team` refuses to delete either, so a project
+team — including kukeon's own, which is named `kukeon` — can never take over
+their configs.
 
 To create a project team after `init`, use
 [`kuke create team`](kuke-create.md#kuke-create-team).
@@ -21,13 +30,13 @@ model, see [Teams](../concepts/team.md).
 
 ## Flags
 
-| Flag              | Default | Description                                                                                                                                                                                                                               |
-| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--force`         | `false` | Replace the stored `kuke` team with the initial majordomo declaration and apply it. Picks up a newer majordomo declaration (a new role need, a new harness); drops `spec.secrets`.                                                        |
-| `--reapply`       | `false` | Recompose and apply the `kuke` team from its stored Team. Excludes `--force`.                                                                                                                                                             |
-| `--upgrade`       | `false` | Re-pin the stored `kukeon` Source to this `kuke`'s revision, convert state stored before Sources were a kind, and recompose the `kuke` team. See [Upgrading the kuke team](#upgrading-the-kuke-team). Excludes `--force` and `--reapply`. |
-| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                                                                                                                                       |
-| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                                                                                                                                              |
+| Flag              | Default | Description                                                                                                                                                                                                                                                                                       |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--force`         | `false` | Replace the stored `kuke` and `default` teams with their initial declarations and apply them. Picks up a newer majordomo declaration (a new role need, a new harness); drops `spec.secrets`.                                                                                                      |
+| `--reapply`       | `false` | Recompose and apply the `kuke` and `default` teams from their stored Teams; creates `default` when none is stored. Excludes `--force`.                                                                                                                                                            |
+| `--upgrade`       | `false` | Re-pin the stored `kukeon` Source to this `kuke`'s revision, convert state stored before Sources were a kind, and recompose the `kuke` and `default` teams (creating `default` when none is stored). See [Upgrading the kuke team](#upgrading-the-kuke-team). Excludes `--force` and `--reapply`. |
+| `--host`          | —       | kukeond Unix endpoint. Overrides `KUKEON_HOST` and `ClientConfiguration.spec.host`.                                                                                                                                                                                                               |
+| `--configuration` | —       | kuke `ClientConfiguration` path. Defaults to `KUKE_CONFIGURATION`, then `~/.kuke/kuke.yaml`.                                                                                                                                                                                                      |
 
 Init does not read or store a git identity; use
 [`kuke connector import git --default`](kuke-connector.md#kuke-connector-import-git)
@@ -131,6 +140,46 @@ This applies the shared blueprints `codex` and `claude` — one per harness ×
 security profile, realm-wide, see [Teams](../concepts/team.md#shared-blueprints) —
 and the CellConfigs `kuke-majordomo-codex` and `kuke-majordomo-claude`, labelled
 `kukeon.io/team: kuke`, that reference them. Init does not start them.
+
+## The default team
+
+After the `kuke` team, init applies the `default` team in the same mode:
+
+| Init                       | `default` stored                      | `default` not stored |
+| -------------------------- | ------------------------------------- | -------------------- |
+| `kuke team init` (first)   | —                                     | created              |
+| `kuke team init --force`   | replaced with the initial declaration | created              |
+| `kuke team init --reapply` | recomposed from the stored Team       | created              |
+| `kuke team init --upgrade` | recomposed when the kuke team was     | created              |
+
+A plain `kuke team init` on an initialized host stops before either team (see
+above), so an install that predates the `default` team gets it from
+`--upgrade` (which [`kuke update`](kuke-update.md) runs) or `--reapply`.
+
+The team reads the `agent` role and both harnesses from the stored `kukeon`
+Source, and its `spec.configs: template` makes composition label each Config
+`kukeon.io/template: "true"`: `default-agent-claude` and `default-agent-codex`,
+in `default/default/default`, using the shared `claude` and `codex` blueprints.
+`kuke get team default -o yaml` prints the declaration; see
+[Teams → The default team](../concepts/team.md#the-default-team) and
+[Your first agent](../guides/first-agent.md).
+
+Agents made from the templates have no `kukeon.io/team` label, so applying the
+team (`--reapply`, `--force`, `--upgrade`) never prunes them or their cells.
+
+**A team of your own named `default`.** A team you added under that name before
+it became a system team has no `spec.configs`. Init leaves it untouched, still
+applies `kuke`, and prints:
+
+```
+Notes:
+  team default is a team you added before default became a system team; init left it untouched and did not apply the system default team (the agent templates). To rename yours: kuke team export default > team.yaml, set metadata.name in team.yaml, kuke apply -f team.yaml, kuke delete team default, then kuke team init --reapply
+```
+
+When the `kuke` team applies and the `default` team then fails, init prints
+the `kuke` outcome and exits non-zero with
+`team kuke applied; team default failed: …`; rerun with `--reapply` once the
+cause is fixed.
 
 ## Daemon endpoint and client configuration
 
@@ -349,9 +398,12 @@ health sweep, for one — in the stored Team. See
 ```
 Applied 6 resources; stored team kuke.
 No cells created or started.
+Applied <n> resources; stored team default.
+No cells created or started.
 ```
 
-Pruned configs, missing runtime secrets and notes follow when there are any:
+Each team's report is printed in turn, `kuke` first; a `default` team init
+kept or left untouched is reported as a note instead. Pruned configs, missing runtime secrets and notes follow when there are any:
 
 ```
 Pruned configs: kuke-majordomo-opencode

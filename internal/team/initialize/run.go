@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io/fs"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"gopkg.in/yaml.v3"
@@ -58,6 +59,10 @@ type Outcome struct {
 	// application (kuke team init --upgrade with nothing to recompose);
 	// Plan and Result are nil then.
 	Notes []string
+	// Also are the outcomes of the further teams the same operation
+	// applied, in order: kuke team init applies the system default team
+	// after the kuke team (issue #1692).
+	Also []Outcome
 }
 
 func (o Options) check() error {
@@ -85,13 +90,30 @@ type InitOptions struct {
 	Pin *config.Source
 }
 
-// Init applies the kuke team (issue #1618, AC7). "Already initialized" is the
+// Init applies the kuke team (issue #1618, AC7), then the system default team
+// (issue #1692), whose outcome is the returned Outcome's Also. A failure of the
+// default team after the kuke team was applied returns the kuke team's
+// outcome with an error wrapping errdefs.ErrDefaultTeamInit.
+func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
+	out, err := initKuke(ctx, opts)
+	if err != nil {
+		return out, err
+	}
+	def, err := initDefault(ctx, opts, out)
+	if err != nil {
+		return out, fmt.Errorf("%w: %w", errdefs.ErrDefaultTeamInit, err)
+	}
+	out.Also = append(out.Also, def)
+	return out, nil
+}
+
+// initKuke applies the kuke team (issue #1618, AC7). "Already initialized" is the
 // stored kuke Team. When the realm has no TeamDefaults, init creates one in
 // the same apply, with the kukeon source and its claude and codex harnesses,
 // so a project team needs only roles; an existing TeamDefaults is never
 // changed. Partial daemon application is not rolled back; a forced rerun
 // converges the team.
-func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
+func initKuke(ctx context.Context, opts InitOptions) (Outcome, error) {
 	if err := opts.check(); err != nil {
 		return Outcome{}, err
 	}

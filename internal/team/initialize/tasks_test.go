@@ -151,7 +151,7 @@ func TestSetTaskSchedule(t *testing.T) {
 	})
 	t.Run("a role with tasks omitted keeps every task selected", func(t *testing.T) {
 		opts, fake := setupReapply(t)
-		before := renderedConfigs(t, fake.raw)
+		before := renderedConfigs(t, fake.byTeam["kuke"])
 		if _, err := SetTaskSchedule(t.Context(), opts.Options, sweepChange(true, "claude")); err != nil {
 			t.Fatal(err)
 		}

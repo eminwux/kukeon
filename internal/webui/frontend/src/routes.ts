@@ -28,6 +28,8 @@ export function readRoute(): Route {
       try { blueprint = JSON.parse(params.get("blueprint") ?? "null"); } catch { blueprint = null; }
       return { view: "new-config", scope: [], parent: [], document: false, blueprint: Array.isArray(blueprint) && blueprint.every(value => typeof value === "string") ? blueprint.slice(0, 4) : undefined };
     }
+    // #/agents/new opens the New agent page (#1692).
+    if (parts[0] === "agents" && parts[1] === "new" && parts.length === 2) return { view: "new-agent", scope: [], parent: [], document: false };
     // #/new-secret opens the New Secret page.
     if (parts[0] === "new-secret") return { view: "new-secret", scope: [], parent: [], document: false };
     // #/connectors lists the connector catalog; #/connectors/<name>?scope=[realm, space, stack] opens one
@@ -83,6 +85,9 @@ export function newCellLink(config?: string[]): string {
 }
 export function newConfigLink(blueprint?: string[]): string {
   return "#/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : "");
+}
+export function newAgentLink(): string {
+  return "#/agents/new";
 }
 export function newSecretLink(): string {
   return "#/new-secret";

@@ -905,8 +905,9 @@ A secret binding's `source.env` / `source.file` is read by that process.
 
 - **Teams list**: every stored team with its project URL and ref, roles,
   harnesses (or "defaults" when inherited) and number of Configs. The `kuke`
-  system team is badged; when it is not stored the page says to run
-  `kuke team init`. **New team** opens the wizard.
+  and `default` system teams are badged, cannot be deleted, and the page names
+  the team in its system-team note; when `kuke` is not stored the page says to
+  run `kuke team init`. **New team** opens the wizard.
 - **New team** (`#/new-team`, `kuke create team`) is a wizard of six steps;
   **Next** stays disabled while a step has problems and **Back** keeps every
   input:
@@ -1520,6 +1521,46 @@ specifications. They use the same origin protections and strict request
 decoding. Unknown fields and daemon-owned Container values are rejected. Both
 endpoint pairs redact environment values and materialization inputs. Neither path
 reads daemon storage directly or introduces an independent resource store.
+
+### New agent
+
+**New agent** (`#/agents/new`), in the Workbench page heading and on the empty
+Workbench, is `kuke create agent`: pick **Claude** or **Codex**, optionally
+give the agent a name (at most 63 characters, no control characters), and
+**Create**. Each harness shows **Template ready** or **Template missing**;
+when no template is stored the page says to run `kuke team init`. The server
+copies the harness's agent template (`default-agent-claude` or
+`default-agent-codex`, stored by the [`default` team](site/concepts/team.md#the-default-team))
+into a Config of its own, creates its first cell and starts it, then the UI
+opens the cell's terminal with a success notice. When creating or starting the
+cell fails after the Config was stored, the page shows **Agent stored, but not
+started** with a link to the Config and the step that failed. See
+[Your first agent](site/guides/first-agent.md).
+
+**Names.** An agent's display name is the `kukeon.io/display-name` annotation
+on its Config; an instance's is the same annotation on its cell. Agents are
+listed under their display name, else their Config's name; the instances of a
+named agent are listed as `<name> #1`, `<name> #2`, … unless an instance has a
+name of its own. **Rename** sets or clears (empty) either name: the agent's on
+the cell page next to its Config and on the Config's catalog page, the
+instance's on the cell page next to its name. A rename writes only the
+annotation; it never restarts, recreates or marks a cell OutOfSync. Agent
+templates carry a **Template** badge in the Configs catalog, cannot be renamed
+and are not listed as agents.
+
+| Method | Path                                                                          | Purpose                                                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/agents/templates`                                                       | `{ "templates": [{ "harness", "name", "realm", "space", "stack", "exists" }] }`: each harness's agent template and whether it is stored.                        |
+| `POST` | `/api/agents`                                                                 | New agent. Body `{ "harness", "displayName"?, "scope"?: { "realm", "space", "stack" } }`. Response `{ "config", "cell" }`, each with its scope and annotations. |
+| `POST` | `/api/configs/display-name`                                                   | Rename an agent. Body `{ "config": { "name", "realm", "space", "stack" }, "displayName" }`; an empty `displayName` clears it. Response `{ "config" }`.          |
+| `POST` | `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/display-name` | Rename an instance. Body `{ "displayName" }`. Response `{ "cell" }`.                                                                                            |
+
+The routes require the same Origin and `Content-Type: application/json`, and
+decode strictly. `POST /api/agents` creates under the creation timeout and
+starts under the lifecycle timeout. A missing template is `template_not_found`
+(404) and an invalid display name `invalid_request` (400). An error after the
+Config was stored adds `step` (`create-cell` or `start-cell`), `config` and,
+when one was created, `cell` to the error body.
 
 ### Create a Config from a Blueprint
 

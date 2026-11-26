@@ -86,6 +86,46 @@ func Majordomo() *Team {
 	}
 }
 
+// DefaultTeamName is the second system team kuke team init registers (issue
+// #1692): the agent templates New agent copies.
+const DefaultTeamName = "default"
+
+// ConfigsTemplate is the spec.configs value that makes every Config a team
+// composes an agent template (v1beta1.LabelTemplate).
+const ConfigsTemplate = "template"
+
+// DefaultTeam returns the initial declaration of the default team: the
+// kukeon-aware agent role on both shipped harnesses, no project, and its
+// Configs stamped as agent templates (default-agent-claude,
+// default-agent-codex).
+func DefaultTeam() *Team {
+	// The agent role's instructions are read from a clone of the stored
+	// kukeon Source, as majordomo's are.
+	source := Source{Name: KukeonSourceName, ClonePath: "/home/user/kukeon-src"}
+	return &Team{
+		APIVersion: APIVersion, Kind: KindTeam,
+		Metadata: Metadata{Name: DefaultTeamName, Realm: DefaultRealm},
+		Spec: TeamSpec{
+			Configs: ConfigsTemplate,
+			Defaults: Defaults{
+				Sources: []Source{source},
+				Roles: []Role{
+					{Name: "agent", Source: KukeonSourceName, Path: "team/roles/agent", InitialPath: "$HOME"},
+				},
+				Harnesses: MajordomoHarnesses(),
+			},
+		},
+	}
+}
+
+// IsSystemDefaultTeam reports whether team is the system default team: named
+// default and composing agent templates. A user team named default that was
+// stored before default became a system team has no spec.configs (the field
+// did not exist), so it is not.
+func IsSystemDefaultTeam(team *Team) bool {
+	return team != nil && team.Metadata.Name == DefaultTeamName && team.Spec.Configs == ConfigsTemplate
+}
+
 // Resolve applies whole-list inheritance, validates effective references, and
 // retains the original declaration. Explicit empty slices select none.
 func Resolve(cfg *TeamDefaults, team *Team) (Defaults, error) {
@@ -186,6 +226,9 @@ func validateTeamBody(team *Team) error {
 	if err := validateTeamSources(&team.Spec); err != nil {
 		return err
 	}
+	if c := team.Spec.Configs; c != "" && c != ConfigsTemplate {
+		return fmt.Errorf("spec.configs: %q is not supported; the only value is %s", c, ConfigsTemplate)
+	}
 	if err := validateConnectors("spec.connectors", team.Spec.Connectors); err != nil {
 		return err
 	}
@@ -252,6 +295,7 @@ func Declaration(team *Team) (*Team, error) {
 		Metadata:   team.Metadata,
 		Spec: TeamSpec{
 			ProjectSource: cloneSource(team.Spec.ProjectSource),
+			Configs:       team.Spec.Configs,
 			Secrets:       slices.Clone(team.Spec.Secrets),
 			Defaults:      cloneSelections(team.Spec.Defaults),
 		},

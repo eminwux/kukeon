@@ -5177,13 +5177,18 @@ test("a team page shows its project, sources, roles, tasks, harnesses and connec
   expect(lastPost(world, "/api/teams/web/delete")).toEqual({});
 });
 
-test("the kuke team cannot be deleted from its page", async ({ page }) => {
-  await mockTeams(page);
+test("the kuke and default teams cannot be deleted from their pages", async ({ page }) => {
+  const world = await mockTeams(page);
   await page.goto(`${server.url}#/teams/kuke`);
   const overview = page.getByRole("region", { name: "Team overview" });
   await expect(overview.getByRole("button", { name: "Reapply" })).toBeVisible();
   await expect(overview.getByRole("button", { name: "Delete" })).toHaveCount(0);
-  await expect(overview).toContainText("kuke team init --force");
+  await expect(overview).toContainText("The kuke system team cannot be deleted; reset it with kuke team init --force");
+  // The default team (#1692) is a system team too, and the note names it.
+  world.teams.push({ ...world.teams[0], name: "default", roles: ["agent"], configs: ["default-agent-claude", "default-agent-codex"] });
+  await page.goto(`${server.url}#/teams/default`);
+  await expect(overview.getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expect(overview).toContainText("The default system team cannot be deleted; reset it with kuke team init --force");
 });
 
 test("Edit team switches one schedule off and moves the project ref without YAML", async ({ page }) => {
@@ -6710,4 +6715,209 @@ test("Exec is offered for attachable and non-attachable containers and follows t
   await terminalTools(page).getByLabel("Container").selectOption("shell");
   await expect(page.getByLabel("Terminal for dev / shared / services / api / shell")).toBeVisible();
   await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
+});
+
+// ---------------------------------------------------------------------------
+// New agent and display names (#1692). A stateful mock of the agent routes: the template Configs of the
+// default team, the agent copies and their cells, all in dev / shared / services like the other fixtures.
+function agentWorld({ templates = ["claude", "codex"], configs = [], cells = [] } = {}) {
+  const scope = { realm: "dev", space: "shared", stack: "services" };
+  const world = { posts: [], renames: [], configs: [...configs], cells: [...cells], failCreate: undefined };
+  for (const harness of templates) world.configs.push({ metadata: { name: `default-agent-${harness}`, ...scope, labels: { "kukeon.io/team": "default", "kukeon.io/role": "agent", "kukeon.io/harness": harness, "kukeon.io/template": "true" } } });
+  world.agentCell = (name, config, { createdAt = "2026-11-26T10:00:00Z", annotations } = {}) => ({
+    apiVersion: "v1beta1", kind: "Cell",
+    metadata: { name, labels: { "kukeon.io/config": config.metadata.name, "kukeon.io/role": "agent", "kukeon.io/harness": config.metadata.labels["kukeon.io/harness"] }, ...(annotations ? { annotations } : {}) },
+    spec: { realmId: "dev", spaceId: "shared", stackId: "services", containers: [{ id: "agent", attachable: true }], provenance: { bindingKind: "config", bindingRef: { name: config.metadata.name, ...scope } } },
+    status: { state: "Ready", createdAt },
+  });
+  world.copy = (name, harness, displayName) => ({ metadata: { name, ...scope, labels: { "kukeon.io/role": "agent", "kukeon.io/harness": harness }, annotations: { "kukeon.io/agent-template": `default-agent-${harness}`, ...(displayName ? { "kukeon.io/display-name": displayName } : {}) } } });
+  world.install = async page => {
+    await mock(page, path => {
+      if (path === "/api/realms/dev/spaces/shared/stacks/services/cells") return { json: world.cells };
+      if (path.endsWith("/cells") && path.startsWith("/api/realms/prod")) return { json: [] };
+      const found = world.cells.find(cell => path === `/api/realms/dev/spaces/shared/stacks/services/cells/${cell.metadata.name}`);
+      if (found) return { json: found };
+      if (path.endsWith("/containers")) return { json: [{ id: "agent", attachable: true }] };
+      return undefined;
+    });
+    await page.route(url => url.pathname === "/api/catalog/configs", route => route.fulfill({ json: world.configs }));
+    await page.route(url => url.pathname.startsWith("/api/catalog/configs/"), route => {
+      const url = new URL(route.request().url());
+      const config = world.configs.find(item => url.pathname === `/api/catalog/configs/${item.metadata.name}`);
+      return route.fulfill(config ? { json: { apiVersion: "v1beta1", kind: "CellConfig", ...config, spec: { blueprint: { name: "codex", realm: "dev" } } } } : { status: 404, json: { error: { code: "not_found", message: "config not found" } } });
+    });
+    await page.route(url => url.pathname === "/api/agents/templates", route => route.fulfill({ json: { templates: ["claude", "codex"].map(harness => ({ harness, name: `default-agent-${harness}`, ...scope, exists: templates.includes(harness) })) } }));
+    await page.route(url => url.pathname === "/api/agents", async route => {
+      const body = route.request().postDataJSON();
+      world.posts.push(body);
+      if (world.failCreate) return route.fulfill(world.failCreate);
+      const config = world.copy(`default-agent-${body.harness}-a1b2c3`, body.harness, body.displayName);
+      world.configs.push(config);
+      const cell = world.agentCell(`${config.metadata.name}-d4e5f6`, config);
+      world.cells.push(cell);
+      await route.fulfill({ json: { config: config.metadata, cell: { name: cell.metadata.name, ...scope } } });
+    });
+    await page.route(url => url.pathname === "/api/configs/display-name", async route => {
+      const body = route.request().postDataJSON();
+      world.renames.push({ kind: "config", ...body });
+      const config = world.configs.find(item => item.metadata.name === body.config.name);
+      const annotations = { ...config.metadata.annotations };
+      if (body.displayName) annotations["kukeon.io/display-name"] = body.displayName; else delete annotations["kukeon.io/display-name"];
+      config.metadata = { ...config.metadata, annotations };
+      await route.fulfill({ json: { config: config.metadata } });
+    });
+    await page.route(url => url.pathname.endsWith("/display-name") && url.pathname.startsWith("/api/realms/"), async route => {
+      const body = route.request().postDataJSON();
+      const name = new URL(route.request().url()).pathname.split("/").at(-2);
+      world.renames.push({ kind: "cell", name, ...body });
+      const cell = world.cells.find(item => item.metadata.name === name);
+      const annotations = { ...cell.metadata.annotations };
+      if (body.displayName) annotations["kukeon.io/display-name"] = body.displayName; else delete annotations["kukeon.io/display-name"];
+      cell.metadata = { ...cell.metadata, annotations };
+      await route.fulfill({ json: { cell: { name, ...scope, annotations } } });
+    });
+    await page.routeWebSocket("**/attach", () => {});
+  };
+  return world;
+}
+
+test("New agent creates a named Codex agent, opens its terminal and shows its display name everywhere", async ({ page }) => {
+  const world = agentWorld();
+  await world.install(page);
+  await page.goto(server.url);
+  // Linked from the Workbench heading and its empty state.
+  await expect(grid(page).getByRole("link", { name: "New agent" })).toHaveAttribute("href", "#/agents/new");
+  await page.locator(".page-heading").getByRole("link", { name: "New agent" }).click();
+  await expect(page).toHaveURL(/#\/agents\/new$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("New agent");
+  const form = page.getByRole("region", { name: "New agent" });
+  await expect(form.locator(".agent-card")).toHaveText([/Claude.*Template ready/, /Codex.*Template ready/]);
+  await form.getByRole("radio", { name: /Codex/ }).check();
+  await form.getByLabel(/^Name/).fill("Docs bot");
+  await form.getByRole("button", { name: "Create" }).click();
+  // The new cell's terminal opens.
+  const cell = "default-agent-codex-a1b2c3-d4e5f6";
+  await expect(page).toHaveURL(new RegExp(`#/workspace/dev/shared/services/${cell}$`));
+  expect(world.posts).toEqual([{ harness: "codex", displayName: "Docs bot" }]);
+  await expect(page.locator(".cell-page-title-row h1")).toHaveText("Docs bot #1");
+  await expect(page.locator(".cell-page-title-row .cell-page-name")).toHaveText(cell);
+  // Sidebar: the agent is listed by its display name, its Config name secondary.
+  const agent = page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "Docs bot agent" });
+  await expect(agent.locator(".agent-name")).toContainText("Docs bot");
+  await expect(agent.locator(".agent-internal")).toHaveText("default-agent-codex-a1b2c3");
+  // Grid: the agent's section and its instance tile.
+  await page.goto(`${server.url}#/`);
+  const section = grid(page).getByRole("region", { name: "Docs bot agent" });
+  await expect(section.locator(".cell-grid-heading")).toContainText("Docs bot");
+  await expect(section.locator(".cell-tile-name")).toHaveText("Docs bot #1");
+  await expect(section.locator(".cell-tile-cell")).toHaveText(cell);
+  // Rail: the agent glyph is named after the agent.
+  const sidebar = page.getByRole("complementary", { name: "Cell sidebar" });
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar.getByRole("navigation", { name: "Cell shortcuts" }).getByRole("link", { name: `Agent Docs bot, 1 instance: open dev / shared / services / ${cell} (Ready)` })).toBeVisible();
+  // The template Configs are never agents, nor Other cells.
+  await expect(page.locator(".cell-grid-group")).toHaveCount(1);
+});
+
+test("an unnamed agent copy is listed as Claude agent, and renaming the agent and an instance updates every surface without a reload", async ({ page }) => {
+  const world = agentWorld();
+  const copy = world.copy("default-agent-claude-0a0b0c", "claude");
+  world.configs.push(copy);
+  world.cells.push(world.agentCell("default-agent-claude-0a0b0c-111111", copy, { createdAt: "2026-11-26T09:00:00Z" }), world.agentCell("default-agent-claude-0a0b0c-222222", copy, { createdAt: "2026-11-26T10:00:00Z" }));
+  await world.install(page);
+  let loads = 0;
+  page.on("load", () => { loads += 1; });
+  await page.goto(`${server.url}#/resource/dev/shared/services/default-agent-claude-0a0b0c-111111`);
+  const nav = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(nav.getByRole("region", { name: "Claude agent agent" })).toBeVisible();
+  await expect(nav.locator(".cell-link-name")).toHaveText(["Claude agent #1", "Claude agent #2"]);
+  await expect(page.locator(".cell-page-title-row h1")).toHaveText("Claude agent #1");
+  const overview = page.locator(".resource-overview");
+  await expect(overview.locator(".instance-display-name")).toHaveText("Listed as Claude agent #1");
+  await expect(overview.locator(".agent-display-name")).toHaveText("Agent: Claude agent");
+
+  // Rename the instance.
+  await overview.getByRole("button", { name: "Rename instance dev / shared / services / default-agent-claude-0a0b0c-111111" }).click();
+  await overview.getByRole("form", { name: /^Rename instance/ }).getByLabel("Display name").fill("Night shift");
+  await overview.getByRole("button", { name: "Save" }).click();
+  await expect(nav.locator(".cell-link-name")).toHaveText(["Night shift", "Claude agent #2"]);
+  await expect(page.locator(".cell-page-title-row h1")).toHaveText("Night shift");
+  await expect(overview.locator(".instance-display-name")).toHaveText("Display name: Night shift");
+
+  // Rename the agent: the agent row and the other instance follow.
+  await overview.getByRole("button", { name: "Rename agent dev / shared / services / default-agent-claude-0a0b0c" }).click();
+  await overview.getByRole("form", { name: /^Rename agent/ }).getByLabel("Display name").fill("Reviewer");
+  await overview.getByRole("button", { name: "Save" }).click();
+  await expect(nav.getByRole("region", { name: "Reviewer agent" })).toBeVisible();
+  await expect(nav.locator(".cell-link-name")).toHaveText(["Night shift", "Reviewer #2"]);
+  expect(world.renames).toEqual([
+    { kind: "cell", name: "default-agent-claude-0a0b0c-111111", displayName: "Night shift" },
+    { kind: "config", config: { name: "default-agent-claude-0a0b0c", realm: "dev", space: "shared", stack: "services" }, displayName: "Reviewer" },
+  ]);
+
+  // Clearing the instance's name brings its ordinal back.
+  await overview.getByRole("button", { name: /^Rename instance/ }).click();
+  await overview.getByRole("form", { name: /^Rename instance/ }).getByLabel("Display name").fill("");
+  await overview.getByRole("button", { name: "Save" }).click();
+  await expect(nav.locator(".cell-link-name")).toHaveText(["Reviewer #1", "Reviewer #2"]);
+  // The Config page shows the agent's display name with its own Rename action.
+  await page.goto(`${server.url}#/configs/dev/shared/services/default-agent-claude-0a0b0c`);
+  await expect(page.locator(".details-grid .display-name-row")).toContainText("Reviewer");
+  await expect(page.getByRole("button", { name: "Rename agent dev / shared / services / default-agent-claude-0a0b0c" })).toBeVisible();
+  expect(loads).toBe(1);
+});
+
+test("template Configs carry a Template badge in Manage → Configs and are left out of the agent lists", async ({ page }) => {
+  const world = agentWorld();
+  // A cell someone ran from the template itself: neither an agent nor an Other cell.
+  const template = world.configs.find(config => config.metadata.name === "default-agent-claude");
+  world.cells.push({ ...world.agentCell("default-agent-claude-ffffff", template), metadata: { ...world.agentCell("default-agent-claude-ffffff", template).metadata, labels: { ...template.metadata.labels, "kukeon.io/config": "default-agent-claude" } } });
+  const copy = world.copy("default-agent-codex-123456", "codex");
+  world.configs.push(copy);
+  world.cells.push(world.agentCell("default-agent-codex-123456-abcdef", copy));
+  await world.install(page);
+  await page.goto(server.url);
+  const nav = page.getByRole("navigation", { name: "Cell navigation" });
+  await expect(nav.getByRole("region", { name: /agent$/ })).toHaveCount(1);
+  await expect(nav.getByRole("region", { name: "Codex agent agent" })).toBeVisible();
+  await expect(nav.getByRole("region", { name: "Other cells" })).toHaveCount(0);
+  await expect(grid(page).locator(".cell-tile")).toHaveCount(1);
+  await page.goto(`${server.url}#/configs`);
+  const row = name => page.locator("tbody tr").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await expect(row("default-agent-claude").locator(".template-badge")).toHaveText("Template");
+  await expect(row("default-agent-codex").locator(".template-badge")).toHaveText("Template");
+  await expect(row("default-agent-codex-123456").locator(".template-badge")).toHaveCount(0);
+  await row("default-agent-claude").getByRole("link", { name: "default-agent-claude", exact: true }).click();
+  await expect(page.locator(".details-grid .template-badge")).toHaveText("Template");
+  await expect(page.getByRole("button", { name: /^Rename agent/ })).toHaveCount(0);
+});
+
+test("New agent says when no template exists, and names the step that failed after the Config was stored", async ({ page }) => {
+  const none = agentWorld({ templates: [] });
+  await none.install(page);
+  await page.goto(`${server.url}#/agents/new`);
+  const form = page.getByRole("region", { name: "New agent" });
+  await expect(form.getByRole("note")).toContainText("No agent templates");
+  await expect(form.getByRole("note").getByRole("link", { name: "Teams" })).toHaveAttribute("href", "#/teams");
+  await expect(form.getByRole("button", { name: "Create" })).toHaveCount(0);
+  await expect(form.getByRole("radio")).toHaveCount(2);
+  for (const radio of await form.getByRole("radio").all()) await expect(radio).toBeDisabled();
+  await expect(form.locator(".agent-card")).toHaveText([/Template missing/, /Template missing/]);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // Only Claude's template: it is picked, and a start failure keeps the stored Config visible.
+  const claude = agentWorld({ templates: ["claude"] });
+  claude.failCreate = { status: 503, json: { error: { code: "unavailable", message: "kukeond did not answer", step: "start-cell", config: { name: "default-agent-claude-a1b2c3", realm: "dev", space: "shared", stack: "services" }, cell: { name: "default-agent-claude-a1b2c3-d4e5f6", realm: "dev", space: "shared", stack: "services" } } } };
+  await signIn(page);
+  await claude.install(page);
+  await page.reload();
+  await expect(form.getByRole("radio", { name: /Claude/ })).toBeChecked();
+  await expect(form.getByRole("radio", { name: /Codex/ })).toBeDisabled();
+  await expect(form.getByLabel(/^Name/)).toHaveAttribute("maxlength", "63");
+  await form.getByRole("button", { name: "Create" }).click();
+  await expect(form.getByRole("alert")).toContainText("Agent stored, but not started");
+  await expect(form.getByRole("alert")).toContainText("starting its first cell failed: kukeond did not answer");
+  await expect(form.getByRole("alert").getByRole("link", { name: "default-agent-claude-a1b2c3" })).toHaveAttribute("href", "#/configs/dev/shared/services/default-agent-claude-a1b2c3");
+  expect(claude.posts).toEqual([{ harness: "claude" }]);
+  await expect(page).toHaveURL(/#\/agents\/new$/);
 });

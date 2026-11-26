@@ -232,7 +232,8 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 // apply never surfaces a half-written name. Each carrier's Metadata.Labels
 // is populated by parsing the document's `metadata.labels` (issue #1027) —
 // `kukeon.io/team=<team>` is the prune-apply discriminator, so callers can
-// filter without re-reading every document themselves. A document that fails
+// filter without re-reading every document themselves; Metadata.Annotations
+// likewise (#1692). A document that fails
 // to parse contributes an entry with nil Labels and is logged at debug — the
 // list call is best-effort metadata, not strict. The same read lifts the
 // document's spec.schedule summary onto the carrier (issue #1503), so a list
@@ -254,26 +255,29 @@ func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, s
 		if strings.HasPrefix(name, ".config-") && strings.HasSuffix(name, ".tmp") {
 			continue
 		}
-		labels, schedule := r.readConfigListFields(fs.ConfigPath(r.opts.RunPath, realm, space, stack, name))
+		fields := r.readConfigListFields(fs.ConfigPath(r.opts.RunPath, realm, space, stack, name))
 		*out = append(*out, intmodel.CellConfig{
 			Metadata: intmodel.CellConfigMetadata{
-				Name:   name,
-				Realm:  realm,
-				Space:  space,
-				Stack:  stack,
-				Labels: labels,
+				Name:        name,
+				Realm:       realm,
+				Space:       space,
+				Stack:       stack,
+				Labels:      fields.labels,
+				Annotations: fields.annotations,
 			},
-			Schedule: schedule,
+			Schedule: fields.schedule,
 		})
 	}
 	return nil
 }
 
 // configListDoc is the minimum YAML structure a config list lifts from each
-// document: its labels (#1027) and its spec.schedule summary (#1503).
+// document: its labels (#1027), its annotations (#1692) and its spec.schedule
+// summary (#1503).
 type configListDoc struct {
 	Metadata struct {
-		Labels map[string]string `yaml:"labels"`
+		Labels      map[string]string `yaml:"labels"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Spec struct {
 		Schedule *struct {
@@ -284,30 +288,39 @@ type configListDoc struct {
 	} `yaml:"spec"`
 }
 
+// configListFields is what a config list lifts from one document.
+type configListFields struct {
+	labels      map[string]string
+	annotations map[string]string
+	schedule    *intmodel.CellConfigSchedule
+}
+
 // readConfigListFields reads the config document at path and returns its
-// metadata.labels and spec.schedule summary, both nil on any failure. Like
-// readLabelsFromDoc it logs at debug rather than failing: a half-written or
-// corrupt document must not fail the whole list.
-func (r *Exec) readConfigListFields(path string) (map[string]string, *intmodel.CellConfigSchedule) {
+// metadata.labels, metadata.annotations and spec.schedule summary, all nil on
+// any failure. Like readLabelsFromDoc it logs at debug rather than failing: a
+// half-written or corrupt document must not fail the whole list.
+func (r *Exec) readConfigListFields(path string) configListFields {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		r.logger.DebugContext(r.ctx, "read config list fields: read file", "path", path, "error", err)
-		return nil, nil
+		return configListFields{}
 	}
 	var doc configListDoc
 	if err = yaml.Unmarshal(data, &doc); err != nil {
 		r.logger.DebugContext(r.ctx, "read config list fields: parse yaml", "path", path, "error", err)
-		return nil, nil
+		return configListFields{}
 	}
-	var labels map[string]string
+	var fields configListFields
 	if len(doc.Metadata.Labels) > 0 {
-		labels = doc.Metadata.Labels
+		fields.labels = doc.Metadata.Labels
 	}
-	var schedule *intmodel.CellConfigSchedule
+	if len(doc.Metadata.Annotations) > 0 {
+		fields.annotations = doc.Metadata.Annotations
+	}
 	if s := doc.Spec.Schedule; s != nil {
-		schedule = &intmodel.CellConfigSchedule{Cron: s.Cron, Timezone: s.Timezone, Suspend: s.Suspend}
+		fields.schedule = &intmodel.CellConfigSchedule{Cron: s.Cron, Timezone: s.Timezone, Suspend: s.Suspend}
 	}
-	return labels, schedule
+	return fields
 }
 
 // configScheduleStatusFile is the on-disk shape of a config's schedule state

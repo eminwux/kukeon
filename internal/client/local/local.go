@@ -834,6 +834,23 @@ func (c *Client) DeleteTeam(_ context.Context, ref kukeonv1.TeamRef) (kukeonv1.D
 	return out, err
 }
 
+// SetDisplayName sets or clears a Config's or a cell's display name (issue
+// #1692).
+func (c *Client) SetDisplayName(
+	_ context.Context, req kukeonv1.SetDisplayNameRequest,
+) (kukeonv1.SetDisplayNameResult, error) {
+	res, err := c.ctrl.SetDisplayName(controller.DisplayNameTarget{
+		Kind: req.Target.Kind, Name: req.Target.Name,
+		Realm: req.Target.Realm, Space: req.Target.Space, Stack: req.Target.Stack,
+	}, req.DisplayName)
+	if err != nil {
+		return kukeonv1.SetDisplayNameResult{}, err
+	}
+	return kukeonv1.SetDisplayNameResult{
+		DisplayName: res.DisplayName, Annotations: res.Annotations, Changed: res.Changed,
+	}, nil
+}
+
 func (c *Client) GetTeamDefaults(_ context.Context, realm string) (kukeonv1.GetTeamDefaultsResult, error) {
 	got, found, err := c.ctrl.GetTeamDefaults(realm)
 	if err != nil || !found {

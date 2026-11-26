@@ -486,3 +486,59 @@ func TestApplyDocuments_SharedPruneFailsClosed(t *testing.T) {
 		t.Fatalf("alpha's config not applied: %+v err=%v", stored.Spec.Blueprint, convErr)
 	}
 }
+
+// TestApplyDocuments_DefaultTeamKeepsAgentCopies pins issue #1692's prune
+// contract for the system default team: an agent copy New agent made (no
+// kukeon.io/team label) survives every apply of the team, while a template
+// whose harness the team dropped is pruned like any team Config.
+func TestApplyDocuments_DefaultTeamKeepsAgentCopies(t *testing.T) {
+	store := newTeamStore(t)
+	exec := setupTestController(t, store.runner())
+	template := func(harness string) v1beta1.CellConfigDoc {
+		doc := teamConfig("default-agent-"+harness, "default", sharedRef(harness))
+		doc.Metadata.Labels[v1beta1.LabelTemplate] = "true"
+		doc.Metadata.Labels[v1beta1.LabelRole] = "agent"
+		doc.Metadata.Labels[v1beta1.LabelHarness] = harness
+		return doc
+	}
+	both := []parser.Document{
+		blueprintDocument(sharedBlueprint("claude")),
+		blueprintDocument(sharedBlueprint("codex")),
+		configDocument(template("claude")),
+		configDocument(template("codex")),
+	}
+	if _, err := exec.ApplyDocuments(both, "default"); err != nil {
+		t.Fatal(err)
+	}
+	copyDoc := teamConfig("default-agent-claude-1a2b3c", "", sharedRef("claude"))
+	copyDoc.Metadata.Labels = map[string]string{v1beta1.LabelRole: "agent", v1beta1.LabelHarness: "claude"}
+	copyDoc.Metadata.Annotations = map[string]string{v1beta1.AnnotationAgentTemplate: "default-agent-claude"}
+	store.storeConfig(copyDoc)
+
+	// A reapply of the same set keeps everything.
+	if _, err := exec.ApplyDocuments(both, "default"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("reapply deleted %v", store.deleted)
+	}
+	// The team drops codex: its template goes, the claude copy stays.
+	result, err := exec.ApplyDocuments([]parser.Document{
+		blueprintDocument(sharedBlueprint("claude")),
+		configDocument(template("claude")),
+	}, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed := failedResources(result); len(failed) != 0 {
+		t.Fatalf("failed resources: %v", failed)
+	}
+	if !slices.Contains(store.deleted, "CellConfig/default-agent-codex") {
+		t.Fatalf("deleted = %v, want the codex template pruned", store.deleted)
+	}
+	for _, name := range []string{"default-agent-claude", "default-agent-claude-1a2b3c"} {
+		if _, ok := store.configs["default/default/default/"+name]; !ok {
+			t.Fatalf("%s was removed; deleted = %v", name, store.deleted)
+		}
+	}
+}

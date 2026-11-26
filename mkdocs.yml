@@ -88,6 +88,7 @@ nav:
       - architecture/storage-layout.md
   - Guides:
       - guides/init-and-reset.md
+      - guides/first-agent.md
       - guides/apply-manifests.md
       - guides/run-claude-code.md
       - guides/local-dev.md

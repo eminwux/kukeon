@@ -1,9 +1,9 @@
 // The views of the web UI: Workbench (the terminal grid, the cell screen, a cell's container pages and
-// New Cell), Settings (#/settings, #1686) and Manage (every other page) (#1635). The view is derived from
+// New Cell and New agent), Settings (#/settings, #1686) and Manage (every other page) (#1635). The view is derived from
 // the route, never stored.
 // No DOM, no network — unit-tested with node --test.
 
-const workbenchViews = ["workbench", "workspace", "new-cell"];
+const workbenchViews = ["workbench", "workspace", "new-cell", "new-agent"];
 
 // viewOf maps a route to its view. A #/resource route with four or five scope parts is a cell or one of
 // its containers, with or without ?document=1; shorter ones are realm, space and stack pages in Manage.

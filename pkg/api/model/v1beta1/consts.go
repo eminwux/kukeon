@@ -182,7 +182,35 @@ const (
 	// content so `kuke team` can tell "same blueprint, already applied" from
 	// "same name, different content" without comparing documents.
 	LabelContentDigest = "kukeon.io/content-digest"
+	// LabelTemplate marks a CellConfig as an agent template (issue #1692):
+	// the system team `default` stamps it, with the value "true", on each
+	// Config it composes. A template is not run as an agent itself; New
+	// agent copies it into a Config of its own, without this label.
+	LabelTemplate = "kukeon.io/template"
 )
+
+// Annotation keys with reserved kukeon.io semantics. Like every annotation
+// they are never copied from a Config onto its cells and never drive
+// grouping, selection or OutOfSync.
+const (
+	// AnnotationDisplayName is the name a person gave an agent (on its
+	// CellConfig) or one of its instances (on a cell), apart from the
+	// generated resource name (issue #1692). Renaming changes only this
+	// annotation: no cell is restarted, recreated or marked OutOfSync.
+	AnnotationDisplayName = "kukeon.io/display-name"
+	// AnnotationAgentTemplate records, on a CellConfig New agent created,
+	// the name of the agent template it was copied from (issue #1692).
+	AnnotationAgentTemplate = "kukeon.io/agent-template"
+	// AnnotationAgentTeam records, on a CellConfig New agent created, the team
+	// of its template. The copy has no kukeon.io/team label, so applying that
+	// team never prunes it, yet it runs the team's role: it shares the
+	// template's login identity as one role (issue #1692).
+	AnnotationAgentTeam = "kukeon.io/agent-team"
+)
+
+// MaxDisplayNameLength is the most characters (runes) a display name may
+// have.
+const MaxDisplayNameLength = 63
 
 // Common printable state strings.
 const (

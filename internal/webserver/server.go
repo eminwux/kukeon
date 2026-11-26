@@ -295,6 +295,7 @@ func realmImagesHandler(dial Dial) http.HandlerFunc {
 func writeAPIError(w http.ResponseWriter, err error) {
 	status, code := lifecycleErrorStatus(err)
 	fields := map[string]any{"code": code, "message": err.Error()}
+	agentStepFields(err, fields)
 	var phaseErr *celllifecycle.PhaseError
 	if errors.As(err, &phaseErr) {
 		fields["phase"] = string(phaseErr.Phase)
@@ -316,6 +317,9 @@ func apiErrorStatus(err error) (int, string) {
 	}
 	if teamStatus, teamCode, ok := teamErrorStatus(err); ok {
 		return teamStatus, teamCode
+	}
+	if agentStatus, agentCode, ok := agentErrorStatus(err); ok {
+		return agentStatus, agentCode
 	}
 	if execStatus, execCode, ok := execErrorStatus(err); ok {
 		return execStatus, execCode

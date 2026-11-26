@@ -1,0 +1,10 @@
+apiVersion: v1beta1
+kind: Role
+metadata:
+  name: agent
+spec:
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+    codex:
+      approval: on-request

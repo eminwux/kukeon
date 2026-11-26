@@ -885,3 +885,34 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .exec-panel.is-expanded .exec-run { overflow: auto; }
 .exec-panel.is-expanded .terminal-session:not([hidden]) { display: flex; flex: 1; min-height: 0; }
 .exec-panel.is-expanded .terminal-screen { height: 100%; min-height: 0; flex: 1; }
+/* New agent and display names (#1692). */
+.agent-name .agent-internal { grid-column: 2; }
+.agent-internal, .cell-link-cell, .cell-tile-cell, .cell-page-name { color: var(--muted); font-family: var(--mono); font-size: var(--font-sm); font-weight: 400; overflow-wrap: anywhere; }
+.cell-grid-heading .agent-internal { margin-left: 4px; }
+.cell-link-cell { grid-column: 1; min-width: 0; }
+.cell-tile-cell { flex-basis: 100%; }
+.cell-page-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-heading-action { margin-left: auto; align-self: center; }
+.empty-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.display-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.rename-action { padding: 2px 8px; font-size: var(--font-sm); }
+.rename-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 8px; flex-basis: 100%; }
+.rename-form label { display: grid; gap: 3px; font-size: var(--font-sm); color: var(--muted); }
+.rename-form input { min-width: 0; width: min(22em, 100%); }
+.rename-form .error { flex-basis: 100%; margin: 0; }
+.template-badge { white-space: nowrap; }
+.new-agent { display: grid; gap: 16px; max-width: 720px; }
+.new-agent > .description { margin: 0; }
+.agent-harnesses { margin: 0; padding: 0; border: 0; min-width: 0; }
+.agent-harnesses legend { margin-bottom: 8px; font-weight: 600; }
+.agent-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.agent-card { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 10px; padding: 14px 16px; cursor: pointer; }
+.agent-card input { grid-row: 1 / span 3; margin: 0; }
+.agent-card strong { font-size: var(--font-md); }
+.agent-card .badge { justify-self: start; }
+.agent-card.is-selected { border-color: var(--accent); background: var(--selected); }
+.agent-card.is-missing { cursor: default; opacity: .7; }
+.new-agent-form { display: grid; gap: 12px; }
+.new-agent-form > label { display: grid; gap: 4px; max-width: 26em; font-weight: 600; }
+.new-agent-form input { font-weight: 400; }
+.new-agent-missing { padding: 40px 24px; }

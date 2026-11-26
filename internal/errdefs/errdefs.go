@@ -821,8 +821,19 @@ var (
 	// ErrTeamExists is returned by kuke create team when a team of the name
 	// is stored already: create creates, replacing needs --force.
 	ErrTeamExists = errors.New("team already exists")
-	// ErrTeamReserved is returned by a delete of the kuke system team.
-	ErrTeamReserved = errors.New("team kuke is the system team; reset it with kuke team init --force")
+	// ErrTeamReserved is returned by a delete of a system team (kuke, or
+	// the system default team). It is wrapped as "team <name> is a %w", so
+	// the error names the team.
+	ErrTeamReserved = errors.New("system team; reset it with kuke team init --force")
+	// ErrInvalidDisplayName wraps a display name (kukeon.io/display-name)
+	// that is too long or has control characters (issue #1692).
+	ErrInvalidDisplayName = errors.New("invalid display name")
+	// ErrAgentTemplateNotFound is returned by New agent when the agent
+	// template of the harness is not stored (issue #1692).
+	ErrAgentTemplateNotFound = errors.New("agent template not found")
+	// ErrDefaultTeamInit is returned by kuke team init when the kuke team
+	// was applied and the system default team then failed (issue #1692).
+	ErrDefaultTeamInit = errors.New("team kuke applied; team default failed")
 	// ErrTeamScopeNotFound fires when a Team's or TeamDefaults' realm does
 	// not exist.
 	ErrTeamScopeNotFound = errors.New("team realm does not exist")

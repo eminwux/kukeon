@@ -552,7 +552,7 @@ kuke connector default git --clear
 **Sequence.**
 
 ```bash
-# 1. the kuke system team (majordomo), the kukeon Source and the realm's first TeamDefaults
+# 1. the system teams kuke (majordomo) and default (agent templates), the kukeon Source and the realm's first TeamDefaults
 kuke team init
 kuke get sources
 
@@ -587,10 +587,10 @@ kuke delete source web
 - kukeond stores a `Team` only in the team apply that carries the documents composed from it, and only when every one of them applied. A `Team` document sent on its own exits non-zero with a message naming `kuke apply -f`. An invalid document is rejected with the decoder's message and nothing is written.
 - `kuke apply -f FILE` stores `Source` and `TeamDefaults` documents and composes each `Team` document as `kuke team apply -f FILE` does, after the file's other documents; if one of those fails, the Teams are skipped. `Role`, `Harness`, `HarnessImageCatalog`, `Component` and `Connector` documents are rejected.
 - Every team document is `apiVersion: v1beta1`; the old group-qualified header is rejected with the normal decode error.
-- `kuke team init` stops with `already initialized (team kuke is stored)` when the `kuke` Team is stored; `--force` replaces it, `--reapply` (= `kuke team apply kuke`) recomposes it, and both together exit non-zero. Init stores the `kukeon` Source unless one of that name is stored, and creates a `TeamDefaults` (the `claude` and `codex` harnesses of that Source, no sources) only when the realm has none, never changing an existing one, except `--upgrade`.
+- `kuke team init` stops with `already initialized (team kuke is stored)` when the `kuke` Team is stored; `--force` replaces it, `--reapply` (= `kuke team apply kuke`) recomposes it, and both together exit non-zero. After the `kuke` team, every mode applies the `default` system team the same way (`--upgrade` and `--reapply` create it when none is stored); a stored `default` team without `spec.configs: template` (one added before it was a system team) is left untouched with a note on how to rename it. When `default` fails after `kuke` applied, init prints the `kuke` outcome and exits non-zero with `team kuke applied; team default failed`. Init stores the `kukeon` Source unless one of that name is stored, and creates a `TeamDefaults` (the `claude` and `codex` harnesses of that Source, no sources) only when the realm has none, never changing an existing one, except `--upgrade`.
 - `kuke team init --upgrade` (excludes `--force` and `--reapply`) re-pins the stored `kukeon` Source whose address is `github.com/eminwux/kukeon` to the running binary's revision, converts a legacy `TeamDefaults` sources list and the `kuke` team's legacy `kukeon` entry, and recomposes the `kuke` team in one apply, keeping `spec.secrets` and every other field; it prints the old and new revision and the other teams that inherit the defaults, and recomposes none of them. When nothing changes it prints `Source kukeon already at <revision>`, fetches and applies nothing, and exits 0. It never creates the `kuke` team, and leaves a `kukeon` Source with another address alone.
 - `kuke create team NAME --source ADDRESS|SOURCE` reads the repository's `kuketeam.yaml` from the fetched revision; `NAME` wins over its `metadata.name`; without a file the team inherits the defaults. `--source` naming a stored Source uses it. The project is `--source`, else the declaration's `spec.projectSource`, else (directory mode) the `origin` remote; when the declaration and `--source` name different repositories the plan has a note naming both. `-f FILE` with `spec.projectSource.url` needs no `--source`. Directory mode reads the local file. `-f FILE` replaces the whole declaration, `--no-repo-file` ignores the repository's, and `--role` / `--harness` replace their list (a default's `NAME` or `[NAME=]SOURCE:PATH`). The stored Team is what was applied, overrides included.
-- `create team` of a stored name exits non-zero before fetching and writes nothing; the error names `kuke team apply NAME` and `--force`. With `--force` the stored declaration is replaced and its recorded secret bindings are kept. `root` and `kuke` are refused. `--identity` on a project whose Source is stored exits non-zero naming `kuke create source NAME --force`.
+- `create team` of a stored name exits non-zero before fetching and writes nothing; the error names `kuke team apply NAME` and `--force`. With `--force` the stored declaration is replaced and its recorded secret bindings are kept. `root`, `kuke` and `default` are refused. `--identity` on a project whose Source is stored exits non-zero naming `kuke create source NAME --force`.
 - `--dry-run` (create team, apply) prints the declaration's origin, the declaration as stored, each source with its resolved commit, each role × harness with Config, image, tasks and components, the Configs to create, re-render and prune, missing secrets and notes (the Sources it would store among them); it creates no Secret or Source, applies no document and reads no secret value.
 - A team with no role × harness pair exits non-zero naming the empty input (no `kuketeam.yaml`, no default roles, no default harnesses), `--role` and `kuke create source`.
 - `kuke team apply NAME` recomposes from the stored Team without reading the repository's file. `kuke team apply -f FILE` stores FILE's Team, creating it when new, and keeps the stored `spec.projectSource` when FILE has none.
@@ -598,9 +598,33 @@ kuke delete source web
 - Every fetch for a team or a source uses the Source's `spec.git.identityRef`, else the realm's default git identity when it covers the address's host, else the caller's git configuration. A stored credential is staged by kukeond in a directory only the calling user can read and removed when the fetch ends; no reply carries secret bytes, and git output is withheld from errors.
 - `kuke team export NAME` prints a `kuketeam.yaml` with the project's address, each source's address and ref, and the declared roles, harnesses and connectors; it omits `metadata.realm`, `source:` names, the project's ref, identities and `spec.secrets` unless `--host-fields`; `--explicit-defaults` writes inherited lists out. `kuke create team NAME -f <export --host-fields> --force` stores the same Team.
 - Every command that changes the `TeamDefaults` prints the stored teams that inherit it and `kuke team apply NAME` for each; it recomposes nothing. A `TeamDefaults` or Team stored before Sources were a kind keeps reading; the first command that writes it creates the Sources, rewrites it in the new form and prints `converted N registered sources to Source documents`.
-- `kuke delete team NAME` deletes the team's Configs, the shared blueprints no other Config references, and the Team; it leaves cells, volumes and Sources, prints the cells still running from deleted Configs and the state volumes kept, and refuses `kuke`.
+- `kuke delete team NAME` deletes the team's Configs, the shared blueprints no other Config references, and the Team; it leaves cells, volumes and Sources, prints the cells still running from deleted Configs and the state volumes kept, and refuses `kuke` and the system `default` team with `team NAME is a system team; reset it with kuke team init --force`.
 - When old per-user team files from an earlier release exist under `~/.kuke`, `init`, `create team` and `apply` print one note that they are no longer read; nothing is converted.
 - No `kuke team`, `kuke create team` or `kuke create source` command creates or starts cells.
+
+### New agent (`kuke create agent`)
+
+**Intent.** Start a Claude or Codex agent that needs no project, copied from the `default` team's agent template. Guide: [`docs/site/guides/first-agent.md`](site/guides/first-agent.md).
+
+**Sequence.**
+
+```bash
+kuke team init                                             # stores default-agent-claude and default-agent-codex
+kuke create agent --harness claude --name "Reviewer"       # copy, create the first cell, start it
+kuke create agent --harness codex -a                       # same, then attach (detach with ^]^])
+kuke get configs -o wide                                   # DISPLAY NAME column
+kuke run --from-config default-agent-claude-<6hex>         # another instance of the same agent
+```
+
+**Invariants.**
+
+- The templates are CellConfigs in `default/default/default` labelled `kukeon.io/team: default` and `kukeon.io/template: "true"`. A copy is named `<template>-<6 hex>`, keeps the template's spec unchanged (so every agent of a harness mounts the same state volume), keeps `kukeon.io/role` and `kukeon.io/harness`, drops `kukeon.io/team` and `kukeon.io/template`, and carries the annotations `kukeon.io/agent-template: <template>` and `kukeon.io/agent-team: <template's team>` (so the copy is the template's role and may share its login identity) and, with `--name`, `kukeon.io/display-name`.
+- `--harness` is required and is `claude` or `codex`; anything else exits non-zero before contacting the daemon. A display name is at most 63 characters with no control characters.
+- A missing template exits non-zero naming it and stores nothing.
+- Exactly one cell is created (generated name) and started. When creating or starting it fails, the Config is kept, its name is printed, and the error names the failed step; `kuke run --from-config <config>` or `kuke start <cell>` finishes the job.
+- Applying any team, `default` included (`kuke team init --reapply`), never prunes a copy or its cells.
+- A display name is an annotation: setting or clearing it never restarts, recreates or marks a cell OutOfSync, and it is not part of the Config's render revision.
+- `kuke get configs -o wide` and `kuke get cells -o wide` end with `DISPLAY NAME` (`-` when unset); a cell shows only its own name.
 
 ### Harness mode per cell
 
