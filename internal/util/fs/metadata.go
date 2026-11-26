@@ -157,6 +157,13 @@ func ContainerSocketSymlinkDir(baseRunPath string) string {
 	return filepath.Join(baseRunPath, consts.KukeonSocketSymlinkSubdir)
 }
 
+// ExecFIFODir returns the per-RunPath directory that holds the stdio FIFOs
+// of `kuke exec` processes; each exec gets its own subdirectory, removed
+// when the exec is deleted.
+func ExecFIFODir(baseRunPath string) string {
+	return filepath.Join(baseRunPath, consts.KukeonExecFIFOSubdir)
+}
+
 // ContainerSocketSymlinkPath returns the SUN_PATH-safe host-side path
 // `kuke attach` connects to. It is a short symlink staged by the daemon
 // inside ContainerSocketSymlinkDir that resolves to the deep socket inode

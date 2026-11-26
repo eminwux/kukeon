@@ -123,6 +123,17 @@ type Client interface {
 	TaskStatus(namespace, id string) (containerd.Status, error)
 	TaskMetrics(namespace, id string) (*apitypes.Metric, error)
 
+	// ExecTask starts spec as a new process inside the running task of the
+	// container and wires it to the given streams (issue #1432). A nil
+	// stdin gives the process an already-ended stdin. Returns
+	// errdefs.ErrTaskNotFound when the container has no task.
+	ExecTask(
+		namespace, containerdID string,
+		spec ExecSpec,
+		stdin io.Reader,
+		stdout, stderr io.Writer,
+	) (ExecProcess, error)
+
 	// ContainerProcessUID returns the resolved process.User.UID from the
 	// given container's OCI runtime spec. Used after CreateContainerFromSpec
 	// to chown the host-side per-container Attachable tty directory to the

@@ -129,6 +129,7 @@ type fakeRunner struct {
 	KillContainerFn     func(cell intmodel.Cell, containerID string) error
 	DeleteContainerFn   func(cell intmodel.Cell, containerID string) error
 	GetContainerStateFn func(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
+	ExecContainerFn     func(cell intmodel.Cell, name string, spec ctr.ExecSpec, stdio ctr.ExecStdio) (ctr.ExecProcess, error)
 
 	// Utility methods
 	ExistsCgroupFn func(doc any) (bool, error)
@@ -710,6 +711,15 @@ func (f *fakeRunner) GetContainerState(cell intmodel.Cell, containerID string) (
 		return f.GetContainerStateFn(cell, containerID)
 	}
 	return intmodel.ContainerStateUnknown, errors.New("unexpected call to GetContainerState")
+}
+
+func (f *fakeRunner) ExecContainer(
+	cell intmodel.Cell, name string, spec ctr.ExecSpec, stdio ctr.ExecStdio,
+) (ctr.ExecProcess, error) {
+	if f.ExecContainerFn != nil {
+		return f.ExecContainerFn(cell, name, spec, stdio)
+	}
+	return nil, errors.New("unexpected call to ExecContainer")
 }
 
 // Utility methods

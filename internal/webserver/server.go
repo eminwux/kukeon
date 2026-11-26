@@ -309,6 +309,9 @@ func apiErrorStatus(err error) (int, string) {
 	if teamStatus, teamCode, ok := teamErrorStatus(err); ok {
 		return teamStatus, teamCode
 	}
+	if execStatus, execCode, ok := execErrorStatus(err); ok {
+		return execStatus, execCode
+	}
 	switch {
 	// First: a wrapped ErrContainerNotFound or ErrAttach* must not win (#1635).
 	case errors.Is(err, errScreenUnavailable):

@@ -6492,3 +6492,223 @@ test("a team page lists each Config's connectors with identity, level and who as
   await expect(rows.nth(1).getByRole("link", { name: "Needs identity" })).toHaveAttribute("href", "#/connectors/github");
   await expect(rows.nth(1)).toContainText("Team");
 });
+
+// ---------------------------------------------------------------------------
+// Exec (#1432): run a command or open a shell in a container of a running cell.
+const execCell = "#/workspace/dev/shared/services/api";
+// The Exec panel of the fixture's one container (`web`, not attachable).
+const execPanel = page => page.getByRole("group", { name: "Exec in web" });
+// Mocks the run-command route and records each request body. `reply` answers a request.
+async function mockExecRun(page, reply = () => ({ json: { stdout: "1000\n", stderr: "", exitCode: 0, truncated: false, timedOut: false } }), extra = () => undefined) {
+  const runs = [];
+  await mock(page, (path, request) => {
+    if (path.endsWith("/containers/web/exec") && request.method() === "POST") {
+      runs.push(request.postDataJSON());
+      return reply(runs.at(-1));
+    }
+    return extra(path, request);
+  });
+  return runs;
+}
+async function openExec(page) {
+  await page.goto(`${server.url}${execCell}`);
+  await terminalTools(page).getByRole("button", { name: "Exec" }).click();
+  await expect(execPanel(page)).toBeVisible();
+  return execPanel(page);
+}
+
+test("Exec runs a command as the container user and shows stdout, stderr and the exit code apart", async ({ page }) => {
+  const runs = await mockExecRun(page, () => ({ json: { stdout: "1000\n", stderr: "id: warning\n", exitCode: 3, truncated: false, timedOut: false } }));
+  const panel = await openExec(page);
+  // The panel opens on Run command, as the container user, with the command field focused.
+  await expect(panel.getByRole("radio", { name: "Container user" })).toBeChecked();
+  await expect(panel.getByRole("tab", { name: "Run command" })).toHaveAttribute("aria-selected", "true");
+  const command = panel.getByRole("textbox", { name: /^Command/ });
+  await expect(command).toBeFocused();
+  await expect(panel.getByRole("button", { name: "Run" })).toBeDisabled();
+  await command.fill("id -u");
+  await command.press("Enter");
+  await expect(panel.locator(".exec-exit")).toHaveText("Exit code 3");
+  await expect(panel.locator("pre.exec-output").nth(0)).toHaveText("1000\n");
+  await expect(panel.locator("pre.exec-output").nth(1)).toHaveText("id: warning\n");
+  await expect(panel.getByRole("heading", { name: "stdout" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "stderr" })).toBeVisible();
+  // The request names the container identity and carries no root confirmation.
+  expect(runs).toEqual([{ command: "id -u", identity: "container" }]);
+  // Escape outside the terminal closes the panel and returns focus to the Exec button.
+  await command.press("Escape");
+  await expect(execPanel(page)).toHaveCount(0);
+  await expect(terminalTools(page).getByRole("button", { name: "Exec" })).toBeFocused();
+});
+
+test("Exec as root asks for confirmation and sends confirmRoot only after it", async ({ page }) => {
+  const runs = await mockExecRun(page, body => ({ json: { stdout: body.identity === "root" ? "0\n" : "1000\n", stderr: "", exitCode: 0, truncated: false, timedOut: false } }));
+  const panel = await openExec(page);
+  await panel.getByRole("radio", { name: "root" }).click();
+  const dialog = page.getByRole("dialog", { name: "Run as root" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("dev / shared / services / api / web");
+  // Nothing was sent, and root is not selected until the dialog is confirmed.
+  await expect(panel.getByRole("radio", { name: "Container user" })).toBeChecked();
+  expect(runs).toEqual([]);
+  await dialog.getByRole("button", { name: "Run as root" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(panel.getByRole("radio", { name: "root" })).toBeChecked();
+  await panel.getByRole("textbox", { name: /^Command/ }).fill("id -u");
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.locator("pre.exec-output").first()).toHaveText("0\n");
+  expect(runs).toEqual([{ command: "id -u", identity: "root", confirmRoot: true }]);
+  // Back to the container user: no confirmation travels. Root again: it was confirmed for this panel.
+  await panel.getByRole("radio", { name: "Container user" }).check();
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.locator("pre.exec-output").first()).toHaveText("1000\n");
+  await panel.getByRole("radio", { name: "root" }).check();
+  await expect(page.getByRole("dialog", { name: "Run as root" })).toHaveCount(0);
+  await expect(panel.getByRole("radio", { name: "root" })).toBeChecked();
+  expect(runs.slice(1)).toEqual([{ command: "id -u", identity: "container" }]);
+});
+
+test("cancelling the Exec root confirmation sends nothing and keeps the container user", async ({ page }) => {
+  const runs = await mockExecRun(page);
+  const sockets = [];
+  await page.routeWebSocket(/\/exec\/terminal/, socket => { sockets.push(socket.url()); socket.send(JSON.stringify({ type: "ready" })); });
+  const panel = await openExec(page);
+  await panel.getByRole("textbox", { name: /^Command/ }).fill("id -u");
+  for (const dismiss of ["button", "Escape"]) {
+    await panel.getByRole("radio", { name: "root" }).click();
+    const dialog = page.getByRole("dialog", { name: "Run as root" });
+    await expect(dialog).toBeVisible();
+    if (dismiss === "button") await dialog.getByRole("button", { name: "Cancel" }).click();
+    else await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    // Escape closed the dialog only; the panel stays open on the container user.
+    await expect(panel.getByRole("radio", { name: "Container user" })).toBeChecked();
+    await expect(panel.getByRole("radio", { name: "root" })).not.toBeChecked();
+  }
+  expect(runs).toEqual([]);
+  expect(sockets).toEqual([]);
+  // What is sent afterwards is still a container-user request.
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.locator(".exec-exit")).toHaveText("Exit code 0");
+  expect(runs).toEqual([{ command: "id -u", identity: "container" }]);
+});
+
+test("Exec reports a truncated or timed-out run and a refused one", async ({ page }) => {
+  let answer = { json: { stdout: "partial\n", stderr: "", exitCode: -1, truncated: true, timedOut: true } };
+  await mockExecRun(page, () => answer);
+  const panel = await openExec(page);
+  await panel.getByRole("textbox", { name: /^Command/ }).fill("yes");
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.locator(".exec-exit")).toHaveText("Stopped after the time limit; no exit code.");
+  await expect(panel.locator(".exec-result")).toContainText("longer than 60 seconds");
+  await expect(panel.locator(".exec-result")).toContainText("Output above 1 MiB per stream was dropped.");
+  await expect(panel.locator("pre.exec-output").nth(0)).toHaveText("partial\n");
+  await expect(panel.locator("pre.exec-output").nth(1)).toHaveText("(empty)");
+  // A refusal replaces the previous result with the server's message.
+  answer = { status: 409, json: { error: { code: "not_running", message: "container task is not running; cannot exec into it" } } };
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.getByRole("alert")).toContainText("container task is not running");
+  await expect(panel.locator(".exec-result")).toHaveCount(0);
+});
+
+test("Exec terminal opens a shell, shows its output, forwards input and reports the exit code", async ({ page }) => {
+  await mockExecRun(page);
+  const urls = [];
+  const messages = [];
+  let closed = 0;
+  let exit = () => {};
+  await page.routeWebSocket(/\/exec\/terminal/, socket => {
+    urls.push(new URL(socket.url()));
+    socket.onMessage(message => { messages.push(message); });
+    socket.onClose(() => { closed++; });
+    socket.send(JSON.stringify({ type: "ready" }));
+    socket.send(Buffer.from("agent@api:~$ "));
+    exit = () => { socket.send(JSON.stringify({ type: "exit", code: 3 })); socket.close(); };
+  });
+  const panel = await openExec(page);
+  // No shell starts until the Terminal tab is shown; the arrow keys move between the two tabs.
+  expect(urls).toEqual([]);
+  await panel.getByRole("tab", { name: "Run command" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(panel.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("tab", { name: "Terminal" })).toBeFocused();
+  const screen = panel.getByLabel("Exec terminal for dev / shared / services / api / web");
+  await expect(screen.locator(".xterm-rows")).toContainText("agent@api:~$");
+  await expect(panel.locator(".exec-terminal-status")).toContainText("Connected");
+  expect(urls).toHaveLength(1);
+  expect(urls[0].pathname).toBe("/api/realms/dev/spaces/shared/stacks/services/cells/api/containers/web/exec/terminal");
+  expect(urls[0].searchParams.get("identity")).toBe("container");
+  expect(urls[0].searchParams.has("confirmRoot")).toBe(false);
+  await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
+  // Typed bytes reach the shell, and Escape typed into it does not close the panel.
+  await screen.locator(".xterm-helper-textarea").press("a");
+  await screen.locator(".xterm-helper-textarea").press("Escape");
+  await expect.poll(() => messages.filter(Buffer.isBuffer).map(message => message.toString()).join("")).toBe("a\x1b");
+  await expect(panel).toBeVisible();
+  exit();
+  await expect(panel.locator(".exec-terminal-status")).toContainText("Process exited with code 3");
+  await expect(screen.locator(".xterm-rows")).toContainText("Process exited with code 3");
+  // An ended process is not reconnected to: only a new shell is offered, and it is a new connection.
+  await expect(panel.getByRole("button", { name: /Reconnect|Attach/ })).toHaveCount(0);
+  await panel.getByRole("button", { name: "New shell" }).click();
+  await expect.poll(() => urls.length).toBe(2);
+  await expect(panel.locator(".exec-terminal-status")).toContainText("Connected");
+  // Closing the panel closes the shell's connection, which is what kills its process.
+  const before = closed;
+  await panel.getByRole("button", { name: "Close Exec" }).click();
+  await expect(execPanel(page)).toHaveCount(0);
+  await expect.poll(() => closed).toBeGreaterThan(before);
+});
+
+test("Exec terminal as root connects with the confirmation only after it is given", async ({ page }) => {
+  await mockExecRun(page);
+  const urls = [];
+  await page.routeWebSocket(/\/exec\/terminal/, socket => {
+    urls.push(new URL(socket.url()));
+    socket.send(JSON.stringify({ type: "ready" }));
+    socket.send(Buffer.from("# "));
+  });
+  const panel = await openExec(page);
+  await panel.getByRole("tab", { name: "Terminal" }).click();
+  await expect.poll(() => urls.length).toBe(1);
+  await panel.getByRole("radio", { name: "root" }).click();
+  await expect(page.getByRole("dialog", { name: "Run as root" })).toBeVisible();
+  expect(urls).toHaveLength(1);
+  await page.getByRole("dialog", { name: "Run as root" }).getByRole("button", { name: "Run as root" }).click();
+  // The container-user shell is replaced by a root one.
+  await expect.poll(() => urls.length).toBe(2);
+  expect(urls[1].searchParams.get("identity")).toBe("root");
+  expect(urls[1].searchParams.get("confirmRoot")).toBe("1");
+  await expect(panel.locator(".exec-terminal-status")).toContainText("Connected (root)");
+});
+
+test("Exec is disabled with a reason while the cell is not running", async ({ page }) => {
+  const runs = await mockExecRun(page, undefined, path => path.endsWith("/cells") && path.includes("/dev/")
+    ? { json: fixture(path).map(cell => ({ ...cell, status: { state: "Stopped" } })) } : undefined);
+  await page.goto(`${server.url}${execCell}`);
+  const exec = terminalTools(page).getByRole("button", { name: "Exec" });
+  await expect(exec).toBeDisabled();
+  await expect(exec).toHaveAttribute("title", "Exec unavailable: cell is Stopped.");
+  await expect(execPanel(page)).toHaveCount(0);
+  expect(runs).toEqual([]);
+});
+
+test("Exec is offered for attachable and non-attachable containers and follows the selected one", async ({ page }) => {
+  await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }, { id: "sidecar" }, { id: "pause", root: true }] } : undefined);
+  await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); socket.send(Buffer.from("attached$ ")); });
+  await page.goto(`${server.url}${execCell}`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
+  await terminalTools(page).getByRole("button", { name: "Exec" }).click();
+  await expect(page.getByRole("group", { name: "Exec in shell" })).toBeVisible();
+  // The attach terminal stays connected behind the panel and comes back when it closes.
+  await expect(page.getByLabel("Terminal for dev / shared / services / api / shell")).toBeHidden();
+  // Picking another container closes the panel: it belonged to the first one.
+  await terminalTools(page).getByLabel("Container").selectOption("sidecar");
+  await expect(page.getByRole("group", { name: /^Exec in/ })).toHaveCount(0);
+  await terminalTools(page).getByRole("button", { name: "Exec" }).click();
+  await expect(page.getByRole("group", { name: "Exec in sidecar" })).toBeVisible();
+  await page.getByRole("group", { name: "Exec in sidecar" }).getByRole("button", { name: "Close Exec" }).click();
+  await terminalTools(page).getByLabel("Container").selectOption("shell");
+  await expect(page.getByLabel("Terminal for dev / shared / services / api / shell")).toBeVisible();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Attached");
+});

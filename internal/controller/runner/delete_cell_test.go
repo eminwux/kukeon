@@ -54,6 +54,7 @@ type deleteCellFakeClient struct {
 	listContainersFn    func(namespace string, filters ...string) ([]containerd.Container, error)
 	existsContainerFn   func(namespace, id string) (bool, error)
 	taskStatusFn        func(namespace, id string) (containerd.Status, error)
+	execTaskFn          func(namespace, id string, spec ctr.ExecSpec, stdin io.Reader, stdout, stderr io.Writer) (ctr.ExecProcess, error)
 	loadCgroupFn        func(group, mountpoint string) (*cgroup2.Manager, error)
 	newCgroupFn         func(spec ctr.CgroupSpec) (*cgroup2.Manager, error)
 	enableCellSubtreeFn func(group, mountpoint string, controllers []string) ([]string, error)
@@ -199,6 +200,15 @@ func (c *deleteCellFakeClient) TaskStatus(namespace, id string) (containerd.Stat
 func (c *deleteCellFakeClient) TaskMetrics(string, string) (*apitypes.Metric, error) {
 	//nolint:nilnil // not invoked by DeleteCell; present only to satisfy ctr.Client
 	return nil, nil
+}
+
+func (c *deleteCellFakeClient) ExecTask(
+	namespace, containerdID string, spec ctr.ExecSpec, stdin io.Reader, stdout, stderr io.Writer,
+) (ctr.ExecProcess, error) {
+	if c.execTaskFn != nil {
+		return c.execTaskFn(namespace, containerdID, spec, stdin, stdout, stderr)
+	}
+	return nil, errors.New("unexpected call to ExecTask")
 }
 
 func (c *deleteCellFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {

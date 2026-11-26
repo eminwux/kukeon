@@ -129,5 +129,6 @@ sudo kuke run --from-blueprint batch --rm
 
 - [kuke apply](kuke-apply.md) — declarative path; supports multi-document manifests
 - [kuke attach](kuke-attach.md) — attach to an already-running cell
+- [kuke exec](kuke-exec.md) — run a one-off command in a running cell
 - [kuke create cell](kuke-create.md#kuke-create-cell) — un-fused create-only primitive (Blueprint/Config/Clone sources)
 - [kuke restart](kuke-restart.md) — reconcile a live cell against its lineage Config/Blueprint

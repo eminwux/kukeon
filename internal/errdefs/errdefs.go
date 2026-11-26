@@ -446,6 +446,50 @@ var (
 			"retrying cannot fix this — heal the socket with `kuke restart <cell>`",
 	)
 
+	// Exec-related errors (issue #1432).
+
+	// ErrExecNoCandidate is returned by the `kuke exec` container picker
+	// when --container is omitted and the cell has no non-root container.
+	ErrExecNoCandidate = errors.New("no container to exec into in cell; specify --container")
+
+	// ErrExecAmbiguous is returned by the `kuke exec` container picker when
+	// --container is omitted and the cell has more than one non-root
+	// container. The error message lists the candidates.
+	ErrExecAmbiguous = errors.New("multiple containers in cell; specify --container")
+
+	// ErrExecTaskNotRunning is returned by ExecContainer when the target
+	// container exists in the cell spec but its containerd task is not
+	// Running, so there is nothing to exec into.
+	ErrExecTaskNotRunning = errors.New("container task is not running; cannot exec into it")
+
+	// ErrExecInvalidRequest is returned by ExecContainer for a request it
+	// refuses before touching containerd: no command, root together with an
+	// explicit user, a malformed env entry, or a terminal size without a TTY.
+	ErrExecInvalidRequest = errors.New("invalid exec request")
+
+	// ErrExecFailed marks an exec whose process could not be started or
+	// waited on: the session's exit frame carried an error instead of the
+	// process's own exit code.
+	ErrExecFailed = errors.New("the command could not be run")
+
+	// ErrExecSessionLost marks an exec connection that ended before the
+	// daemon reported the process's exit status (kukeond stopped, or the
+	// connection broke). The process is killed on the daemon side.
+	ErrExecSessionLost = errors.New("exec session ended before the command reported its exit status")
+
+	// ErrExecRootNotConfirmed is returned by the `kuke serve` exec routes
+	// for a request to run as root that does not carry the explicit
+	// confirmation the web UI asks the operator for.
+	ErrExecRootNotConfirmed = errors.New("running as root needs an explicit confirmation")
+
+	// ErrExecFrameTooLarge marks a frame of the exec stream protocol whose
+	// payload exceeds the per-frame limit.
+	ErrExecFrameTooLarge = errors.New("exec stream frame exceeds the payload limit")
+
+	// ErrExecMalformedFrame marks a typed payload of the exec stream
+	// protocol (resize, exit) that does not decode.
+	ErrExecMalformedFrame = errors.New("malformed exec stream frame")
+
 	// ErrSocketPathTooLong fires when the resolved host-side path of a
 	// per-container kuketty control socket would overflow Linux's
 	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus

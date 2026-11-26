@@ -11,12 +11,12 @@ kuke att    <cell> [flags]      # alias
 
 ## Flags
 
-| Flag          | Default     | Description                                                              |
-| ------------- | ----------- | ------------------------------------------------------------------------ |
+| Flag          | Default     | Description                                                                             |
+| ------------- | ----------- | --------------------------------------------------------------------------------------- |
 | `--container` | (auto-pick) | Container within the cell to attach to (omit to auto-pick the only non-root attachable) |
-| `--realm`     | `default`   | Realm that owns the cell                                                 |
-| `--space`     | `default`   | Space that owns the cell                                                 |
-| `--stack`     | `default`   | Stack that owns the cell                                                 |
+| `--realm`     | `default`   | Realm that owns the cell                                                                |
+| `--space`     | `default`   | Space that owns the cell                                                                |
+| `--stack`     | `default`   | Stack that owns the cell                                                                |
 
 Plus all [global flags](kuke.md).
 
@@ -47,3 +47,4 @@ sudo kuke attach web --container debug
 
 - [kuke run](kuke-run.md) — create + start a cell and attach in one step
 - [kuke log](kuke-log.md) — one-way log stream instead of an interactive terminal
+- [kuke exec](kuke-exec.md) — start a new process in the container instead of joining its terminal

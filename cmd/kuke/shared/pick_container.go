@@ -51,6 +51,30 @@ func PickContainer(
 	realm, space, stack, cell string,
 	include func(v1beta1.ContainerSpec) bool,
 ) (string, error) {
+	return PickContainerWith(ctx, client, realm, space, stack, cell, include,
+		PickErrors{NoCandidate: errdefs.ErrAttachNoCandidate, Ambiguous: errdefs.ErrAttachAmbiguous})
+}
+
+// PickErrors are the sentinels PickContainerWith wraps, so each command
+// reports the picker's two failures in its own words.
+type PickErrors struct {
+	// NoCandidate is wrapped (with the cell) when no spec passes include.
+	NoCandidate error
+	// Ambiguous is wrapped (with the cell and the sorted candidate list)
+	// when more than one passes.
+	Ambiguous error
+}
+
+// PickContainerWith is PickContainer with caller-supplied sentinels:
+// `kuke exec` picks among containers that need not be Attachable, so its
+// errors must not say "attachable" (issue #1432).
+func PickContainerWith(
+	ctx context.Context,
+	client kukeonv1.Client,
+	realm, space, stack, cell string,
+	include func(v1beta1.ContainerSpec) bool,
+	sentinels PickErrors,
+) (string, error) {
 	specs, err := client.ListContainers(ctx, realm, space, stack, cell)
 	if err != nil {
 		return "", err
@@ -68,11 +92,11 @@ func PickContainer(
 
 	switch len(candidates) {
 	case 0:
-		return "", fmt.Errorf("%w (cell %q)", errdefs.ErrAttachNoCandidate, cell)
+		return "", fmt.Errorf("%w (cell %q)", sentinels.NoCandidate, cell)
 	case 1:
 		return candidates[0], nil
 	default:
 		return "", fmt.Errorf("%w (cell %q): candidates: %s",
-			errdefs.ErrAttachAmbiguous, cell, strings.Join(candidates, ", "))
+			sentinels.Ambiguous, cell, strings.Join(candidates, ", "))
 	}
 }

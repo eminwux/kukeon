@@ -189,6 +189,26 @@ type Client interface {
 	// connection carries a single sbsh call; the caller owns and closes
 	// it. Local transport only.
 	ConnectContainerTerminal(ctx context.Context, doc v1beta1.ContainerDoc) (*net.UnixConn, error)
+	// ExecContainer runs a new process inside the running task of the
+	// target container and returns one end of a connected socket pair that
+	// carries the session (issue #1432). The daemon keeps the other end,
+	// starts the process, and passes this end back over the kukeond socket
+	// (SCM_RIGHTS), so it works from a cell that mounts only that socket.
+	//
+	// Gates, in order: an invalid request (no command, Root together with
+	// User, an env entry without "=", a terminal size without TTY) is
+	// ErrExecInvalidRequest; a container the cell spec does not have is
+	// ErrContainerNotFound; a container whose task is not running is
+	// ErrExecTaskNotRunning. Any container of the cell may be named,
+	// Attachable or not, the root container included.
+	//
+	// The connection speaks the frame protocol of internal/execstream:
+	// stdin, stdin EOF and resize frames from the caller; stdout, stderr
+	// and a final exit frame from the daemon. The process is killed when
+	// the connection closes before the exit frame; the session does not
+	// end with the call's ctx. The caller owns and closes the connection.
+	// Local transport only.
+	ExecContainer(ctx context.Context, doc v1beta1.ContainerDoc, req ExecRequest) (*net.UnixConn, error)
 	// ReadDaemonLogs returns a bounded chunk of kukeond's own stdout/stderr
 	// stream — the same runtime-shim log file `kuke daemon logs` reads —
 	// so callers without filesystem access to the daemon's storage (the
@@ -519,6 +539,7 @@ const (
 	MethodReadContainerLog = ServiceName + ".ReadContainerLog"
 
 	MethodConnectContainerTerminal = ServiceName + ".ConnectContainerTerminal"
+	MethodExecContainer            = ServiceName + ".ExecContainer"
 	MethodReadDaemonLogs           = ServiceName + ".ReadDaemonLogs"
 
 	MethodReadHealthDigest   = ServiceName + ".ReadHealthDigest"

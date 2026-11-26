@@ -143,3 +143,22 @@ func TestTeamErrorKinds(t *testing.T) {
 		}
 	}
 }
+
+// TestExecErrorKinds pins the wire kinds of the `kuke exec` sentinels the
+// daemon returns (issue #1432).
+func TestExecErrorKinds(t *testing.T) {
+	for kind, sentinel := range map[string]error{
+		"ExecTaskNotRunning": errdefs.ErrExecTaskNotRunning,
+		"ExecInvalidRequest": errdefs.ErrExecInvalidRequest,
+	} {
+		serverErr := fmt.Errorf("%w: container %q in cell %q", sentinel, "work", "c")
+		apiErr := kukeonv1.ToAPIError(serverErr)
+		if apiErr.Kind != kind {
+			t.Errorf("Kind = %q, want %q", apiErr.Kind, kind)
+		}
+		if clientErr := kukeonv1.FromAPIError(apiErr); !errors.Is(clientErr, sentinel) ||
+			clientErr.Error() != serverErr.Error() {
+			t.Errorf("%s round trip = %v", kind, clientErr)
+		}
+	}
+}

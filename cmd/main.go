@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/kuke"
+	execcmd "github.com/eminwux/kukeon/cmd/kuke/exec"
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	"github.com/eminwux/kukeon/cmd/kukeond"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -52,12 +53,18 @@ func getFactories(ctx context.Context) factoryMap {
 func execRoot(root *cobra.Command) int {
 	if err := root.Execute(); err != nil {
 		// kuke health --exit-code returns FindingsError to exit with its own
-		// code. Only that kukeon-owned type is honoured: a wrapped
-		// *exec.ExitError also has an ExitCode method, and a child process's
-		// code must not leak out as kuke's. Everything else is a plain failure.
+		// code, and kuke exec returns its ExitError to exit with the code of
+		// the process it ran in the container. Only those kukeon-owned types
+		// are honoured: a wrapped *exec.ExitError also has an ExitCode method,
+		// and a child process's code must not leak out as kuke's. Everything
+		// else is a plain failure.
 		var findings healthcmd.FindingsError
 		if errors.As(err, &findings) {
 			return findings.ExitCode()
+		}
+		var execExit execcmd.ExitError
+		if errors.As(err, &execExit) {
+			return execExit.ExitCode()
 		}
 		return 1
 	}

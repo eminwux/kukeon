@@ -343,6 +343,19 @@ type Runner interface {
 
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 
+	// ExecContainer starts spec as a new process in the running task of the
+	// named container of cell and wires it to stdio (issue #1432). Any
+	// container of the cell spec may be named, the root container included.
+	// Returns errdefs.ErrContainerNotFound when the cell spec has no such
+	// container. The caller owns the returned process: it must Wait, and
+	// Delete it once it exited.
+	ExecContainer(
+		cell intmodel.Cell,
+		containerName string,
+		spec ctr.ExecSpec,
+		stdio ctr.ExecStdio,
+	) (ctr.ExecProcess, error)
+
 	// LoadImage imports an OCI/docker image tarball into the given
 	// containerd namespace and returns the names of the imported images.
 	LoadImage(namespace string, reader io.Reader) ([]string, error)

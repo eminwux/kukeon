@@ -33,6 +33,7 @@ import (
 	daemoncmd "github.com/eminwux/kukeon/cmd/kuke/daemon"
 	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
 	doctorcmd "github.com/eminwux/kukeon/cmd/kuke/doctor"
+	execcmd "github.com/eminwux/kukeon/cmd/kuke/exec"
 	getcmd "github.com/eminwux/kukeon/cmd/kuke/get"
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
 	imagecmd "github.com/eminwux/kukeon/cmd/kuke/image"
@@ -174,6 +175,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(restartcmd.NewRestartCmd())
 	rootCmd.AddCommand(runcmd.NewRunCmd())
 	rootCmd.AddCommand(attachcmd.NewAttachCmd())
+	rootCmd.AddCommand(execcmd.NewExecCmd())
 	rootCmd.AddCommand(logcmd.NewLogCmd())
 	rootCmd.AddCommand(screenshotcmd.NewScreenshotCmd())
 	rootCmd.AddCommand(writecmd.NewWriteCmd())

@@ -182,6 +182,10 @@ func (FakeClient) ConnectContainerTerminal(context.Context, v1beta1.ContainerDoc
 	return nil, ErrUnexpectedCall
 }
 
+func (FakeClient) ExecContainer(context.Context, v1beta1.ContainerDoc, ExecRequest) (*net.UnixConn, error) {
+	return nil, ErrUnexpectedCall
+}
+
 func (FakeClient) ReadDaemonLogs(context.Context, DaemonLogRequest) (DaemonLogResult, error) {
 	return DaemonLogResult{}, ErrUnexpectedCall
 }

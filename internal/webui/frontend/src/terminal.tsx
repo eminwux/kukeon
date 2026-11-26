@@ -9,6 +9,7 @@ import { apiPath } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { Icon } from "./icons";
 import { ContainerLog } from "./container-log";
+import { ExecButton, ExecPanel } from "./exec";
 import { availableLifecycleActions } from "./lifecycle-policy.js";
 import type { LifecycleAction, LifecycleFeedback } from "./lifecycle";
 import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } from "./terminal-palette.js";
@@ -156,8 +157,12 @@ export function useTerminalSessions(inventory: InventoryResource) {
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
 type Manager = TerminalManager;
+// A session that is not an attach (#1432, the exec terminal): the WebSocket path it opens and the
+// label of its screen. Its process ends for good, so the server's `exit` message closes the session
+// with the exit code and nothing offers to reconnect to it.
+export type SessionEndpoint = { path: string; label: string };
 
-export function TerminalSession({ session, active, expanded, theme, update, pending, onPasted }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"]; pending?: PendingPaste; onPasted?: Manager["pasteDelivered"] }) {
+export function TerminalSession({ session, active, expanded, theme, update, pending, onPasted, endpoint }: { session: Session; active: boolean; expanded: boolean; theme: Theme; update: Manager["update"]; pending?: PendingPaste; onPasted?: Manager["pasteDelivered"]; endpoint?: SessionEndpoint }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -236,7 +241,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     if (session.state === "disconnected" || session.state === "interrupted") return;
     let connection: WebSocket;
     try {
-      connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`);
+      connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${endpoint?.path ?? `${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`}`);
     } catch {
       update(session.id, session.generation, "disconnected", "Terminal connection failed. Check the server and retry.");
       return;
@@ -263,7 +268,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
         });
         if (!receivedOutput) {
           receivedOutput = true;
-          if (ready) update(session.id, session.generation, "attached", "Attached");
+          if (ready) update(session.id, session.generation, "attached", endpoint ? "Connected" : "Attached");
         }
       }
       else if (typeof event.data === "string") {
@@ -271,7 +276,12 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
           const response = JSON.parse(event.data);
           if (response.type === "ready") {
             ready = true;
-            update(session.id, session.generation, "attached", receivedOutput ? "Attached" : "Attached — waiting for container output. A prompt appears when the container runs an interactive shell.");
+            update(session.id, session.generation, "attached", endpoint ? "Connected" : receivedOutput ? "Attached" : "Attached — waiting for container output. A prompt appears when the container runs an interactive shell.");
+          }
+          else if (response.type === "exit" && endpoint) {
+            // The process is gone: the message is the session's last state, shown in the terminal too.
+            failure = `Process exited with code ${typeof response.code === "number" ? response.code : "unknown"}`;
+            terminal.current?.write(`\r\n${failure}\r\n`);
           }
           else if (response.type === "error") failure = typeof response.message === "string" ? response.message : "Terminal server error.";
           else failure = "Invalid terminal response.";
@@ -282,13 +292,13 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     // A refused upgrade hides its status code; ask the session route so a 401 signs the UI out (#1652).
     const checkSession = () => { if (!opened) { opened = true; checkSessionAfterSocketFailure(); } };
     connection.onerror = () => { checkSession(); failure ||= "Terminal connection failed. Check the server and retry."; update(session.id, session.generation, "disconnected", failure); connection.close(); };
-    connection.onclose = () => { checkSession(); update(session.id, session.generation, "disconnected", failure || "Terminal connection closed. Reconnect to attach again."); };
+    connection.onclose = () => { checkSession(); update(session.id, session.generation, "disconnected", failure || (endpoint ? "Terminal connection closed." : "Terminal connection closed. Reconnect to attach again.")); };
     return () => {
       connection.onopen = connection.onmessage = connection.onerror = connection.onclose = null;
       connection.close();
       if (socket.current === connection) socket.current = null;
     };
-  }, [session.id, session.generation, session.scope, session.container, update]);
+  }, [session.id, session.generation, session.scope, session.container, update, endpoint?.path]);
 
   useEffect(() => {
     if (!active) { terminal.current?.blur(); return; }
@@ -325,7 +335,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   }, [active, expanded]);
 
   return <div className="terminal-session" hidden={!active} aria-hidden={!active}>
-    <div className="terminal-screen" aria-label={`Terminal for ${session.scope.join(" / ")} / ${session.container}`}>
+    <div className="terminal-screen" aria-label={endpoint?.label ?? `Terminal for ${session.scope.join(" / ")} / ${session.container}`}>
       {/* FitAddon sizes from the xterm parent's computed box; keep padding off it so rows/cols never spill under the panel border. */}
       <div ref={mount} className="terminal-mount" />
     </div>
@@ -337,6 +347,8 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
 export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCells = [], onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCells?: string[]; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
+  // The session id of the container whose Exec panel is open (#1432); "" when none is.
+  const [execFor, setExecFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
   const screens = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -391,6 +403,9 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   // A live terminal needs an attachable container in a live cell; everything else that is listed shows its log.
   const mode: "terminal" | "logs" = scope && !docked && selectedListed && (!selectedEligible || unavailable) ? "logs" : "terminal";
   const logs = mode === "logs";
+  // Exec runs in any listed container, attachable or not, of a cell that is running. The panel takes
+  // the place of the terminal or log while it is open and closes when its container is deselected.
+  const execOpen = !!currentId && execFor === currentId && selectedListed && !docked && !unavailable;
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
@@ -416,7 +431,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
       : containers.error && !live ? `${headerState}: ${containers.error.message}`
         : staleContainers && !live ? staleContainers
           : current?.message || headerState;
-  const overlay = !scope || empty || live || logs ? null
+  const overlay = !scope || empty || live || logs || execOpen ? null
     : atLimit || reconnectLimited ? <p className="terminal-limit" role="status">{limitMessage}</p>
       : unavailable ? <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>
         : containers.error ? <><ErrorNotice error={containers.error} kind="Containers" />{staleContainers && <p className="stale">{staleContainers}</p>}</>
@@ -436,7 +451,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{optionLabel(id)}</option>)}</select>
-        {!logs && connectSlot}</>}
+        {!logs && connectSlot}
+        {selectedListed && <ExecButton container={selected} open={execOpen} reason={unavailable ? `Exec unavailable: cell is ${cellState}.` : ""} onToggle={() => setExecFor(execOpen ? "" : currentId)} />}</>}
       {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
     </div>
   </div>;
@@ -452,9 +468,11 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
         </div>}
       </>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>
-        {manager.sessions.filter(session => !dockedCells.includes(cellId(session.scope))).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+        {manager.sessions.filter(session => !dockedCells.includes(cellId(session.scope))).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && !execOpen && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
         {/* Not mounting the log while hidden is what keeps cellRead free of log requests (#1566). */}
-        {visible && logs && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
+        {visible && logs && !execOpen && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
+        {/* Unmounting the panel closes its terminal's WebSocket, which is what kills the exec process. */}
+        {execOpen && <ExecPanel key={currentId} scope={scope!} container={selected} theme={theme} visible={visible} expanded={expanded} onClose={() => setExecFor("")} />}
       </div>
     </section>
   </>;

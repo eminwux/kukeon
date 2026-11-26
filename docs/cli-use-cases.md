@@ -645,6 +645,36 @@ kuke attach <cell> --container <con>                   # alias: att
 - `kuke attach` requires an Attachable-tagged container (a sbsh-style terminal); attaching to a non-attachable container exits non-zero.
 - Every Attachable container's wrapper writes its own debug log. By default it lands at the per-container `tty/kuketty.log` (peer to `tty/capture` inside the kukeon-controlled bind mount) — a daemon-rendered path, always present after first attach, that operators read directly to diagnose attach-session misbehavior. Cells that need the log elsewhere can pin `spec.containers[].tty.logFile` to an alternate in-container path; the daemon stamps it verbatim without anchoring or rewriting, and the always-on invariant (a non-empty log path on every attachable) still holds. Verbosity is configurable per cell via `spec.containers[].tty.logLevel` (one of `debug` / `info` / `warn` / `error`). When the cell omits it, the renderer falls through to the daemon-wide `spec.kukettyLogLevel` on the ServerConfiguration document (`KUKEOND_KUKETTY_LOG_LEVEL` env / `--kuketty-log-level` flag); the final hardcoded fallback is `info`, so the kuketty wrapper never starts without a usable level.
 
+### Run a one-off command in a running cell
+
+**Intent.** Start a new process inside a container that is already running, as the container's own user or as root, without reaching for containerd.
+
+**Sequence.**
+
+```bash
+kuke exec <cell> -- <cmd> [args...]                    # as the container's user
+kuke exec <cell> --root -- <cmd> [args...]             # as uid 0 / gid 0
+kuke exec <cell> -u <uid[:gid]|name> -- <cmd>          # as an explicit user
+kuke exec <cell> -c <con> -e KEY=VAL -w <dir> -- <cmd> # named container, env, working directory
+echo hi | kuke exec <cell> -i -- cat                   # forward stdin
+kuke exec <cell> -it -- bash                           # interactive shell
+```
+
+**Invariants.**
+
+- `kuke exec <cell> -- id -u` prints the uid the container runs as; `--root -- id -u` prints `0`; `-u 1234 -- id -u` prints `1234`; `-u 1234:5678 -- id -g` prints `5678`.
+- The exit code is the process's: `kuke exec <cell> -- sh -c 'exit 7'` exits 7, and `kuke` prints nothing of its own for it. A failure of `kuke exec` itself (cell not found, daemon down, command not startable) exits 1 with an `Error:` line.
+- The process's stdout arrives on `kuke`'s stdout and its stderr on `kuke`'s stderr, except with `-t`, where the terminal carries both on stdout.
+- Everything after `--` is the command. A missing `--`, a missing cell or a missing command exits non-zero with a usage error that shows the `--` form, before any RPC. `--root` with `-u`, an `-e` value that is not `KEY=VAL`, and `-t` with a stdin that is not a terminal are refused the same way.
+- `-e KEY=VAL` (repeatable) and `-w <dir>` reach the process; an `-e` key the container already sets is replaced.
+- Without `-i` the process reads an already-ended stdin (`kuke exec <cell> -- cat` returns at once). With `-i`, `echo hi | kuke exec <cell> -i -- cat` prints `hi` and exits 0.
+- A missing cell and a stopped cell exit non-zero with the same messages as `kuke attach`. Without `-c`, the cell's only non-root container is picked, attachable or not; none, or more than one, exits non-zero, and the second error lists the candidates. `-c` may name any container of the cell, the root container included; an unknown one, or one whose task is not running, exits non-zero.
+- Killing `kuke exec` (Ctrl-C, SIGKILL) kills the process in the container; kukeond removes the exec from the task and leaves no FIFO under `<run-path>/exec-fifo`. There is no detach.
+- With `-it` the local terminal is restored when the command ends, also when the connection to kukeond drops.
+- Every exec produces two kukeond log entries, `exec started` and `exec finished`, with the cell coordinates, container, identity, argv, the caller's uid and, on finish, the exit code and duration. Root execs carry `root=true`. Only the keys of `-e` variables are logged.
+- `kuke exec` is daemon-only (no `--no-daemon`) and works from a cell that mounts only the kukeond socket. Against a kukeond that predates it, it exits non-zero saying kukeond must be upgraded.
+- Side effect: none on kukeon's state. What the command changed inside the container is lost when the cell is recreated.
+
 ### Stop, kill, delete, purge a cell
 
 **Intent.** Tear down a cell. Three verbs by escalating force:

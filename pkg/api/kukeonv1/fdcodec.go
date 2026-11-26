@@ -32,7 +32,8 @@ import (
 )
 
 // The kukeond socket speaks plain net/rpc JSON-RPC. A reply that must hand
-// the caller a connected socket (ConnectContainerTerminal) carries that
+// the caller a connected socket (ConnectContainerTerminal, ExecContainer)
+// carries that
 // socket's descriptor as SCM_RIGHTS ancillary data on the reply bytes, so
 // the wire stays byte-compatible with jsonrpc for every other method: the
 // shared, multiplexed UnixClient connection is unaffected, and an older
@@ -93,13 +94,15 @@ func peerUID(conn *net.UnixConn) (int, error) {
 }
 
 // peerArgs is implemented by the argument types of methods that act for the
-// calling user (issue #1643): the codec sets their uid from the socket.
+// calling user (issue #1643) or record who called (issue #1432): the codec
+// sets their uid from the socket.
 type peerArgs interface {
 	setPeerUID(uid int)
 }
 
 func (a *StageGitFetchArgs) setPeerUID(uid int)   { a.PeerUID = &uid }
 func (a *ReleaseGitFetchArgs) setPeerUID(uid int) { a.PeerUID = &uid }
+func (a *ExecContainerArgs) setPeerUID(uid int)   { a.PeerUID = &uid }
 
 // ReadRequestBody decodes the body, then overwrites the caller uid of an
 // argument that carries one with the connection's SO_PEERCRED uid. A

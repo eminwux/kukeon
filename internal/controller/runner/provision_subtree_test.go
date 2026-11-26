@@ -21,6 +21,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -168,6 +169,12 @@ func (c *subtreeRecorderClient) TaskStatus(string, string) (containerd.Status, e
 
 func (c *subtreeRecorderClient) TaskMetrics(string, string) (*apitypes.Metric, error) {
 	panic("unexpected")
+}
+
+func (c *subtreeRecorderClient) ExecTask(
+	string, string, ctr.ExecSpec, io.Reader, io.Writer, io.Writer,
+) (ctr.ExecProcess, error) {
+	return nil, errors.New("unexpected call to ExecTask")
 }
 
 func (c *subtreeRecorderClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
