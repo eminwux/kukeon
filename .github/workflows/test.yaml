@@ -464,6 +464,11 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
 
+      # KUKEON_E2E_HOST_LAYOUT=1: the runner has no kukeon runtime, so the
+      # daemon is bootstrapped where an installed host has it (/opt/kukeon,
+      # /run/kukeon/kukeond.sock). Majordomo's Config mounts those paths, and
+      # its step runs in this layout only.
+      #
       # The sudo, cache and stdio handling is the e2e job's; see the comments
       # there. Nothing is written into the tree before `make` builds kuke: an
       # untracked file would set vcs.modified and pin team sources to branch
@@ -477,7 +482,7 @@ jobs:
           GOMODCACHE="$(go env GOMODCACHE)"
           stdbuf -oL -eL sudo env "PATH=$PATH" "GOCACHE=$GOCACHE" "GOMODCACHE=$GOMODCACHE" \
             "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" CI=1 \
-            make e2e-onboarding </dev/null > >(cat) 2> >(cat >&2)
+            make e2e-onboarding KUKEON_E2E_HOST_LAYOUT=1 </dev/null > >(cat) 2> >(cat >&2)
 
       - name: Return Go caches to the runner user
         if: always()

@@ -309,6 +309,13 @@ test-e2e: e2e-image
 # pass from standing in for a run. On a host whose containerd store is small
 # (a kukeon dev cell), run it with KUKEON_E2E_RECLAIM_BUILD=1: the test then
 # prunes the image build's layers before the harness image is pulled.
+#
+# By default the daemon runs under a temporary run path, like the rest of the
+# e2e suite, and the majordomo step is skipped: majordomo's Config mounts the
+# standard host paths (/opt/kukeon/bin/client, /run/kukeon/kukeond).
+# KUKEON_E2E_HOST_LAYOUT=1 bootstraps the daemon in the standard layout
+# (/opt/kukeon, /run/kukeon/kukeond.sock) and runs every step. It is for a
+# host with no kukeon runtime (CI): the test refuses to start otherwise.
 .PHONY: e2e-onboarding
 e2e-onboarding: e2e-image
 	@echo "Running the onboarding e2e using binaries in project root"
@@ -319,6 +326,7 @@ e2e-onboarding: e2e-image
 		KUKEOND_CONFIGURATION=/dev/null \
 		KUKEON_E2E_ONBOARDING=1 \
 		KUKEON_E2E_RECLAIM_BUILD=$(KUKEON_E2E_RECLAIM_BUILD) \
+		KUKEON_E2E_HOST_LAYOUT=$(KUKEON_E2E_HOST_LAYOUT) \
 		env -u KUKEOND_SOCKET go test -v -count=1 -timeout 40m -run '^TestOnboarding_' ./e2e
 
 tag:

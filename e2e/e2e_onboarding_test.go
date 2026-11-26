@@ -43,6 +43,22 @@ const onboardingEnv = "KUKEON_E2E_ONBOARDING"
 // containerd store is small (a kukeon dev cell's 4 GB tmpfs).
 const reclaimBuildEnv = "KUKEON_E2E_RECLAIM_BUILD"
 
+// hostLayoutEnv makes the test bootstrap the daemon where an installed host
+// has it — run path /opt/kukeon, socket /run/kukeon/kukeond.sock — instead of
+// under a temporary run path. Team Configs that carry the kuke client
+// (majordomo) bind-mount the standard host paths, /opt/kukeon/bin/client and
+// /run/kukeon/kukeond (pkg/team/compose/renderers/kukeon/bundled), so only a
+// daemon in the standard layout can start them: the majordomo step runs in
+// this mode alone. It is opt-in because it owns those paths: the test refuses
+// to start on a host that already has a kukeon runtime there. CI sets it.
+const hostLayoutEnv = "KUKEON_E2E_HOST_LAYOUT"
+
+// The standard layout of an installed host.
+const (
+	hostLayoutRunPath = "/opt/kukeon"
+	hostLayoutSocket  = "/run/kukeon/kukeond.sock"
+)
+
 // onboardingTimeout bounds the browser run: one team init (a git fetch), one
 // harness image pull and two cell starts.
 const onboardingTimeout = 25 * time.Minute
@@ -50,8 +66,8 @@ const onboardingTimeout = 25 * time.Minute
 // TestOnboarding_WebUI is first-run onboarding end to end (issue #1694): on a
 // host where only `kuke init` ran, a browser signs in to `kuke serve`, follows
 // the Workbench's Get started checklist — Initialize, a GitHub token that also
-// serves git, a login, a first agent — and enables majordomo, against a real
-// kukeond. The browser side is internal/webui/frontend/tests/onboarding.spec.mjs;
+// serves git, a login, a first agent — and, in the standard host layout
+// (hostLayoutEnv), enables majordomo, against a real kukeond. The browser side is internal/webui/frontend/tests/onboarding.spec.mjs;
 // this test owns the daemon: it bootstraps the runtime the way the installer
 // does, hands the spec the daemon's endpoint and tears everything down.
 //
@@ -88,7 +104,23 @@ func TestOnboarding_WebUI(t *testing.T) {
 	}
 
 	requireInitEgressRemoved(t)
-	runPath := getRandomRunPath(t)
+	hostLayout := os.Getenv(hostLayoutEnv) != ""
+	var runPath string
+	if hostLayout {
+		for _, path := range []string{hostLayoutSocket, filepath.Join(hostLayoutRunPath, "data")} {
+			if _, statErr := os.Stat(path); statErr == nil {
+				t.Fatalf("%s is set but %s exists: this host has a kukeon runtime, which the test would replace",
+					hostLayoutEnv, path)
+			}
+		}
+		runPath = hostLayoutRunPath
+		// An explicit --run-path otherwise moves the socket under it
+		// (applyRunPathImpliesKukeondSocket); every kuke this test runs
+		// inherits the pin.
+		t.Setenv("KUKEOND_SOCKET", hostLayoutSocket)
+	} else {
+		runPath = getRandomRunPath(t)
+	}
 	t.Cleanup(func() {
 		// The same teardown as TestKuke_DaemonReset_RoundTrip. The default
 		// realm goes first and with --cascade: it holds the agent and
@@ -119,6 +151,14 @@ func TestOnboarding_WebUI(t *testing.T) {
 	}
 	// `kuke init --run-path X` brings kukeond up on X/kukeond.sock.
 	host := "unix://" + filepath.Join(runPath, "kukeond.sock")
+	majordomo := "0"
+	if hostLayout {
+		host = "unix://" + hostLayoutSocket
+		majordomo = "1"
+	} else {
+		t.Logf("%s unset: the daemon runs under %s and the majordomo step is skipped "+
+			"(its Config mounts the standard host paths)", hostLayoutEnv, runPath)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), onboardingTimeout)
 	defer cancel()
@@ -131,6 +171,8 @@ func TestOnboarding_WebUI(t *testing.T) {
 		// team Configs live in.
 		"KUKE_ONBOARDING_VOLUMES="+kukefs.VolumesDir(
 			runPath, config.DefaultRealm, consts.KukeonDefaultSpaceName, consts.KukeonDefaultStackName),
+		// Whether the daemon is in the layout majordomo's Config mounts.
+		"KUKE_ONBOARDING_MAJORDOMO="+majordomo,
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
