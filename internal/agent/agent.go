@@ -64,11 +64,15 @@ func Harnesses() []string {
 // default-agent-<harness>, the Config the default team composes for the
 // agent role on that harness.
 func TemplateName(harness string) (string, error) {
-	if !slices.Contains(Harnesses(), harness) {
+	harnesses := Harnesses()
+	i := slices.Index(harnesses, harness)
+	if i < 0 {
 		return "", fmt.Errorf("%w: unknown harness %q; New agent offers %s",
-			errdefs.ErrConfig, harness, strings.Join(Harnesses(), " and "))
+			errdefs.ErrConfig, harness, strings.Join(harnesses, " and "))
 	}
-	return config.DefaultTeamName + "-" + templateRole + "-" + harness, nil
+	// The name is built from the declared harness, not the caller's string,
+	// so a request-supplied harness never reaches a metadata path.
+	return config.DefaultTeamName + "-" + templateRole + "-" + harnesses[i], nil
 }
 
 // TemplateRef locates the agent template of harness.
