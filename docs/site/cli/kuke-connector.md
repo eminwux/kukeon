@@ -9,6 +9,9 @@ kuke connector list
 kuke connector import git [--key PATH] [--passphrase-file FILE] [--known-hosts FILE]
                           [--hosts HOST[,HOST...]] [--name NAME] [--realm REALM]
                           [--default] [--dry-run]
+kuke connector import github --token-stdin|--token-file FILE [--git] [--author 'NAME <EMAIL>']
+                             [--username USER] [--hosts HOST[,HOST...]] [--name NAME]
+                             [--git-name NAME] [--realm REALM] [--default] [--dry-run]
 kuke connector default <connector> [<identity>[@realm[/space[/stack]]]]
                        [--realm REALM] [--method METHOD] [--clear]
 kuke connector login <connector> [<name>] [--realm REALM] [--space SPACE] [--stack STACK]
@@ -27,12 +30,13 @@ subcommand prints secret material or the content of a login.
 
 ## Subcommands
 
-| Command                     | What it does                                                        |
-| --------------------------- | ------------------------------------------------------------------- |
-| `kuke connector list`       | Print each connector's identities and each Realm's default identity |
-| `kuke connector import git` | Store your SSH key and global gitconfig author as one git identity  |
-| `kuke connector default`    | Set or clear a Realm's default identity for a connector             |
-| `kuke connector login`      | Create a login identity and log in to it from an identity cell      |
+| Command                        | What it does                                                           |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `kuke connector list`          | Print each connector's identities and each Realm's default identity    |
+| `kuke connector import git`    | Store your SSH key and global gitconfig author as one git identity     |
+| `kuke connector import github` | Store a GitHub token for `gh` and, with `--git`, for git on github.com |
+| `kuke connector default`       | Set or clear a Realm's default identity for a connector                |
+| `kuke connector login`         | Create a login identity and log in to it from an identity cell         |
 
 ## kuke connector list
 
@@ -186,6 +190,58 @@ Identity:
 An author-only import prints `Key: none (author-only identity)`. With
 `--default` the dry run also prints the default it would set. Key material is
 never printed.
+
+## kuke connector import github
+
+```
+kuke connector import github --token-stdin|--token-file FILE [flags]
+```
+
+Stores a GitHub personal access token as an identity of the `github` connector
+(`github-token`): cells get it as `GH_TOKEN`. With `--git`, the same token is
+also stored as an identity of the `git` connector (`github-git`): a
+`basic-auth` Secret with username `x-access-token` that clones, fetches and
+pushes over HTTPS on `--hosts` only. The token is read once, from exactly one
+of `--token-stdin` and `--token-file`, and is never printed.
+
+| Flag            | Default          | Description                                                                                        |
+| --------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
+| `--token-stdin` | `false`          | Read the token from standard input.                                                                |
+| `--token-file`  | —                | Read the token from this file.                                                                     |
+| `--git`         | `false`          | Also store the token as a git identity for `--hosts`. Without it, git is unchanged.                |
+| `--author`      | —                | Commit author of the git identity, as `Name <email>`. Needs `--git`.                               |
+| `--username`    | `x-access-token` | Username of the git identity. GitHub accepts any non-empty username with a token. Needs `--git`.   |
+| `--hosts`       | `github.com`     | Hosts or URL prefixes the git identity authenticates. Comma-separated or repeated. Needs `--git`.  |
+| `--name`        | `github-token`   | Name of the github identity.                                                                       |
+| `--git-name`    | `github-git`     | Name of the git identity. Default: the git identity already linked to the github identity, if any. |
+| `--realm`       | `default`        | Realm the Secrets are stored in.                                                                   |
+| `--default`     | `false`          | Also make each stored identity its connector's Realm default, replacing any existing one.          |
+| `--dry-run`     | `false`          | Print the Secrets it would store. Store nothing and make no daemon call.                           |
+
+The git identity carries `hosts`, `author` when given, and the reserved key
+`kukeon.io/token-from`, which names the github identity (`github-token@default`).
+Rerunning with `--git` rotates both identities: the git identity linked to the
+github identity keeps its name, hosts and author and gets the new token. A
+Secret of the git identity's name that is not linked to this github identity
+is never overwritten; the command fails and asks for `--git-name`. The username
+is not read back, so a rerun stores `--username`, or `x-access-token`, again.
+
+When a write after the first fails — the git identity, or a default — the
+command prints what was stored and fails with an error naming what was not.
+
+```console
+$ kuke connector import github --token-stdin --git --default < token.txt
+Secret "github-token" (realm "default"): created
+GitHub identity github-token@default (GH_TOKEN)
+Secret "github-git" (realm "default"): created
+Git identity github-git@default (basic-auth for github.com, token from github-token@default)
+Realm "default" default github identity: github-token@default (was none)
+Realm "default" default git identity: github-git@default (was none)
+```
+
+A token cannot sign: for signed commits use
+[`kuke connector import git`](#kuke-connector-import-git) with your SSH key.
+See [Use your GitHub token](../guides/git-credentials.md#1-use-your-github-token).
 
 ## kuke connector default
 

@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	intconnector "github.com/eminwux/kukeon/internal/connector"
+	"github.com/eminwux/kukeon/internal/connector/githubtoken"
 	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -40,9 +41,11 @@ import (
 // catalog embedded in kuke: no route, payload or branch names a connector, so
 // a connector added as one connector.yaml is served — listed, given
 // identities, defaulted, picked — without a change to this file or to the UI.
-// The one exception is the git connector's import from the host (issue
-// #1591, connector_import.go): the git delivery handler is code, and so is
-// discovering its identity.
+// The exceptions are the git connector's import from the host (issue #1591,
+// connector_import.go): the git delivery handler is code, and so is
+// discovering its identity; and the GitHub token for git (issue #1693,
+// internal/connector/githubtoken), which turns one github identity request
+// into a second, git identity.
 //
 // Secret material is write-only on every route: it travels in a request body,
 // is never read back, and is masked out of any error.
@@ -74,6 +77,21 @@ type connectorView struct {
 	SecretTypes []string                 `json:"secretTypes"`
 	Fields      []v1beta1.ConnectorField `json:"fields"`
 	Methods     []connectorMethodView    `json:"methods"`
+	// TokenForGit is set on a connector whose token can also be stored as a
+	// git identity from the same request (issue #1693): the github connector.
+	TokenForGit *tokenForGitView `json:"tokenForGit,omitempty"`
+}
+
+// tokenForGitView is what the identity form needs to offer "Also use this
+// token for git": the defaults the server applies to the git identity.
+type tokenForGitView struct {
+	// Connector is the git-delivered connector the second identity is of.
+	Connector string   `json:"connector"`
+	Hosts     []string `json:"hosts"`
+	Username  string   `json:"username"`
+	Name      string   `json:"name"`
+	// TokenName is the github identity's default name.
+	TokenName string `json:"tokenName"`
 }
 
 // connectorMethodView is one way a connector reaches a cell.
@@ -110,6 +128,13 @@ func viewConnector(conn *connector.Connector) connectorView {
 	}
 	if view.Fields == nil {
 		view.Fields = []v1beta1.ConnectorField{}
+	}
+	if conn.Metadata.Name == intconnector.GitHubIdentityTag {
+		view.TokenForGit = &tokenForGitView{
+			Connector: intconnector.GitIdentityTag,
+			Hosts:     []string{intconnector.GitHubTokenHost}, Username: intconnector.GitHubTokenUsername,
+			Name: githubtoken.DefaultGitName, TokenName: githubtoken.DefaultName,
+		}
 	}
 	if len(conn.Spec.Methods) == 0 {
 		view.Delivery = conn.Spec.Delivery
@@ -369,6 +394,16 @@ type identityRequest struct {
 	PublicKey   string `json:"publicKey,omitempty"`
 	Certificate string `json:"certificate,omitempty"`
 	KnownHosts  string `json:"knownHosts,omitempty"`
+
+	// MakeDefault also makes the stored identity the connector's default at
+	// the identity's scope; Method names the method it is the default of, for
+	// a connector with several.
+	MakeDefault bool   `json:"makeDefault,omitempty"`
+	Method      string `json:"method,omitempty"`
+	// Git, on a connector that offers it (tokenForGit), also stores the token
+	// as a git identity limited to its hosts (issue #1693). The token is the
+	// request's value: it is sent once, and both Secrets are built from it.
+	Git *githubtoken.Git `json:"git,omitempty"`
 }
 
 // material lists the request's secret material, for masking errors.
@@ -392,12 +427,25 @@ type identityResult struct {
 	Identity  map[string]string `json:"identity,omitempty"`
 	// Action is created, or updated when an existing identity was rotated.
 	Action string `json:"action"`
+	// Git is the git identity stored from the same token (issue #1693).
+	Git *identityResult `json:"git,omitempty"`
+	// Defaults lists the defaults makeDefault set.
+	Defaults []githubtoken.DefaultSet `json:"defaults,omitempty"`
+}
+
+func storedResult(s githubtoken.Stored) identityResult {
+	return identityResult{
+		Name: s.Name, Scope: s.Scope, Connector: s.Connector, Type: s.Type, Identity: s.Identity, Action: s.Action,
+	}
 }
 
 // createIdentity stores a Secret tagged as an identity of the connector,
 // after checking it against the connector's definition exactly as
 // `kuke create secret --connector` does: an accepted type, declared fields,
-// required fields set, values readable as their declared types.
+// required fields set, values readable as their declared types. With
+// makeDefault the identity then becomes the connector's default at its own
+// scope — the git import's create-then-default — and a failure there says
+// the identity was stored.
 func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *http.Request) (any, error) {
 	conn, err := a.find(r)
 	if err != nil {
@@ -407,27 +455,114 @@ func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *
 	if err = decodeJSONBody(r, maxIdentityBody, &input); err != nil {
 		return nil, err
 	}
+	if input.Git != nil {
+		result, tokenErr := a.createTokenForGit(ctx, c, conn, input)
+		return result, redactCreationError(tokenErr, input.material())
+	}
 	doc, err := a.identitySecret(conn, input)
 	if err != nil {
 		return nil, redactCreationError(err, input.material())
+	}
+	var defaultTarget scopedefaults.Target
+	if input.MakeDefault {
+		// The default is checked before anything is stored: a connector or a
+		// method that takes no default fails the request whole.
+		if defaultTarget, err = scopedefaults.FindTarget(a.catalog, conn, input.Method); err != nil {
+			return nil, err
+		}
 	}
 	created, err := c.CreateSecret(ctx, doc)
 	if err != nil {
 		return nil, redactCreationError(err, input.material())
 	}
-	action := secretWriteAction(created.Created)
 	secretType := doc.Spec.Type
 	if secretType == "" {
 		secretType = v1beta1.SecretTypeOpaque
 	}
-	return identityResult{
-		Name:      doc.Metadata.Name,
-		Scope:     scopeRef{Realm: doc.Metadata.Realm, Space: doc.Metadata.Space, Stack: doc.Metadata.Stack},
-		Connector: doc.Spec.Connector,
-		Type:      secretType,
-		Identity:  doc.Spec.Identity,
-		Action:    action,
-	}, nil
+	stored := githubtoken.Stored{
+		Name: doc.Metadata.Name, Scope: scopeRef{Realm: doc.Metadata.Realm, Space: doc.Metadata.Space, Stack: doc.Metadata.Stack},
+		Connector: doc.Spec.Connector, Type: secretType, Identity: doc.Spec.Identity,
+		Action: secretWriteAction(created.Created),
+	}
+	result := storedResult(stored)
+	if !input.MakeDefault {
+		return result, nil
+	}
+	ref := githubtoken.Ref(doc)
+	set, err := scopedefaults.Set(ctx, c, a.catalog, conn, stored.Scope, defaultTarget.Method.Name, &ref)
+	if err != nil {
+		return nil, redactCreationError(&githubtoken.PartialError{
+			Result: githubtoken.Result{Secrets: []githubtoken.Stored{stored}},
+			Missing: []string{
+				fmt.Sprintf("%s default at %s %s", conn.Metadata.Name, stored.Scope.Level(), scopeText(stored.Scope)),
+			},
+			Err: err,
+		}, input.material())
+	}
+	result.Defaults = []githubtoken.DefaultSet{{
+		Connector: set.Connector, Method: set.Method, Scope: set.Scope, Level: set.Level,
+		Identity: set.Identity, Previous: set.Previous, Action: set.Action,
+	}}
+	return result, nil
+}
+
+// scopeText renders a scope as realm[/space[/stack]].
+func scopeText(s scopeRef) string {
+	return strings.Join(
+		slices.DeleteFunc([]string{s.Realm, s.Space, s.Stack}, func(v string) bool { return v == "" }),
+		"/",
+	)
+}
+
+// createTokenForGit stores a GitHub token as its github identity and, from
+// the same request, as a git identity limited to its hosts (issue #1693).
+// Both Secrets are built and checked before either is written; the token is
+// never read back, and no error carries it.
+func (a connectorAPI) createTokenForGit(
+	ctx context.Context, c kukeonv1.Client, conn *connector.Connector, input identityRequest,
+) (any, error) {
+	if conn.Metadata.Name != intconnector.GitHubIdentityTag {
+		return nil, fmt.Errorf("%w: a %s identity cannot also be stored for git", errdefs.ErrConfig, conn.Metadata.Name)
+	}
+	if secretType := strings.TrimSpace(input.Type); secretType != "" && secretType != v1beta1.SecretTypeOpaque {
+		return nil, fmt.Errorf("%w: a token for git is an opaque secret, not %s", errdefs.ErrConfig, secretType)
+	}
+	if len(input.Identity) > 0 || input.Username != "" || input.Password != "" || input.PrivateKey != "" {
+		return nil, fmt.Errorf("%w: a token for git takes only a name, a value and its git options", errdefs.ErrConfig)
+	}
+	scope, err := checkScope(input.Scope)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := githubtoken.Existing(ctx, c, scope)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := githubtoken.Build(a.catalog, githubtoken.Options{
+		Scope: scope, Name: input.Name, Token: input.Value, Git: input.Git,
+	}, existing)
+	if err != nil {
+		return nil, tokenError(err)
+	}
+	stored, err := githubtoken.Store(ctx, c, a.catalog, plan, input.MakeDefault)
+	if err != nil {
+		return nil, err
+	}
+	result := storedResult(stored.Secrets[0])
+	if len(stored.Secrets) > 1 {
+		git := storedResult(stored.Secrets[1])
+		result.Git = &git
+	}
+	result.Defaults = stored.Defaults
+	return result, nil
+}
+
+// tokenError classifies a rejected token request as a bad request.
+func tokenError(err error) error {
+	if errors.Is(err, errdefs.ErrGitHubToken) {
+		return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
+	}
+	return err
 }
 
 // identityMaterial reads the material of one secret type out of a request. A

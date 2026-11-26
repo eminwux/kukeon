@@ -63,8 +63,18 @@ How a Codex cell authenticates. Same shape: one method per codex Config.
 
 GitHub API access for the `gh` CLI: one method, `token`, delivered as
 `GH_TOKEN` through the `github-token` slot, with the `gh` image capability. The
-token is never a git credential — clone, push and signing use the `git`
-connector.
+token is never a git credential by itself — clone, push and signing use the
+`git` connector.
+
+The one way to use the token for git is to ask for it (issue #1693): with
+**Also use this token for git on github.com** on the web form, or
+`kuke connector import github --git`, the same token is also stored as a `git`
+identity — `basic-auth`, username `x-access-token`, `hosts: github.com` — that
+records the github identity it came from in the reserved identity key
+`kukeon.io/token-from`. Storing the github identity again with git on rotates
+that linked git identity too. The web form's **Make this the default** sets
+both defaults. See
+[Use your GitHub token](../guides/git-credentials.md#1-use-your-github-token).
 
 ### `git`
 
@@ -78,6 +88,11 @@ The identity a cell clones, pushes and signs with. A git identity is one
 | `committer`         | `Name <email>`    | Committer; git falls back to the author                                                                |
 | `sign`              | `commits`, `tags` | What to sign with the key (`ssh-key` only)                                                             |
 | `allowedSignersRef` | secret reference  | Allowed-signers file used to verify (`ssh-key` only)                                                   |
+
+A git identity stored from a GitHub token also carries `kukeon.io/token-from`, the
+github identity the token was copied from. Keys under `kukeon.io/` are reserved:
+kukeon writes them, every connector accepts them without declaring a field, and
+the delivery handler does not expand them.
 
 `git.identityRef` names such a Secret — on a Realm, Space or Stack default, on a
 Config's `git` block, or on one repo's `git`. When a cell is rendered the daemon
@@ -120,6 +135,7 @@ defaults from the command line:
 ```bash
 kuke connector list                      # identities and Realm defaults
 kuke connector import git --default      # store your SSH key and gitconfig author, make it the default
+kuke connector import github --token-stdin --git --default  # a GitHub token for gh and for git on github.com
 kuke connector default git git-ssh       # make an existing identity the Realm default
 kuke connector default git --clear       # remove it
 ```
@@ -130,10 +146,20 @@ an author-only identity (`git-author`). It turns signing on only when
 `user.signingkey` names the imported key. See the
 [git credentials guide](../guides/git-credentials.md).
 
-#### Import from host in the web UI
+#### New git identity in the web UI
 
-On the Connectors page, the `git` connector's Identities panel has an
-**Import from host** action. It takes a realm, the hosts, an optional identity
+On the Connectors page, the `git` connector's **New identity** page starts with
+three choices:
+
+- **Import from this machine**: the import below.
+- **Use a GitHub token**: opens the `github` connector's identity form with
+  _Also use this token for git_ checked (the connector advertises the option as
+  `tokenForGit` in `GET /api/connectors`).
+- **Enter a key or password**: the identity form. Its secret type is a
+  described choice — _SSH key — clone, push and sign_, _Username and password
+  or token — HTTPS_, _Author only — commits without push_.
+
+**Import from this machine** takes a realm, the hosts, an optional identity
 name, an optional key and passphrase file, and a _Make it the Realm default_
 checkbox (on by default). It calls `POST /api/connectors/git/import` with
 `{realm, hosts, name, key, passphraseFile, makeDefault}` and runs the same
@@ -183,7 +209,17 @@ bot-key      ssh-key  git        default  -      -      -     author=Dev Bot <bo
 work-github  opaque   github     default  -      -      -     -
 ```
 
-The tag and the fields are readable; the material never is. A Secret without a
+The tag and the fields are readable; the material never is.
+
+In the web UI an identity is created on its connector's **New identity** page.
+_Where can cells use it?_ chooses the scope its Secret is stored in:
+**Everywhere in realm `<realm>`** (preselected), **Only in one space…** or
+**Only in one stack…** — only the levels the connector accepts are offered, and
+a realm is chosen only when there is more than one. **Make this the default**
+(on when no default resolves there yet) then makes the new identity the
+connector's default at that same scope, as `makeDefault` (and, for a connector
+with several methods, `method`) on `POST /api/connectors/{connector}/identities`.
+If the default cannot be set, the error says the identity was stored. A Secret without a
 tag still works wherever it is named by hand — one created before connectors
 existed needs no migration — but a Secret tagged for one connector is refused
 for another.

@@ -80,6 +80,8 @@ func NewConnectorCmdWithCatalog(catalog *connector.Catalog) *cobra.Command {
 			"and a Realm, Space or Stack default names the identity every cell in it uses.\n\n" +
 			"  kuke connector list                         connectors, identities and realm defaults\n" +
 			"  kuke connector import git [--default]       store your git identity from this host\n" +
+			"  kuke connector import github --token-stdin [--git] [--default]\n" +
+			"                                              store a GitHub token for gh and, with --git, git\n" +
 			"  kuke connector default git <name[@realm]>   set a realm's default git identity\n" +
 			"  kuke connector login <connector> [name]     create a login identity and log in",
 		Run: func(cmd *cobra.Command, _ []string) {

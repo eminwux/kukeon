@@ -5,11 +5,11 @@ import type { InventoryResource } from "./inventory";
 import { imagesLink } from "./routes";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
+import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
 import { Disclosure } from "./disclosure";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
-  isRegistry, listedConnectors, loginBody, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
 
@@ -92,7 +92,7 @@ function ImportFromHost({ connector, inventory, initiallyOpen = false, onChanged
   return <div className="connector-import">
     <div className="connector-actions"><button type="button" className="subtle-button" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? "Hide import" : "Import from host"}</button></div>
     {open && <form className="creation-form identity-form" aria-label={`Import ${title} identity from host`} method="post" autoComplete="off" onSubmit={submit}>
-      <h3>Import from host</h3>
+      <h3>Import from this machine</h3>
       <p className="description">Reads the SSH key and global git configuration of the account running <code>kuke serve</code> and stores them as one {title} identity: an SSH key identity when a key is found, else an author-only one. Rerunning updates it in place. Key material goes to the daemon only — it is never shown here.</p>
       <ScopePicker label="Import" inventory={inventory} levels={[scopeLevels[0]]} value={scope} disabled={pending} onChange={setScope} />
       <div className="schema-fields">
@@ -247,8 +247,27 @@ function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, targe
 // stored, its form and, for a connector that imports from the host, the import
 // — or #/connectors/<name>/rotate-identity, the rotate form of one identity.
 // Saving or cancelling returns to the connector page.
-function IdentityPage({ connector, action, identity, target, identities, secrets, secretsLoading, inventory, onChanged }: {
+// The ways the New identity page of a git-delivered connector starts (#1693).
+const choiceImport = "import";
+const choiceManual = "manual";
+
+// IdentityChoices are the three ways to add an identity of a git-delivered
+// connector, as cards: discover it on the server's host, use a token another
+// connector can store for git (the GitHub token), or enter a key or password.
+function IdentityChoices({ connector, tokenConnector, target, choice, onChoose }: { connector: Connector; tokenConnector: Connector | undefined; target: Scope | undefined; choice: string; onChoose: (choice: string) => void }) {
+  const title = connector.title || connector.name;
+  const tokenTitle = tokenConnector ? tokenConnector.title || tokenConnector.name : "";
+  const card = (id: string, heading: string, text: string) => <button type="button" className={`identity-choice${choice === id ? " is-selected" : ""}`} aria-pressed={choice === id} onClick={() => onChoose(id)}><strong>{heading}</strong><span className="description">{text}</span></button>;
+  return <div className="identity-choices" role="group" aria-label={`How to add a ${title} identity`}>
+    {card(choiceImport, "Import from this machine", "The SSH key and git author of the account running kuke serve: clone, push and sign.")}
+    {tokenConnector && <a className="identity-choice" href={newIdentityLink(tokenConnector.name, target)}><strong>Use a {tokenTitle} token</strong><span className="description">One personal access token for the {tokenTitle} API and for git over HTTPS on {tokenForGit(tokenConnector)?.hosts.join(", ")}. No signing.</span></a>}
+    {card(choiceManual, "Enter a key or password", "Paste an SSH key, a username with a password or token, or store an author only.")}
+  </div>;
+}
+
+function IdentityPage({ connector, connectors, action, identity, target, identities, secrets, secretsLoading, inventory, onChanged }: {
   connector: Connector;
+  connectors: Connector[];
   action: string;
   identity: string[] | undefined;
   target: Scope | undefined;
@@ -263,11 +282,13 @@ function IdentityPage({ connector, action, identity, target, identities, secrets
   const leave = () => { window.location.hash = back; };
   const saved = () => { onChanged(); leave(); };
   const levels = connectorLevels(connector);
-  const [store, setStore] = useScope(inventory, target && scopeAt(target, scopeLevels[0]));
+  const [store, setStore] = useScope(inventory, target && scopeAt(target, levels.includes(scopeLevels[0]) ? scopeLevels[0] : levels[0]));
   const storable = !!store.realm && levels.includes(scopeLevel(store));
   const rotate = action === "rotate-identity";
   const wanted = identity ? refKey({ name: identity.at(-1) ?? "", ...scopeFromParts(identity.slice(0, -1)) }) : "";
   const existing = rotate ? identities.find(item => refKey(item) === wanted) : undefined;
+  const choices = importsFromHost(connector);
+  const [choice, setChoice] = useState(choices ? "" : choiceManual);
   return <>
     <div className="detail-actions"><a href={back}>← Back to {title}</a></div>
     <section className="panel connector-identity-page" aria-label={rotate ? `Rotate ${title} identity` : `New ${title} identity`}><div className="panel-body">
@@ -275,10 +296,13 @@ function IdentityPage({ connector, action, identity, target, identities, secrets
         : secretsLoading ? <p role="status">Loading identities…</p>
           : <div className="error" role="alert"><strong>Identity not found</strong><p>No {title} identity {identity?.at(-1) ? <code>{identity.at(-1)}</code> : ""} is stored{identity && identity.length > 1 ? <> in {identity.slice(0, -1).join(" / ")}</> : ""}. <a href={back}>Back to {title}</a></p></div>
         : <>
-          <ScopeGroup title="Stored identity scope" description={<>Where the new {title} identity is stored: the Realm, Space or Stack its Secret is saved in.</>}><ScopePicker label="Identity" inventory={inventory} levels={levels} value={store} onChange={setStore} />
-            {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}</ScopeGroup>
-          <IdentityForm key={`new:${scopeParts(store).join("/")}`} connector={connector} scope={store} secrets={secrets} onSaved={saved} onCancel={leave} />
-          {importsFromHost(connector) && <ImportFromHost connector={connector} inventory={inventory} initiallyOpen onChanged={onChanged} />}
+          {choices && <IdentityChoices connector={connector} tokenConnector={tokenConnectors(connectors).find(item => tokenForGit(item)?.connector === connector.name)} target={target} choice={choice} onChoose={setChoice} />}
+          {choice === choiceManual && <>
+            <ScopeRadio label="Identity" connector={connector} inventory={inventory} value={store} onChange={setStore} />
+            {store.realm && !storable && <p className="field-error" role="alert">{title} identities are stored at {levels.join(" or ")} level.</p>}
+            <IdentityForm key={`new:${scopeParts(store).join("/")}`} connector={connector} scope={store} secrets={secrets} onSaved={saved} onCancel={leave} />
+          </>}
+          {choice === choiceImport && <ImportFromHost connector={connector} inventory={inventory} initiallyOpen onChanged={onChanged} />}
         </>}
     </div></section>
   </>;
@@ -354,7 +378,7 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
     <div className="panel-heading"><h2>Default identity</h2><span className="badge">{levels.join(" · ")}</span></div>
     <div className="panel-body">
       <p className="description">A default fills {title} for every Config in the scope that picked no identity. The deepest level wins: Stack over Space over Realm. Changing one takes effect at once — no Config is re-rendered.</p>
-      <ScopeGroup title="Default scope" description={<>The scope whose default is shown and set: every level of it, from its Realm down.</>}><ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} /></ScopeGroup>
+      <ScopeGroup title="Which cells?" description={<>Pick a Realm, or a Space or Stack in it, to see the identity its cells get when they pick none, and to change it.</>}><ScopePicker label="Default" inventory={inventory} levels={levels} value={scope} onChange={setScope} /></ScopeGroup>
       {!scope.realm ? <p className="description">Choose a Realm to see and set its defaults.</p> : <>
         {defaults.loading && !defaults.data && <p role="status">Loading defaults…</p>}
         {defaults.error && <ErrorNotice error={defaults.error} kind="Scope" />}
@@ -365,8 +389,9 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   </section>;
 }
 
-function ConnectorDetail({ connector, usage, secrets, logins, loginsError, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
+function ConnectorDetail({ connector, connectors, usage, secrets, logins, loginsError, secretsError, secretsLoading, target, action, identity, revision, inventory, onChanged }: {
   connector: Connector;
+  connectors: Connector[];
   usage: ConnectorUsage[] | undefined;
   secrets: unknown[] | undefined;
   logins: unknown[] | undefined;
@@ -387,7 +412,7 @@ function ConnectorDetail({ connector, usage, secrets, logins, loginsError, secre
   const storesIdentity = registry || defaultTargets(connector).length > 0;
   const keepsLogins = loginMethods(connector).length > 0;
   const loginIdentities = loginIdentitiesFor(logins, connector.name);
-  if (action && storesIdentity && !registry) return <IdentityPage connector={connector} action={action} identity={identity} target={target} identities={identities} secrets={secrets} secretsLoading={secretsLoading} inventory={inventory} onChanged={onChanged} />;
+  if (action && storesIdentity && !registry) return <IdentityPage connector={connector} connectors={connectors} action={action} identity={identity} target={target} identities={identities} secrets={secrets} secretsLoading={secretsLoading} inventory={inventory} onChanged={onChanged} />;
   return <>
     <div className="detail-actions"><a href={connectorsLink()}>← Back to connectors</a></div>
     <section className="panel" aria-label={`${title} connector`}>
@@ -448,6 +473,6 @@ export function ConnectorsPage({ name, target, action, identity, revision, inven
     {!name && <p className="description connectors-intro">A connector is a kind of access a cell needs. An identity is the stored credential that fills it — chosen per cell or per Config, or inherited from a Realm, Space or Stack default.</p>}
     {catalog.data && !name && <ConnectorList connectors={listedConnectors(catalog.data)} usage={usage.data} secrets={secrets.data} logins={logins.data} />}
     {catalog.data && name && !connector && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {name} is defined. <a href={connectorsLink()}>Back to connectors</a></p></div>}
-    {connector && <ConnectorDetail key={connector.name} connector={connector} usage={usage.data} secrets={secrets.data} logins={logins.data} loginsError={logins.error} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
+    {connector && <ConnectorDetail key={connector.name} connector={connector} connectors={catalog.data ?? []} usage={usage.data} secrets={secrets.data} logins={logins.data} loginsError={logins.error} secretsError={secrets.error} secretsLoading={secrets.loading && !secrets.data} target={scope} action={action} identity={identity} revision={revision} inventory={inventory} onChanged={onChanged} />}
   </>;
 }

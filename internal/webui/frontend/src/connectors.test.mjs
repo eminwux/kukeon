@@ -5,6 +5,7 @@ import {
   groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
   harnessEphemeral, harnessPersistent, keepsLogin, loginBody, loginEmpty, loginIdentitiesFor, loginLoggedIn, loginNameError, loginStateText, loginTone, picksIdentity, sessionScope, stateText, statusIdentity,
+  emptyGitForm, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -459,4 +460,84 @@ test("a token method says where its harness keeps state", () => {
   assert.equal(stateText({ delivery: "env", harnessState: harnessEphemeral }), harnessEphemeral);
   assert.equal(stateText({ delivery: "env" }), "", "a connector that authenticates no harness keeps no state");
   assert.equal(stateText({ delivery: "stateVolume", harnessState: harnessPersistent, volume: "demo-state" }), "", "a login method names its identity instead");
+});
+
+// The GitHub token for git (#1693): a connector the catalog marks with
+// tokenForGit, named only in this fixture.
+const forge = {
+  name: "forge", title: "Forge", scopes: ["realm", "space", "stack"], secretTypes: ["opaque"], fields: [],
+  methods: [{ name: "token", component: "forge", default: true, delivery: "env", slot: "forge-token", envName: "FORGE_TOKEN" }],
+  tokenForGit: { connector: "repo", hosts: ["forge.example.com"], username: "x-access-token", name: "forge-git", tokenName: "forge-token" },
+};
+
+test("a connector whose token serves git is read from the catalog alone", () => {
+  assert.deepEqual(tokenForGit(forge), { connector: "repo", hosts: ["forge.example.com"], username: "x-access-token", name: "forge-git", tokenName: "forge-token" });
+  assert.equal(tokenForGit(example), undefined);
+  assert.deepEqual(tokenConnectors([example, forge, repo]).map(item => item.name), ["forge"]);
+  // A new form starts on the advertised name; a rotation keeps the identity's own.
+  assert.equal(emptyIdentityForm(forge).name, "forge-token");
+  assert.equal(emptyIdentityForm(forge, { name: "work", type: "opaque" }).name, "work");
+  assert.equal(emptyIdentityForm(example).name, "");
+});
+
+test("the token-for-git payload carries only what was typed, with makeDefault and the method", () => {
+  const form = { ...emptyIdentityForm(forge), value: "tok" };
+  const scope = { realm: "dev" };
+  assert.deepEqual(identityPayload(forge, scope, form, { git: tokenGitPayload({ git: true, gitAuthor: " Dev <dev@example.com> ", gitUsername: "" }), makeDefault: true, method: "token" }), {
+    scope, name: "forge-token", type: "opaque", value: "tok", git: { author: "Dev <dev@example.com>" }, makeDefault: true, method: "token",
+  });
+  // Git unchecked: no git block. A connector that does not offer it never sends one.
+  assert.deepEqual(identityPayload(forge, scope, form), { scope, name: "forge-token", type: "opaque", value: "tok" });
+  assert.equal("git" in identityPayload(example, scope, { ...form, fields: { account: "a" } }, { git: {} }), false);
+  assert.deepEqual(tokenGitPayload({ git: true, gitAuthor: "", gitUsername: " octo " }), { username: "octo" });
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthor: "nobody" }), ["Commit author must be written Name <email>."]);
+  assert.deepEqual(tokenGitErrors({ git: false, gitAuthor: "nobody" }), []);
+  assert.deepEqual(emptyGitForm(true), { git: true, gitAuthor: "", gitUsername: "" });
+});
+
+test("a rotation keeps the reserved token-from key and finds the linked git identity", () => {
+  const secrets = [
+    { metadata: { name: "forge-git", realm: "dev" }, spec: { type: "basic-auth", connector: "repo", identity: { hosts: "forge.example.com", [identityTokenFrom]: "forge-token@dev" } } },
+    { metadata: { name: "other-git", realm: "dev" }, spec: { type: "ssh-key", connector: "repo", identity: { hosts: "forge.example.com" } } },
+  ];
+  assert.equal(linkedGitIdentity(secrets, forge, { name: "forge-token", realm: "dev" })?.name, "forge-git");
+  assert.equal(linkedGitIdentity(secrets, forge, { name: "forge-token", realm: "prod" }), undefined);
+  assert.equal(linkedGitIdentity(secrets, example, { name: "forge-token", realm: "dev" }), undefined);
+  const rotate = { ...emptyIdentityForm(repo, { name: "forge-git", type: "basic-auth", identity: secrets[0].spec.identity }), username: "x-access-token", password: "tok" };
+  assert.deepEqual(identityPayload(repo, { realm: "dev" }, rotate).identity, { hosts: "forge.example.com", [identityTokenFrom]: "forge-token@dev" });
+});
+
+test("secret types are a described choice; a git-delivered connector says what each gives a cell", () => {
+  const git = { ...repo, secretTypes: ["ssh-key", "basic-auth", "opaque"] };
+  assert.deepEqual(secretTypeChoices(git).map(choice => `${choice.label} — ${choice.description}`), [
+    "SSH key — clone, push and sign", "Username and password or token — HTTPS", "Author only — commits without push",
+  ]);
+  assert.deepEqual(secretTypeChoices(example).map(choice => choice.type), ["opaque"]);
+});
+
+test("the scope is asked as where cells can use it, offering only the connector's levels", () => {
+  assert.deepEqual(scopeChoices(example, "dev"), [
+    { level: "realm", label: "Everywhere in realm dev", recommended: true },
+    { level: "space", label: "Only in one space…", recommended: false },
+    { level: "stack", label: "Only in one stack…", recommended: false },
+  ]);
+  assert.deepEqual(scopeChoices({ scopes: ["space", "stack"] }, "").map(choice => choice.level), ["space", "stack"]);
+  assert.equal(scopeChoices({ scopes: ["realm"] }, "")[0].label, "Everywhere in realm default");
+  const spaces = realm => realm === "dev" ? ["shared", "default"] : [];
+  const stacks = (realm, space) => space === "default" ? ["web"] : ["services"];
+  // A narrower level starts on the `default` Space, else the first; one the realm lacks is not offered.
+  assert.deepEqual(scopeAtLevel({ realm: "dev" }, "realm", spaces, stacks), { realm: "dev" });
+  assert.deepEqual(scopeAtLevel({ realm: "dev" }, "space", spaces, stacks), { realm: "dev", space: "default" });
+  assert.deepEqual(scopeAtLevel({ realm: "dev", space: "shared" }, "stack", spaces, stacks), { realm: "dev", space: "shared", stack: "services" });
+  assert.equal(scopeAtLevel({ realm: "prod" }, "space", spaces, stacks), undefined);
+  assert.equal(scopeAtLevel({ realm: "" }, "realm", spaces, stacks), undefined);
+});
+
+test("Make this the default starts on when no default resolves for the target", () => {
+  const [target] = defaultTargets(example);
+  const row = effective => ({ connector: "example-token", component: "example-token", method: "token", delivery: "env", levels: {}, ...(effective ? { effective } : {}) });
+  assert.equal(identityDefaultOn([row()], example, target), true);
+  assert.equal(identityDefaultOn([row({ name: "x", realm: "dev" })], example, target), false);
+  assert.equal(identityDefaultOn(undefined, example, target), true);
+  assert.equal(identityDefaultOn([], example, undefined), false);
 });

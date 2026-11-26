@@ -5,9 +5,9 @@ import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
 import { workspaceLink } from "./routes";
 import {
-  allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
-  formatSecretReference, harnessEphemeral, identitiesFor, identityErrors, identityFields, identityPayload, keepsLogin, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeLevels, scopeParts,
-  secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, sessionScope, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf,
+  allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, defaultTargets, emptyGitForm, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
+  formatSecretReference, harnessEphemeral, identitiesFor, identityDefaultOn, identityErrors, identityFields, identityPayload, keepsLogin, linkedGitIdentity, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeAtLevel, scopeChoices, scopeLevel, scopeLevels, scopeParts, scopeQuery,
+  secretBasicAuth, secretOpaque, secretRef, secretSSHKey, secretTypeChoices, secretTypesOf, sessionScope, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
@@ -218,6 +218,44 @@ export function ScopePicker({ label, inventory, levels, value, onChange, disable
   </div>;
 }
 
+// ScopeRadio asks "Where can cells use it?" (#1693): everywhere in a realm, or
+// only in one Space or Stack of it — only the levels the connector accepts.
+// The realm is picked only when the inventory has more than one; a narrower
+// choice reveals its Space (and Stack) select, starting on `default`.
+export function ScopeRadio({ label, connector, inventory, value, onChange, disabled = false }: { label: string; connector: Connector; inventory: InventoryResource; value: Scope; onChange: (scope: Scope) => void; disabled?: boolean }) {
+  const name = useId();
+  const rows = inventory.data?.rows ?? [[], [], [], []];
+  const names = (items: string[], current?: string) => [...new Set([...items, ...(current ? [current] : [])])];
+  const spacesOf = (realm: string) => rows[1].filter(row => row.scope[0] === realm).map(row => row.scope[1]);
+  const stacksOf = (realm: string, space: string) => rows[2].filter(row => row.scope[0] === realm && row.scope[1] === space).map(row => row.scope[2]);
+  const realms = names(rows[0].map(row => row.scope[0]), value.realm);
+  const level = scopeLevel(value);
+  const [, spaceLevel, stackLevel] = scopeLevels;
+  return <fieldset className="connector-store scope-radio" disabled={disabled}>
+    <legend>Where can cells use it?</legend>
+    {realms.length > 1 && <label className="schema-field"><span>Realm</span><select aria-label={`${label} realm`} value={value.realm} onChange={event => onChange(scopeAtLevel({ realm: event.target.value }, level, spacesOf, stacksOf) ?? { realm: event.target.value })}><option value="">Select a Realm…</option>{realms.map(item => <option key={item}>{item}</option>)}</select></label>}
+    {scopeChoices(connector, value.realm).map(choice => {
+      const next = scopeAtLevel(value, choice.level, spacesOf, stacksOf);
+      return <label className="schema-check" key={choice.level}><input type="radio" name={name} checked={level === choice.level} disabled={!next} onChange={() => next && onChange(next)} /><span>{choice.label}{choice.recommended && <span className="description"> (recommended)</span>}{!next && value.realm && <span className="description"> — none in {value.realm}</span>}</span></label>;
+    })}
+    {level !== scopeLevels[0] && <div className="schema-fields scope-picker">
+      <label className="schema-field"><span>Space</span><select aria-label={`${label} space`} value={value.space ?? ""} onChange={event => onChange(scopeAtLevel({ realm: value.realm, space: event.target.value }, level, spacesOf, stacksOf) ?? { realm: value.realm, space: event.target.value })}>{names(spacesOf(value.realm), value.space).map(item => <option key={item}>{item}</option>)}</select></label>
+      {level === stackLevel && <label className="schema-field"><span>Stack</span><select aria-label={`${label} stack`} value={value.stack ?? ""} onChange={event => onChange({ realm: value.realm, space: value.space, stack: event.target.value })}>{names(stacksOf(value.realm, value.space ?? ""), value.stack).map(item => <option key={item}>{item}</option>)}</select></label>}
+    </div>}
+    <p className="description">{level === scopeLevels[0] ? <>Every cell in {value.realm ? <code>{value.realm}</code> : "the realm"} can be given this identity.</> : level === spaceLevel ? <>Only cells in this Space can be given it.</> : <>Only cells in this Stack can be given it.</>}</p>
+  </fieldset>;
+}
+
+// SecretTypeChoice picks the Secret type an identity is stored as, each with
+// what it gives a cell.
+function SecretTypeChoice({ connector, value, onChange, disabled }: { connector: Connector; value: string; onChange: (type: string) => void; disabled: boolean }) {
+  const name = useId();
+  return <fieldset className="schema-field secret-type-choice" disabled={disabled}>
+    <legend>Secret type</legend>
+    {secretTypeChoices(connector).map(choice => <label className="schema-check" key={choice.type}><input type="radio" name={name} value={choice.type} checked={value === choice.type} onChange={() => onChange(choice.type)} /><span>{choice.label} — {choice.description}</span></label>)}
+  </fieldset>;
+}
+
 function IdentityFieldInput({ field, value, onChange, disabled, secrets, listId }: { field: FormField; value: string; onChange: (value: string) => void; disabled: boolean; secrets: unknown[] | undefined; listId: string }) {
   const label = <span>{field.name}{field.required && <b aria-label="required"> *</b>}</span>;
   const help = field.help && <small>{field.help}</small>;
@@ -233,7 +271,7 @@ function IdentityFieldInput({ field, value, onChange, disabled, secrets, listId 
 // SecretMaterialFields are the write-only inputs of one Secret type, shared by
 // the identity form and the New Secret / Replace value form. An author-only
 // identity takes none.
-export function SecretMaterialFields({ type, form, set, pending, authorOnly = false }: { type: string; form: IdentityFormState; set: (next: Partial<IdentityFormState>) => void; pending: boolean; authorOnly?: boolean }) {
+export function SecretMaterialFields({ type, form, set, pending, authorOnly = false, valueLabel = "Value" }: { type: string; form: IdentityFormState; set: (next: Partial<IdentityFormState>) => void; pending: boolean; authorOnly?: boolean; valueLabel?: string }) {
   const secretInput = { autoComplete: "new-password", spellCheck: false, disabled: pending } as const;
   return <div className="schema-fields">
     {type === secretBasicAuth ? <>
@@ -246,7 +284,7 @@ export function SecretMaterialFields({ type, form, set, pending, authorOnly = fa
       <label className="schema-field"><span>Certificate</span><input value={form.certificate} autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ certificate: event.target.value })} /></label>
       <label className="schema-field identity-key"><span>Known hosts</span><textarea value={form.knownHosts} placeholder="example.com ssh-ed25519 AAAA…" autoComplete="off" spellCheck={false} disabled={pending} onChange={event => set({ knownHosts: event.target.value })} /></label>
     </> : authorOnly ? <p className="description identity-no-value">An author-only identity: it stores no value, and gives cells the author and committer only — no credential and no signing.</p>
-      : <label className="schema-field"><span>Value<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
+      : <label className="schema-field"><span>{valueLabel}<b aria-label="required"> *</b></span><input type="password" value={form.value} {...secretInput} onChange={event => set({ value: event.target.value })} /></label>}
   </div>;
 }
 
@@ -255,37 +293,63 @@ export function SecretMaterialFields({ type, form, set, pending, authorOnly = fa
 // generated from the connector's secretTypes and fields. Material is
 // write-only: held only while typed, sent in the POST body, cleared on every
 // submission and never rendered back.
-export function IdentityForm({ connector, scope, existing, secrets, onSaved, onCancel }: {
+type IdentityResult = { name: string; scope: Scope; action: string; git?: { name: string; scope: Scope; action: string }; defaults?: Array<{ connector: string }> };
+
+// IdentityForm also offers, on a connector whose token can serve git (#1693),
+// "Also use this token for git": the server stores the same token as a git
+// identity limited to the advertised hosts. With offerDefault, "Make this the
+// default" makes the stored identity (or both) the default at the same scope.
+export function IdentityForm({ connector, scope, existing, secrets, onSaved, onCancel, offerDefault = true }: {
   connector: Connector;
   scope: Scope;
   existing?: Identity;
   secrets?: unknown[];
   onSaved: (ref: SecretRef, action: string) => void;
   onCancel?: () => void;
+  offerDefault?: boolean;
 }) {
+  const offer = tokenForGit(connector);
+  const linked = existing ? linkedGitIdentity(secrets, connector, existing) : undefined;
   const [form, setForm] = useState<IdentityFormState>(() => emptyIdentityForm(connector, existing));
+  const [git, setGit] = useState(() => emptyGitForm(!!offer && (!existing || !!linked)));
+  const targets = offerDefault ? defaultTargets(connector) : [];
+  const [method, setMethod] = useState(() => (targets.find(item => connector.methods.find(m => m.name === item.method)?.default) ?? targets[0])?.method ?? "");
+  const target = targets.find(item => item.method === method) ?? targets[0];
+  const defaults = useResource<unknown[]>(target && scope.realm ? `/api/connectors/defaults?${scopeQuery(scope)}` : null, 0);
+  // "Make this the default" follows the scope — on where no default resolves
+  // yet, and for a new token with git — until the user sets it.
+  const [makeDefault, setMakeDefault] = useState<boolean>();
+  // Until the scope's defaults load, nothing is known to be missing: off.
+  const defaultOn = makeDefault ?? (!!target && ((git.git && !existing) || (!!defaults.data && identityDefaultOn(defaults.data, connector, target))));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure>();
   const { notify } = useNotify();
   const listId = useId();
   const types = secretTypesOf(connector);
   const title = connector.title || connector.name;
-  const target = scopeParts(scope).join(" / ");
+  const where = scopeParts(scope).join(" / ");
+  const withGit = !!offer && git.git && form.type === secretOpaque;
+  const hosts = offer?.hosts.join(", ") ?? "";
   const set = (next: Partial<IdentityFormState>) => { setForm(old => ({ ...old, ...next })); setError(undefined); };
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (pending) return;
-    const problems = !scope.realm ? ["Choose where the identity is stored."] : identityErrors(connector, form);
+    const problems = !scope.realm ? ["Choose where the identity is stored."] : [...identityErrors(connector, form), ...(withGit ? tokenGitErrors(git) : [])];
     if (problems.length) { setError({ code: "invalid_request", message: problems.join(" ") }); return; }
-    const body = JSON.stringify(identityPayload(connector, scope, form));
+    const body = JSON.stringify(identityPayload(connector, scope, form, { makeDefault: !!target && defaultOn, method: target?.method, git: withGit ? tokenGitPayload(git) : undefined }));
     // The material leaves the form before the request is even sent.
     setForm(old => clearMaterial(old));
     setPending(true); setError(undefined);
     try {
-      const result = await sendJSON<{ name: string; scope: Scope; action: string }>(connectorAPI(connector.name, "identities"), body);
+      const result = await sendJSON<IdentityResult>(connectorAPI(connector.name, "identities"), body);
       const ref = secretRef({ name: result.name, ...result.scope }) ?? secretRef({ name: form.name, ...scope })!;
-      notify({ key: `identity:${connector.name}:${refKey(ref)}`, tone: "success", message: `${title} identity ${ref.name} ${result.action === "updated" ? "rotated" : "created"} in ${refScope(ref).join(" / ")}.` });
+      const place = refScope(ref).join(" / ");
+      const verb = (action: string) => action === "updated" ? "rotated" : "created";
+      const parts = [`${title} identity ${ref.name} ${verb(result.action)} in ${place}.`];
+      if (result.git) parts.push(`Git identity ${result.git.name} ${verb(result.git.action)} for ${hosts}.`);
+      if (result.defaults?.length) parts.push(result.defaults.length > 1 ? `Both are now the defaults in ${place}.` : `It is now the default in ${place}.`);
+      notify({ key: `identity:${connector.name}:${refKey(ref)}`, tone: "success", message: parts.join(" ") });
       if (!existing) setForm(emptyIdentityForm(connector));
       onSaved(ref, result.action);
     } catch (caught) { setError(toFailure(caught)); }
@@ -294,13 +358,26 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
 
   return <form className="creation-form identity-form" aria-label={existing ? `Rotate ${title} identity ${existing.name}` : `New ${title} identity`} method="post" autoComplete="off" onSubmit={submit}>
     <h3>{existing ? `Rotate ${existing.name}` : `New ${title} identity`}</h3>
-    <p className="description">{existing ? <>Replaces the value stored under <code>{existing.name}</code> in {target}. Everything that uses this identity picks up the new value.</> : <>Stored as a Secret tagged <code>{connector.name}</code>{target && <> in {target}</>}.</>} Values are write-only: they are sent once and never shown again.</p>
+    <p className="description">{existing ? <>Replaces the value stored under <code>{existing.name}</code> in {where}. Everything that uses this identity picks up the new value.</> : <>Stored as a Secret tagged <code>{connector.name}</code>{where && <> in {where}</>}.</>} Values are write-only: they are sent once and never shown again.</p>
     <div className="schema-fields">
       <label className="schema-field"><span>Identity name<b aria-label="required"> *</b></span><input value={form.name} disabled={pending || !!existing} autoComplete="off" spellCheck={false} onChange={event => set({ name: event.target.value })} /></label>
-      {types.length > 1 && <label className="schema-field"><span>Secret type</span><select value={form.type} disabled={pending} onChange={event => set({ type: event.target.value })}>{types.map(type => <option key={type}>{type}</option>)}</select></label>}
+      {types.length > 1 && <SecretTypeChoice connector={connector} value={form.type} disabled={pending} onChange={type => set({ type })} />}
       {identityFields(connector, form.type).map(field => <IdentityFieldInput key={field.name} field={field} value={form.fields[field.name] ?? ""} disabled={pending} secrets={secrets} listId={`${listId}-${field.name}`} onChange={value => set({ fields: { ...form.fields, [field.name]: value } })} />)}
     </div>
-    <SecretMaterialFields type={form.type} form={form} set={set} pending={pending} authorOnly={storesNoValue(connector, form.type)} />
+    <SecretMaterialFields type={form.type} form={form} set={set} pending={pending} authorOnly={storesNoValue(connector, form.type)} valueLabel={offer ? "Token" : "Value"} />
+    {offer && form.type === secretOpaque && <div className="schema-fields token-for-git" role="group" aria-label="Use for git">
+      <label className="schema-check"><input type="checkbox" checked={git.git} disabled={pending} onChange={event => { setGit(old => ({ ...old, git: event.target.checked })); setError(undefined); }} />Also use this token for git on {hosts}</label>
+      {git.git ? <>
+        <p className="description">{linked ? <>Rotates the linked git identity <code>{linked.name}</code> too.</> : <>Also stored as the git identity <code>{offer.name}</code>: username and token, for HTTPS on {hosts} only.</>} Signing needs an SSH key: <a href={newIdentityLink(offer.connector, scope)}>Import from this machine</a>.</p>
+        <label className="schema-field"><span>Commit author</span><input value={git.gitAuthor} placeholder="Name <email>" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitAuthor: event.target.value })); setError(undefined); }} /><small>Optional. The name and email of commits made with this identity.</small></label>
+        <label className="schema-field"><span>Username</span><input value={git.gitUsername} placeholder={offer.username} disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitUsername: event.target.value })); setError(undefined); }} /><small>Optional. {title} accepts any non-empty username with a personal access token; empty stores <code>{offer.username}</code>.</small></label>
+      </> : <p className="description">Git is unchanged: the token reaches cells as an API token only.</p>}
+    </div>}
+    {target && <div className="schema-fields identity-default">
+      <label className="schema-check"><input type="checkbox" checked={defaultOn} disabled={pending} onChange={event => setMakeDefault(event.target.checked)} />Make this the default{where && <> in {where}</>}</label>
+      {targets.length > 1 && <label className="schema-field"><span>Default for</span><select aria-label={`${title} default method`} value={target.method} disabled={pending || !defaultOn} onChange={event => { setMethod(event.target.value); setMakeDefault(undefined); }}>{targets.map(item => <option key={item.method} value={item.method}>{item.method} method</option>)}</select></label>}
+      <small className="description">{defaultOn ? withGit ? <>Cells here that pick no identity get this token for {title} and for git.</> : <>Cells here that pick no identity get this one.</> : <>Stored only: set a default later on the {title} page.</>}</small>
+    </div>}
     <div className="connector-actions">
       <button type="submit" disabled={pending}>{pending ? "Saving…" : existing ? "Rotate identity" : "Create identity"}</button>
       {onCancel && <button type="button" className="subtle-button" disabled={pending} onClick={onCancel}>Cancel</button>}
@@ -351,7 +428,7 @@ function SetDefault({ status, connector, scope, identities, secrets, onChanged, 
       {connector && <button type="button" className="subtle-button" aria-expanded={creating} disabled={pending} onClick={() => setCreating(value => !value)}>{creating ? "Hide new identity" : "Create a new identity…"}</button>}
       <button type="button" className="subtle-button" disabled={pending} onClick={onClose}>Cancel</button>
     </div>
-    {creating && connector && <IdentityForm connector={connector} scope={target} secrets={secrets} onSaved={created => { setChoice(created); setCreating(false); onChanged(); }} onCancel={() => setCreating(false)} />}
+    {creating && connector && <IdentityForm connector={connector} scope={target} secrets={secrets} offerDefault={false} onSaved={created => { setChoice(created); setCreating(false); onChanged(); }} onCancel={() => setCreating(false)} />}
     {error && <ErrorNotice error={error} kind="Scope" />}
   </div>;
 }

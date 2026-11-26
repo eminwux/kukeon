@@ -29,7 +29,13 @@ export type ConnectorMethod = { name: string; component: string; description?: s
 export type Connector = {
   name: string; title: string; description?: string; delivery?: string; group?: string; harness?: string; optional?: boolean;
   scopes: string[]; secretTypes: string[]; fields: ConnectorField[]; methods: ConnectorMethod[];
+  tokenForGit?: TokenForGit;
 };
+// A connector whose token can also be stored as a git identity (#1693).
+export type TokenForGit = { connector: string; hosts: string[]; username: string; name: string; tokenName: string };
+export type GitForm = { git: boolean; gitAuthor: string; gitUsername: string };
+export type SecretTypeChoice = { type: string; label: string; description: string };
+export type ScopeChoice = { level: string; label: string; recommended: boolean };
 export type ConnectorStatus = {
   connector: string; title?: string; component: string; method?: string; delivery: string; slot?: string; state: string;
   required?: boolean; identity?: SecretRef; origin?: string; volume?: string; volumeRef?: VolumeRef; message?: string;
@@ -78,7 +84,7 @@ export function connectorLevels(connector: { scopes?: string[] } | undefined): s
 export function allowedLevels(connector: { scopes?: string[] } | undefined, scope: Partial<Scope> | undefined): string[];
 export function scopeQuery(scope: Partial<Scope> | undefined): string;
 export function defaultTargets(connector: Connector | undefined): DefaultTarget[];
-export function defaultRow(defaults: ConnectorDefault[] | undefined, target: { connector: string; component?: string; method?: string }): ConnectorDefault | undefined;
+export function defaultRow(defaults: ConnectorDefault[] | unknown[] | undefined, target: { connector: string; component?: string; method?: string }): ConnectorDefault | undefined;
 export function loginMethods(connector: Connector | undefined): ConnectorMethod[];
 export function isRegistry(connector: Connector | undefined): boolean;
 export function usageFor(usage: ConnectorUsage[] | undefined, connector: string): { configs: number; missing: ConnectorMissing[] };
@@ -111,10 +117,22 @@ export type ImportResult = {
   default?: { realm: string; identity: SecretRef | null; previous?: SecretRef; action: string };
 };
 export function importPayload(form: Partial<ImportForm> | undefined): Record<string, unknown>;
-export function emptyIdentityForm(connector: { secretTypes?: string[] } | undefined, existing?: { name?: string; type?: string; identity?: Record<string, string> }): IdentityForm;
+export function emptyIdentityForm(connector: { secretTypes?: string[]; tokenForGit?: unknown } | undefined, existing?: { name?: string; type?: string; identity?: Record<string, string> }): IdentityForm;
 export function parseList(value: string | undefined): string[];
 export function identityErrors(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined, form: IdentityForm): string[];
-export function identityPayload(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined, scope: Partial<Scope>, form: IdentityForm): Record<string, unknown>;
+export function identityPayload(connector: { fields?: ConnectorField[]; secretTypes?: string[]; methods?: unknown[]; delivery?: string; tokenForGit?: unknown } | undefined, scope: Partial<Scope>, form: IdentityForm, options?: { makeDefault?: boolean; method?: string; git?: Record<string, string> }): Record<string, unknown>;
+export const reservedIdentityPrefix: string;
+export const identityTokenFrom: string;
+export function tokenForGit(connector: { tokenForGit?: unknown } | undefined): TokenForGit | undefined;
+export function tokenConnectors(connectors: Connector[] | undefined): Connector[];
+export function linkedGitIdentity(secrets: unknown[] | undefined, connector: Connector | undefined, identity: Partial<SecretRef> | undefined): Identity | undefined;
+export function emptyGitForm(on: boolean): GitForm;
+export function tokenGitPayload(form: Partial<GitForm> | undefined): Record<string, string>;
+export function tokenGitErrors(form: Partial<GitForm> | undefined): string[];
+export function secretTypeChoices(connector: { secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined): SecretTypeChoice[];
+export function scopeChoices(connector: { scopes?: string[] } | undefined, realm: string | undefined): ScopeChoice[];
+export function scopeAtLevel(scope: Partial<Scope> | undefined, level: string, spaces?: (realm: string) => string[], stacks?: (realm: string, space: string) => string[]): Scope | undefined;
+export function identityDefaultOn(defaults: unknown[] | undefined, connector: Connector | undefined, target: DefaultTarget | undefined): boolean;
 export function clearMaterial(form: IdentityForm): IdentityForm;
 export function registryEntries(realm: unknown): RegistryEntry[];
 export const secretTypes: string[];

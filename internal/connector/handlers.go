@@ -50,6 +50,40 @@ const (
 	GitFieldAllowedSignersRef = "allowedSignersRef"
 )
 
+// The GitHub token for git (issue #1693) is the one place code names a
+// connector other than the two special handlers: one request stores a GitHub
+// API token as an identity of the github connector and, on explicit request,
+// as a second, host-limited basic-auth identity of the git connector. Git
+// never picks the API token up by itself (#1472): the second identity exists
+// only because the user asked for it, and it names the hosts it serves.
+const (
+	// GitHubIdentityTag is the Secret tag of a GitHub API token identity.
+	GitHubIdentityTag = "github"
+	// GitHubTokenHost is the host a GitHub token authenticates git on by default.
+	GitHubTokenHost = "github.com"
+	// GitHubTokenUsername is the basic-auth username stored with a GitHub token
+	// for git. GitHub accepts any non-empty username with a personal access
+	// token; this is the one its own tooling uses.
+	GitHubTokenUsername = "x-access-token"
+	// GitHubTokenName is the github identity's name when none is given.
+	GitHubTokenName = "github-token"
+	// GitHubGitName is the name of the git identity stored from a GitHub token
+	// when none is given and none is linked to it yet.
+	GitHubGitName = "github-git"
+)
+
+// IdentityTokenFrom is a reserved identity key (issue #1693): set on a git
+// identity derived from a GitHub token, it names the github identity the token
+// came from (`name@realm[/space[/stack]]`), so rotating that identity rotates
+// this one too. A reserved key starts with ReservedIdentityPrefix and is
+// accepted on every connector's identities without being declared as a field:
+// it is metadata kukeon writes, not a fact a delivery handler expands, and a
+// Blueprint composed before the key existed still accepts the Secret.
+const IdentityTokenFrom = ReservedIdentityPrefix + "token-from"
+
+// ReservedIdentityPrefix starts the identity keys kukeon reserves for itself.
+const ReservedIdentityPrefix = "kukeon.io/"
+
 // GitAuthorOnlyValue is the stored value of an author-only git identity: an
 // opaque Secret tagged `git` that carries an author and committer but no key
 // or hosts (issue #1591). The daemon's secret store rejects an empty opaque
