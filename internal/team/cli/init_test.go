@@ -39,8 +39,13 @@ func TestInitStoresTheKukeTeamAndInitialDefaults(t *testing.T) {
 	if !strings.Contains(out, "stored team kuke") || !strings.Contains(out, "No cells created or started") {
 		t.Fatalf("output:\n%s", out)
 	}
-	if h.store.team != "kuke" || h.store.teams["kuke"] == nil {
-		t.Fatalf("team apply for %q; stored %v", h.store.team, h.store.teams)
+	// The default team follows the kuke team (issue #1692).
+	if !strings.Contains(out, "stored team default") ||
+		strings.Index(out, "stored team kuke") > strings.Index(out, "stored team default") {
+		t.Fatalf("output does not report the default team after kuke:\n%s", out)
+	}
+	if h.store.team != "default" || h.store.teams["kuke"] == nil || h.store.teams["default"] == nil {
+		t.Fatalf("last team apply for %q; stored %v", h.store.team, h.store.teams)
 	}
 	team, err := config.DecodeTeam(bytes.NewReader(h.store.teams["kuke"]))
 	if err != nil || team.Metadata.Name != "kuke" || team.Metadata.Realm != "default" {

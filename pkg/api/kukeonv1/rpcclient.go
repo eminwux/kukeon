@@ -1137,6 +1137,17 @@ func (c *UnixClient) DeleteTeam(ctx context.Context, ref TeamRef) (DeleteTeamRes
 	return reply.Result, nil
 }
 
+func (c *UnixClient) SetDisplayName(ctx context.Context, req SetDisplayNameRequest) (SetDisplayNameResult, error) {
+	reply := &SetDisplayNameReply{}
+	if err := c.call(ctx, MethodSetDisplayName, &SetDisplayNameArgs{Request: req}, reply); err != nil {
+		return SetDisplayNameResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ---- Sources (issue #1643) ----
 
 func (c *UnixClient) GetSource(ctx context.Context, ref SourceRef) (GetSourceResult, error) {

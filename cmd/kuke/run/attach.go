@@ -347,6 +347,13 @@ func socketPresent(socketPath string) bool {
 	return err == nil
 }
 
+// AttachTarget is the container `kuke run -a` attaches to after a start when
+// no --container is given: the cell's tty default, else its first attachable
+// container (`kuke create agent -a`, issue #1692).
+func AttachTarget(spec v1beta1.CellSpec, cellName string) (string, error) {
+	return pickAttachTarget(spec, cellName, "")
+}
+
 // AttachCell attaches the terminal to one attachable container of a running
 // cell and returns when the session ends: detached=true when the operator
 // detached (^]^]) and the cell is still running, false when the workload

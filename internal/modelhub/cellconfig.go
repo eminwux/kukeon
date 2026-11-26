@@ -83,4 +83,7 @@ type CellConfigMetadata struct {
 	// round-trip — the labels travel inside the canonical serialized doc,
 	// the carrier just lifts a typed view.
 	Labels map[string]string
+	// Annotations lifts the document's metadata.annotations the same way,
+	// so a list shows a Config's display name (issue #1692).
+	Annotations map[string]string
 }

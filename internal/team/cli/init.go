@@ -19,6 +19,7 @@ package cli
 import (
 	"errors"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/initialize"
 	"github.com/spf13/cobra"
 )
@@ -28,9 +29,13 @@ func newInitCommand(deps Deps) *cobra.Command {
 	var force, reapply, upgrade bool
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Apply the kuke team and its majordomo role",
+		Short: "Apply the kuke team (majordomo) and the default team (agent templates)",
 		Long: "Fetch the kukeon source, compose the kuke team (the majordomo role) and apply it to kukeond, " +
-			"which stores the Team with the Configs composed from it.\n" +
+			"which stores the Team with the Configs composed from it. Then apply the default team the same " +
+			"way: the agent role on claude and codex, composed as the agent templates default-agent-claude " +
+			"and default-agent-codex (label kukeon.io/template=true) that kuke create agent copies. " +
+			"--force, --reapply and --upgrade cover both teams; a team named default you added before it " +
+			"became a system team is left untouched, with how to rename it.\n" +
 			"A stored kuke team stops init; --force replaces it with the initial majordomo declaration and " +
 			"--reapply recomposes it from the stored Team (kuke team apply kuke).\n" +
 			"Init stores the Source kukeon (kuke get sources) when none is stored. When the realm has no " +
@@ -64,6 +69,12 @@ func newInitCommand(deps Deps) *cobra.Command {
 				Options: s.options(false), Force: force, Reapply: reapply, Upgrade: upgrade,
 			})
 			if err != nil {
+				// The kuke team was applied before the default team failed.
+				if errors.Is(err, errdefs.ErrDefaultTeamInit) {
+					if printErr := PrintOutcome(cmd.OutOrStdout(), out); printErr != nil {
+						return printErr
+					}
+				}
 				return err
 			}
 			return PrintOutcome(cmd.OutOrStdout(), out)

@@ -21,6 +21,7 @@ package runner
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"sort"
 	"testing"
@@ -543,5 +544,39 @@ func TestListConfigs_LiftsScheduleAndSkipsStatusDir(t *testing.T) {
 	}
 	if byName["plain"].Schedule != nil {
 		t.Errorf("an unscheduled config listed a Schedule: %+v", byName["plain"].Schedule)
+	}
+}
+
+// TestListConfigs_LiftsAnnotations (issue #1692): a list carries each Config's
+// metadata.annotations, so a client shows an agent's display name without
+// reading every document.
+func TestListConfigs_LiftsAnnotations(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+	named := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "default-agent-claude-1a2b3c", Realm: "default"},
+		Document: []byte("metadata:\n  name: default-agent-claude-1a2b3c\n  annotations:\n" +
+			"    kukeon.io/display-name: Reviewer\n    kukeon.io/agent-template: default-agent-claude\n"),
+	}
+	if _, err := r.WriteConfig(named); err != nil {
+		t.Fatalf("seed WriteConfig error = %v", err)
+	}
+	seedConfig(t, r, "plain", "default", "", "")
+	got, err := r.ListConfigs("default", "", "")
+	if err != nil {
+		t.Fatalf("ListConfigs() error = %v", err)
+	}
+	byName := map[string]intmodel.CellConfig{}
+	for _, c := range got {
+		byName[c.Metadata.Name] = c
+	}
+	want := map[string]string{
+		"kukeon.io/display-name": "Reviewer", "kukeon.io/agent-template": "default-agent-claude",
+	}
+	if a := byName["default-agent-claude-1a2b3c"].Metadata.Annotations; !maps.Equal(a, want) {
+		t.Errorf("listed Annotations = %v, want %v", a, want)
+	}
+	if a := byName["plain"].Metadata.Annotations; a != nil {
+		t.Errorf("a Config without annotations listed %v", a)
 	}
 }

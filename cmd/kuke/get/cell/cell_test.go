@@ -265,15 +265,18 @@ func TestNewCellCmd_DefaultColumns(t *testing.T) {
 
 // TestNewCellCmd_WideColumns pins the `-o wide` column set after #929
 // restored SYNC + DIVERGENCE: NAME REALM SPACE STACK STATE SYNC AGE
-// CONTAINERS BRIDGE DIVERGENCE (10 cols). CGROUP / CONTROLLERS must not
+// CONTAINERS BRIDGE DIVERGENCE, plus DISPLAY NAME since #1692 (11 cols). CGROUP / CONTROLLERS must not
 // appear.
 func TestNewCellCmd_WideColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
 		return []v1beta1.CellDoc{{
-			Metadata: v1beta1.CellMetadata{Name: "ce1"},
-			Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			Metadata: v1beta1.CellMetadata{
+				Name:        "ce1",
+				Annotations: map[string]string{v1beta1.AnnotationDisplayName: "Docs bot #1"},
+			},
+			Spec: v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
 			Status: v1beta1.CellStatus{
 				State:   v1beta1.CellStateReady,
 				Network: v1beta1.CellNetworkStatus{BridgeName: "k-1a2b3c4d"},
@@ -302,7 +305,7 @@ func TestNewCellCmd_WideColumns(t *testing.T) {
 	out := buf.String()
 	for _, h := range []string{
 		"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE",
-		"CONTAINERS", "BRIDGE", "DIVERGENCE",
+		"CONTAINERS", "BRIDGE", "DIVERGENCE", "DISPLAY NAME",
 	} {
 		if !strings.Contains(out, h) {
 			t.Errorf("-o wide table missing header %q\nGot:\n%s", h, out)
@@ -313,7 +316,7 @@ func TestNewCellCmd_WideColumns(t *testing.T) {
 			t.Errorf("-o wide table must NOT contain %q; got:\n%s", denied, out)
 		}
 	}
-	for _, sub := range []string{"ce1", "1/2", "k-1a2b3c4d"} {
+	for _, sub := range []string{"ce1", "1/2", "k-1a2b3c4d", "Docs bot #1"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("-o wide row missing %q\nGot:\n%s", sub, out)
 		}

@@ -47,6 +47,9 @@ func setupUpgrade(t *testing.T, withTeam bool, sourcePin *config.Source) (InitOp
 	storeLegacyDefaults(t, f, InitialDefaults(config.DefaultRealm))
 	if withTeam {
 		storeLegacyTeam(t, f, config.Majordomo())
+		// An install of this release stores the default team beside it
+		// (issue #1692).
+		storeTeam(t, f, config.DefaultTeam())
 	}
 	return upgradeTo(opts), f
 }
@@ -102,10 +105,10 @@ func TestUpgradeRepinsTheKukeonSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
-		t.Fatalf("writes = %v, want one team apply", f.writes)
+	if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) {
+		t.Fatalf("writes = %v, want the kuke team, then the default team", f.writes)
 	}
-	kinds, _ := appliedDocs(t, f.raw)
+	kinds, _ := appliedDocs(t, f.byTeam["kuke"])
 	if kinds[0] != "Source" || kinds[len(kinds)-1] != "Team" || slices.Contains(kinds, "TeamDefaults") {
 		t.Fatalf("apply stream kinds = %v", kinds)
 	}
@@ -145,10 +148,10 @@ func TestUpgradeConvertsLegacyState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
-		t.Fatalf("writes = %v, want one team apply", f.writes)
+	if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) {
+		t.Fatalf("writes = %v, want the kuke team, then the default team", f.writes)
 	}
-	kinds, _ := appliedDocs(t, f.raw)
+	kinds, _ := appliedDocs(t, f.byTeam["kuke"])
 	if kinds[0] != "TeamDefaults" || !slices.Contains(kinds, "Source") || kinds[len(kinds)-1] != "Team" {
 		t.Fatalf("apply stream kinds = %v", kinds)
 	}
@@ -283,7 +286,7 @@ func TestUpgradeNamesInheritingTeamsWithoutRecomposingThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.writes, []string{"apply-team kuke"}) {
+	if !slices.Equal(f.writes, []string{"apply-team kuke", "apply-team default"}) {
 		t.Fatalf("writes = %v, the inheriting team must not be applied", f.writes)
 	}
 	if bytes.Contains(f.raw, []byte("project-")) {

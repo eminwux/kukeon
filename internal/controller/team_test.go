@@ -20,6 +20,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/cellconfig"
@@ -120,8 +121,40 @@ func TestDeleteTeam(t *testing.T) {
 
 func TestDeleteTeam_RefusesSystemTeam(t *testing.T) {
 	exec := setupTestController(t, &fakeRunner{})
-	if _, err := exec.DeleteTeam("kuke", "default"); !errors.Is(err, errdefs.ErrTeamReserved) {
-		t.Fatalf("err = %v, want ErrTeamReserved", err)
+	_, err := exec.DeleteTeam("kuke", "default")
+	if !errors.Is(err, errdefs.ErrTeamReserved) || !strings.Contains(err.Error(), "team kuke is a system team") {
+		t.Fatalf("err = %v, want ErrTeamReserved naming kuke", err)
+	}
+}
+
+// TestDeleteTeam_RefusesTheSystemDefaultTeam (issue #1692): the system
+// default team is reserved, and the error names it; a user team stored as
+// default before it became a system team can still be deleted, which is how
+// it is renamed.
+func TestDeleteTeam_RefusesTheSystemDefaultTeam(t *testing.T) {
+	_, teams, f := deleteTeamFixture(t)
+	system := "apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: default\n  realm: default\nspec:\n  configs: template\n"
+	teams.teams["default/default"] = intmodel.Team{
+		Metadata: intmodel.TeamMetadata{Name: "default", Realm: "default"}, Document: []byte(system),
+	}
+	exec := setupTestController(t, f)
+	_, err := exec.DeleteTeam("default", "default")
+	if !errors.Is(err, errdefs.ErrTeamReserved) || !strings.Contains(err.Error(), "team default is a system team") {
+		t.Fatalf("err = %v, want ErrTeamReserved naming default", err)
+	}
+	if _, ok := teams.teams["default/default"]; !ok {
+		t.Fatal("the system default team was deleted")
+	}
+
+	teams.teams["default/default"] = intmodel.Team{
+		Metadata: intmodel.TeamMetadata{Name: "default", Realm: "default"},
+		Document: []byte("apiVersion: v1beta1\nkind: Team\nmetadata:\n  name: default\n  realm: default\n"),
+	}
+	if _, err = exec.DeleteTeam("default", "default"); err != nil {
+		t.Fatalf("a user team named default: %v", err)
+	}
+	if _, ok := teams.teams["default/default"]; ok {
+		t.Fatal("the user's default team was not deleted")
 	}
 }
 

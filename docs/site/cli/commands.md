@@ -20,7 +20,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke apply`                   | Apply resource definitions from YAML (multi-document supported)          |
 | `kuke run`                     | Create and start a single cell from a file or per-user profile           |
 | `kuke get`                     | List or describe resources (realm, space, stack, cell, container, team)  |
-| `kuke create`                  | Create a single resource imperatively                                    |
+| `kuke create`                  | Create a single resource imperatively (or a new agent: `create agent`)   |
 | `kuke delete`                  | Delete a resource                                                        |
 | `kuke start` / `stop` / `kill` | Lifecycle operations on cells                                            |
 | `kuke purge`                   | Delete with aggressive cleanup of residual state                         |

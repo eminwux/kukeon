@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryResource, Row } from "./inventory";
 import type { CellFilter } from "./cell-filter";
-import { activeCells, agentGroups, attentionFirst, cellMatches, groupCells, groupingKeys, rollupState, screenTail } from "./cells.mjs";
+import { activeCells, agentGroups, attentionFirst, cellMatches, groupCells, groupingKeys, instanceLabels, rollupState, screenTail } from "./cells.mjs";
 import type { CellListStyle } from "./settings";
 import { Icon } from "./icons";
-import { newCellLink, workspaceLink } from "./routes";
+import { newAgentLink, newCellLink, workspaceLink } from "./routes";
 import { DriftBadge, RollupDot, ScopePath, StateBadge } from "./status";
 import { unavailableStates, type TerminalState } from "./terminal";
 import { useCellScreens, type Screen } from "./screens";
@@ -12,13 +12,13 @@ import { StoppedCellsLink } from "./cell-sidebar";
 
 const key = (scope: string[]) => JSON.stringify(scope);
 
-function CellTile({ row, screen, docked, terminalState, onOpenDock }: { row: Row; screen?: Screen; docked: boolean; terminalState?: TerminalState; onOpenDock: () => void }) {
+function CellTile({ row, label, screen, docked, terminalState, onOpenDock }: { row: Row; label?: string; screen?: Screen; docked: boolean; terminalState?: TerminalState; onOpenDock: () => void }) {
   const state = row.doc.status?.state;
   const fullName = row.scope.join(" / ");
   // A cell with no live terminal never gets a screenshot request; it and an unavailable screen read as state only.
   const text = !unavailableStates.has(state ?? "") && !screen?.unavailable ? screenTail(screen?.text ?? "") : "";
   const body = <>
-    <span className="cell-tile-head"><strong className="cell-tile-name">{row.doc.metadata.name}</strong><StateBadge state={state} /><DriftBadge status={row.doc.status} /></span>
+    <span className="cell-tile-head"><strong className="cell-tile-name">{label ?? row.doc.metadata.name}</strong>{label && <span className="cell-tile-cell mono-id">{row.doc.metadata.name}</span>}<StateBadge state={state} /><DriftBadge status={row.doc.status} /></span>
     <span className="cell-tile-scope mono-id"><ScopePath parts={row.scope.slice(0, 3)} /></span>
     {/* Terminal text is rendered as a text node, never as HTML. */}
     {text ? <pre className="cell-tile-screen" aria-hidden="true">{text}</pre> : <span className="cell-tile-screen cell-tile-empty">{screen || unavailableStates.has(state ?? "") ? "No terminal screen" : "Reading terminal screen…"}</span>}
@@ -26,8 +26,8 @@ function CellTile({ row, screen, docked, terminalState, onOpenDock }: { row: Row
   </>;
   // A cell docked in the majordomo panel opens the panel instead of the cell screen.
   return docked
-    ? <button type="button" className="cell-tile panel" data-scope={key(row.scope)} aria-label={`Open ${fullName} in the majordomo panel`} onClick={onOpenDock}>{body}</button>
-    : <a className="cell-tile panel" data-scope={key(row.scope)} href={workspaceLink(row.scope)} aria-label={`Open ${fullName}`}>{body}</a>;
+    ? <button type="button" className="cell-tile panel" data-scope={key(row.scope)} aria-label={`Open ${fullName} in the majordomo panel`} title={fullName} onClick={onOpenDock}>{body}</button>
+    : <a className="cell-tile panel" data-scope={key(row.scope)} href={workspaceLink(row.scope)} aria-label={`Open ${label ? `${label} (${fullName})` : fullName}`} title={fullName}>{body}</a>;
 }
 
 // The grid's own search field and Group by select (#1686), separate from the sidebar's. Each is rendered
@@ -61,14 +61,17 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
   const hidden = all.length - cells.length;
   const keys = useMemo(() => groupingKeys(cells, filter.groupBy), [cells, filter.groupBy]);
   const filtered = useMemo(() => cells.filter(row => cellMatches(row, filter.search)), [cells, filter.search]);
+  const configs = inventory.data?.configs;
+  // Instance labels are counted over every cell, so a search or a stopped cell never renumbers them.
+  const labels = useMemo(() => agentStyle ? instanceLabels(all, configs) : new Map<string, string>(), [agentStyle, all, configs]);
   const sections = useMemo(() => {
     if (!agentStyle) return groupCells(filtered, filter.groupBy).map(group => ({ id: group.id, name: `${group.label} group`, heading: filter.groupBy ? <>{group.label}</> : null, state: undefined as string | undefined, rollup: false, rows: attentionFirst(group.rows) }));
-    const { agents, others } = agentGroups(filtered);
+    const { agents, others } = agentGroups(filtered, configs);
     return [
-      ...agents.map(agent => ({ id: agent.id, name: `${agent.name} agent`, heading: <><Icon name="agent" /><span>{agent.name}</span>{agent.context && <span className="agent-context">{agent.context}</span>}</>, state: rollupState(agent.rows), rollup: true, rows: attentionFirst(agent.rows) })),
+      ...agents.map(agent => ({ id: agent.id, name: `${agent.displayName} agent`, heading: <><Icon name="agent" /><span>{agent.displayName}</span>{agent.named && <span className="agent-internal mono-id">{agent.name}</span>}{agent.context && <span className="agent-context">{agent.context}</span>}</>, state: rollupState(agent.rows), rollup: true, rows: attentionFirst(agent.rows) })),
       { id: "others", name: "Other cells", heading: <>Other cells</>, state: undefined, rollup: false, rows: attentionFirst(others) },
     ];
-  }, [agentStyle, filtered, filter.groupBy]);
+  }, [agentStyle, filtered, filter.groupBy, configs]);
   const incomplete = !!inventory.error || !!inventory.data?.failures.length;
 
   // Which tiles are on screen: only those are polled.
@@ -101,11 +104,11 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
       {incomplete && <p className="cell-inventory-warning">{inventory.data ? "Inventory incomplete or stale. Refresh to retry." : "Cells unavailable. Refresh to retry."}</p>}
       {!!cells.length && !filtered.length && <p>No matching cells.</p>}
     </div>
-    {inventory.data && !cells.length && <div className="empty-state"><h3>No active cells</h3><p>{hidden ? "Every cell is stopped or exited." : "Create a cell to see its terminal here."}</p><a className="header-action" href={newCellLink()}>New Cell</a></div>}
+    {inventory.data && !cells.length && <div className="empty-state"><h3>No active cells</h3><p>{hidden ? "Every cell is stopped or exited." : "Create a cell to see its terminal here."}</p><div className="empty-state-actions"><a className="header-action" href={newAgentLink()}>New agent</a><a className="header-action" href={newCellLink()}>New Cell</a></div></div>}
     <div ref={grid} className="cell-grid-groups">
       {sections.filter(section => section.rows.length).map(section => <section className="cell-grid-group" key={section.id} aria-label={section.heading ? section.name : undefined}>
         {section.heading && <h2 className="cell-grid-heading">{section.heading} <small>{section.rows.length}{section.rollup && <span className="sr-only"> {section.rows.length === 1 ? "instance" : "instances"}</span>}</small>{section.rollup && <RollupDot state={section.state} />}</h2>}
-        <ul className="cell-grid">{section.rows.map(row => <li key={key(row.scope)}><CellTile row={row} screen={screens[key(row.scope)]} docked={dockedCells.includes(key(row.scope))} terminalState={terminalStates[key(row.scope)]} onOpenDock={onOpenDock} /></li>)}</ul>
+        <ul className="cell-grid">{section.rows.map(row => <li key={key(row.scope)}><CellTile row={row} label={labels.get(key(row.scope))} screen={screens[key(row.scope)]} docked={dockedCells.includes(key(row.scope))} terminalState={terminalStates[key(row.scope)]} onOpenDock={onOpenDock} /></li>)}</ul>
       </section>)}
     </div>
     <StoppedCellsLink hidden={hidden} />

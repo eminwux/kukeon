@@ -206,7 +206,8 @@ func TestInitOverUnixSocketAndClientConfiguration(t *testing.T) {
 	if _, err = Init(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if f.applies != 2 || f.team != "kuke" || f.defaults == nil {
+	// Each init applies the kuke team, then the default team.
+	if f.applies != 4 || f.byTeam["kuke"] == nil || f.byTeam["default"] == nil || f.defaults == nil {
 		t.Fatalf("wire did not carry stable team identity: applies=%d team=%q", f.applies, f.team)
 	}
 }

@@ -53,11 +53,11 @@ Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o w
 | `realm`        | `NAME STATE AGE`                                                                | `NAMESPACE`                                   |
 | `space`        | `NAME REALM STATE AGE`                                                          | `EGRESS NET-DEFAULTS`                         |
 | `stack`        | `NAME REALM SPACE STATE AGE`                                                    | _(none — stack carries no wide-only signals)_ |
-| `cell`         | `NAME REALM SPACE STACK STATE SYNC AGE`                                         | `CONTAINERS BRIDGE DIVERGENCE`                |
+| `cell`         | `NAME REALM SPACE STACK STATE SYNC AGE`                                         | `CONTAINERS BRIDGE DIVERGENCE DISPLAY NAME`   |
 | `container`    | `NAME REALM SPACE STACK CELL STATE RESTARTS AGE`                                | `IMAGE EXIT`                                  |
 | `image`        | `NAME REALM CREATED` (cross-realm default)                                      | `DIGEST`                                      |
 | `blueprint`    | `NAME REALM SPACE STACK AGE`                                                    | _(none)_                                      |
-| `config`       | `NAME REALM SPACE STACK SCHEDULE NEXT`                                          | `CONNECTORS`                                  |
+| `config`       | `NAME REALM SPACE STACK SCHEDULE NEXT`                                          | `CONNECTORS DISPLAY NAME`                     |
 | `secret`       | `NAME TYPE CONNECTOR REALM SPACE STACK CELL`                                    | `IDENTITY`                                    |
 | `healthreport` | `ID CREATED FINDINGS RECURRING FILED SUMMARY` (the `kuke health reports` table) | _(none)_                                      |
 
@@ -68,6 +68,8 @@ Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o w
 `SCHEDULE` and `NEXT` are filled for a CellConfig with a [`spec.schedule`](../manifests/config.md#specschedule-object-optional) and empty otherwise. `SCHEDULE` is the cron expression, followed by the time zone in parentheses when one is set. `NEXT` is the next fire time in UTC, or `suspended`; it stays empty until kukeond's first scheduler pass after the schedule was applied, at most a minute. `kuke get config <name> -o yaml` shows the full `status.schedule`.
 
 `-o wide` on `config` adds `CONNECTORS`: one `<connector>=<what fills it>` entry per [connector](../concepts/connectors.md) the Config requires — the identity and the level it comes from (`github=work-github (realm)`), the method of a connector that keeps a login in the state volume (`claude=login`), `MISSING` for a required connector nothing resolves (a cell cannot be created from the Config until one does), and `none` for a connector the cell starts without. A connector that authenticates a harness adds, in brackets, where the harness keeps its state: the login identity and its login state (`claude=login [team-dev-claude-state, logged in]`), or the state of a token method (`claude=claude-sub (realm) [state team-pm-claude-state]`, `[state ephemeral]`). The same resolution is in `status.connectors` of `-o yaml` / `-o json`.
+
+`-o wide` on `config` and `cell` ends with `DISPLAY NAME`: the `kukeon.io/display-name` annotation, the name a person gave an agent (on its Config) or one of its instances (on that cell), or `-` when there is none. A cell shows only its own name, not its agent's. See [Your first agent](../guides/first-agent.md). The `config` table lists the agent templates (`default-agent-claude`, `default-agent-codex`) like any Config; `-o yaml` shows their `kukeon.io/template: "true"` label.
 
 `-o wide` on `volume` adds `CONNECTOR`, `METHOD` and `LOGIN`: the connector and method a [login identity](../concepts/connectors.md#login-identities) is tagged with, and `logged in` or `empty`. `-o yaml` / `-o json` carry them as `spec.connector`, `spec.method` and `status.login`.
 

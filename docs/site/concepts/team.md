@@ -10,10 +10,15 @@ creates or starts cells: launch them explicitly, for example with
 
 The commands that drive it:
 
-- [`kuke team init`](../cli/kuke-team-init.md) applies the `kuke` team, whose
-  one role is `majordomo`. `kuke` is the operator's reserved system team;
-  `kuke create team` refuses that name and `kuke delete team` refuses to
-  delete it.
+- [`kuke team init`](../cli/kuke-team-init.md) applies the two **system
+  teams**: `kuke`, whose one role is `majordomo`, and then `default`, whose
+  Configs are the agent templates New agent copies (see
+  [The default team](#the-default-team)). `kuke create team` refuses the names
+  `kuke`, `default` and `root`, and `kuke delete team` refuses to delete either
+  system team; the error names the team.
+- [`kuke create agent`](../cli/kuke-create.md#kuke-create-agent), and the web
+  UI's **New agent** page, create an agent from a template of the `default`
+  team.
 - [`kuke create team`](../cli/kuke-create.md#kuke-create-team) creates a
   project team from a Git repository (and the `kuketeam.yaml` it commits, if
   any), a stored Source, or a local checkout.
@@ -40,6 +45,73 @@ the rest; **Export** is `kuke team export`; and the **Sources** page is
 `kuke create source`, `kuke source show` and `kuke delete source`. See
 [web server → Teams](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#teams).
 
+## The default team
+
+`default` is the second system team (issue #1692). It gives a new host Claude
+and Codex agents that need no project:
+
+```yaml
+apiVersion: v1beta1
+kind: Team
+metadata:
+  name: default
+  realm: default
+spec:
+  configs: template
+  sources:
+    - name: kukeon
+      clonePath: /home/user/kukeon-src
+  roles:
+    - name: agent
+      source: kukeon
+      path: team/roles/agent
+      initialPath: $HOME
+  harnesses:
+    - { name: codex, source: kukeon, path: team/harnesses/codex }
+    - { name: claude, source: kukeon, path: team/harnesses/claude }
+```
+
+- **The `agent` role** knows only that it runs in a kukeon cell: its home, what
+  persists across restarts and what does not, that it has no project and no
+  host access, and that operating kukeon is majordomo's job. It has no skills,
+  no tasks, no image needs and no host mounts, so it uses the shared
+  default-posture blueprints (`claude`, `codex`). Its instructions are read
+  from the kukeon Source, cloned at `/home/user/kukeon-src` as majordomo's are.
+- **Agent templates.** `spec.configs: template` makes composition stamp
+  `kukeon.io/template: "true"` on every Config the team renders:
+  `default-agent-claude` and `default-agent-codex`. A template is not run
+  itself. The blueprints are the same shared ones every other team uses.
+- **New agent** (`kuke create agent --harness claude|codex [--name NAME]`, or
+  the web UI) copies a template into a Config of its own, named
+  `<template>-<6 hex>`, and creates and starts its first cell. The copy keeps
+  the template's spec as it is, so every agent of a harness mounts the
+  template's state volume (`default-agent-<harness>-state`) and shares one
+  login. It keeps the `kukeon.io/role` and `kukeon.io/harness` labels, drops
+  `kukeon.io/team` and `kukeon.io/template`, and records its template in the
+  annotation `kukeon.io/agent-template`.
+- **Display names.** The name a person gives an agent is stored in the
+  annotation `kukeon.io/display-name` on its Config, and the name of one of its
+  instances on that cell. It is not a label: Config labels are copied onto
+  cells and drive grouping and OutOfSync, annotations do neither. Renaming an
+  agent or an instance never restarts, recreates or marks a cell OutOfSync.
+- **Reapply and prune.** A copy has no `kukeon.io/team` label, so applying the
+  `default` team never prunes it: `kuke team init --reapply` keeps every agent
+  and its cells. A template is pruned like any team Config when the team stops
+  rendering it, for example when its harness is removed. Updating copies when
+  the template changes is not done; `kukeon.io/agent-template` records where
+  each one came from.
+- **Reserved.** `kuke create team default` is refused, and so is deleting the
+  system `default` team (CLI and web UI). `kuke team init --force`,
+  `--reapply` and `--upgrade` cover both system teams; `--upgrade` creates
+  `default` on an install that predates it.
+- **A team of your own named `default`.** One you added before `default`
+  became a system team has no `spec.configs`. Init leaves it untouched, applies
+  `kuke` all the same, and prints how to rename it: `kuke team export default
+  > team.yaml`, change `metadata.name`, `kuke apply -f team.yaml`,
+`kuke delete team default`, then `kuke team init --reapply`.
+
+See [Your first agent](../guides/first-agent.md).
+
 ## Where teams live
 
 kukeond stores three kinds. All are realm-scoped `v1beta1` documents, decoded
@@ -64,8 +136,8 @@ Definitions are read from sources, never stored:
 Every team document — `Team`, `TeamDefaults`, and the source documents `Role`,
 `Harness`, `HarnessImageCatalog`, `Component` and `Connector` — has
 `apiVersion: v1beta1`. The source documents are read by `kuke` from a fetched
-source; `kuke apply` rejects them. This repository ships the `majordomo` role
-under `team/roles/` and the `claude`, `codex`, `opencode`, and `script`
+source; `kuke apply` rejects them. This repository ships the `majordomo` and
+`agent` roles under `team/roles/` and the `claude`, `codex`, `opencode`, and `script`
 harnesses under `team/harnesses/` (`script` runs a program role, see
 [Program roles](#program-roles-the-script-harness)); other roles (dev, pm,
 pr-reviewer, …) can come from any Git source, such as the agents repository.

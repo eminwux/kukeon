@@ -72,6 +72,8 @@ var kindToSentinel = map[string]error{
 	"ImageNotFound":           errdefs.ErrImageNotFound,
 	"ConfigNotFound":          errdefs.ErrConfigNotFound,
 	"ConfigExists":            errdefs.ErrConfigExists,
+	"InvalidDisplayName":      errdefs.ErrInvalidDisplayName,
+	"AgentTemplateNotFound":   errdefs.ErrAgentTemplateNotFound,
 	"BlueprintNotFound":       errdefs.ErrBlueprintNotFound,
 	"CellAlreadyExists":       errdefs.ErrCellAlreadyExists,
 	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,

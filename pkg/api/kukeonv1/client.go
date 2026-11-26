@@ -264,6 +264,12 @@ type Client interface {
 	// Config references, and then its Team document. Cells and volumes stay.
 	// The kuke system team is refused.
 	DeleteTeam(ctx context.Context, ref TeamRef) (DeleteTeamResult, error)
+	// SetDisplayName sets, or for an empty name clears, the display name
+	// (v1beta1.AnnotationDisplayName) of a CellConfig or a cell (issue
+	// #1692). Only that annotation changes: no cell is restarted, recreated
+	// or marked OutOfSync. A daemon that predates it answers with
+	// errdefs.ErrDaemonMethodUnsupported.
+	SetDisplayName(ctx context.Context, req SetDisplayNameRequest) (SetDisplayNameResult, error)
 	// GetTeamDefaults reads a realm's stored TeamDefaults document. Exists is
 	// false, with no error, when the realm stores none.
 	GetTeamDefaults(ctx context.Context, realm string) (GetTeamDefaultsResult, error)
@@ -563,6 +569,7 @@ const (
 	MethodGetTeam         = ServiceName + ".GetTeam"
 	MethodListTeams       = ServiceName + ".ListTeams"
 	MethodDeleteTeam      = ServiceName + ".DeleteTeam"
+	MethodSetDisplayName  = ServiceName + ".SetDisplayName"
 	MethodGetTeamDefaults = ServiceName + ".GetTeamDefaults"
 
 	MethodGetSource    = ServiceName + ".GetSource"

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeCells, agentGroups, attentionFirst, cellMatches, groupCells, groupingKeys, isActiveCell, matchesState, needsAttention, rollupState, screenTail } from "./cells.mjs";
+import { activeCells, agentGroups, attentionFirst, cellMatches, configDisplayName, displayNameError, groupCells, groupingKeys, instanceLabels, isActiveCell, matchesState, needsAttention, rollupState, screenTail } from "./cells.mjs";
 
 const row = (name, state, extra = {}) => ({ scope: ["r", "s", "k", name], doc: { metadata: { name, labels: extra.labels }, status: { state, ...extra.status } } });
 const names = rows => rows.map(item => item.doc.metadata.name);
@@ -121,4 +121,84 @@ test("rollupState is the first instance that needs attention, else the first ins
   assert.equal(rollupState([cell("dev", "a", { state: "Ready" }), cell("dev", "b", { state: "Ready" })]), "Ready");
   assert.equal(rollupState([cell("dev", "a"), cell("dev", "b", { status: { outOfSync: true } })]), "Ready");
   assert.equal(rollupState([]), undefined);
+});
+
+// Display names (#1692). A Config in realm dev / s / k; `copy` makes it an agent copy of a template.
+const config = (name, { displayName, harness, copy = false, template = false } = {}) => ({
+  metadata: {
+    name, realm: "dev", space: "s", stack: "k",
+    labels: { ...(harness ? { "kukeon.io/harness": harness, "kukeon.io/role": "agent" } : {}), ...(template ? { "kukeon.io/template": "true" } : {}) },
+    annotations: { ...(displayName !== undefined ? { "kukeon.io/display-name": displayName } : {}), ...(copy ? { "kukeon.io/agent-template": `default-agent-${harness}` } : {}) },
+  },
+});
+const bound = (name, configName, { createdAt, displayName, labels } = {}) => {
+  const row = cell("dev", name, { binding: { realm: "dev", space: "s", stack: "k", name: configName }, config: configName, status: createdAt ? { createdAt } : {} });
+  if (displayName) row.doc.metadata.annotations = { "kukeon.io/display-name": displayName };
+  if (labels) row.doc.metadata.labels = { ...row.doc.metadata.labels, ...labels };
+  return row;
+};
+
+test("configDisplayName prefers the annotation, then the agent-copy fallback, else none", () => {
+  assert.deepEqual(configDisplayName(config("c1", { displayName: " Reviewer ", harness: "claude", copy: true })), { name: "Reviewer", named: true });
+  assert.deepEqual(configDisplayName(config("c2", { harness: "claude", copy: true })), { name: "Claude agent", named: true });
+  assert.deepEqual(configDisplayName(config("c3", { harness: "codex", copy: true })), { name: "Codex agent", named: true });
+  assert.deepEqual(configDisplayName(config("c4", { displayName: "  ", harness: "codex", copy: true })), { name: "Codex agent", named: true });
+  assert.deepEqual(configDisplayName(config("pm")), { name: "", named: false });
+  assert.deepEqual(configDisplayName(undefined), { name: "", named: false });
+});
+
+test("agentGroups names agents from their Config and falls back to the Config name", () => {
+  const configs = [config("default-agent-codex-a1b2c3", { displayName: "Docs bot", harness: "codex", copy: true }), config("default-agent-claude-d4e5f6", { harness: "claude", copy: true }), config("pm")];
+  const rows = [bound("x", "default-agent-codex-a1b2c3"), bound("y", "default-agent-claude-d4e5f6"), bound("z", "pm"), cell("dev", "w", { config: "pm" })];
+  const { agents } = agentGroups(rows, configs);
+  assert.deepEqual(agents.map(agent => [agent.displayName, agent.name, agent.named, names(agent.rows)]), [
+    ["Claude agent", "default-agent-claude-d4e5f6", true, ["y"]],
+    ["Docs bot", "default-agent-codex-a1b2c3", true, ["x"]],
+    ["pm", "pm", false, ["z", "w"]],
+  ]);
+  // Without the Config list every agent is its Config name.
+  assert.deepEqual(agentGroups(rows).agents.map(agent => [agent.displayName, agent.named]), [["default-agent-claude-d4e5f6", false], ["default-agent-codex-a1b2c3", false], ["pm", false]]);
+});
+
+test("agentGroups leaves template cells out of agents and others", () => {
+  const configs = [config("default-agent-claude", { harness: "claude", template: true })];
+  const rows = [bound("t1", "default-agent-claude"), cell("dev", "t2", { config: "default-agent-claude" }), cell("dev", "loose")];
+  rows[1].doc.metadata.labels["kukeon.io/template"] = "true";
+  assert.deepEqual(shape(agentGroups(rows, configs)), { agents: [], others: ["loose"] });
+});
+
+test("instanceLabels numbers a named agent's instances by creation time and honours a cell's own name", () => {
+  const configs = [config("default-agent-codex-a1b2c3", { displayName: "Docs bot", harness: "codex", copy: true }), config("pm")];
+  const rows = [
+    bound("b", "default-agent-codex-a1b2c3", { createdAt: "2026-11-02T00:00:00Z" }),
+    bound("a", "default-agent-codex-a1b2c3", { createdAt: "2026-11-03T00:00:00Z" }),
+    bound("c", "default-agent-codex-a1b2c3", { createdAt: "2026-11-01T00:00:00Z", displayName: "Night shift" }),
+    bound("d", "default-agent-codex-a1b2c3", { createdAt: "0001-01-01T00:00:00Z" }),
+    bound("p", "pm"),
+    bound("q", "pm", { displayName: "Planner" }),
+  ];
+  const labels = instanceLabels(rows, configs);
+  const label = name => labels.get(JSON.stringify(["dev", "s", "k", name]));
+  // c is the first instance and keeps its own name; b and a follow; d has no creation time and comes last.
+  assert.equal(label("c"), "Night shift");
+  assert.equal(label("b"), "Docs bot #2");
+  assert.equal(label("a"), "Docs bot #3");
+  assert.equal(label("d"), "Docs bot #4");
+  // An agent without a name of its own keeps cell names, except for a cell that carries one.
+  assert.equal(label("p"), undefined);
+  assert.equal(label("q"), "Planner");
+});
+
+test("instanceLabels falls back to name order when no instance has a creation time", () => {
+  const configs = [config("default-agent-claude-x", { harness: "claude", copy: true })];
+  const labels = instanceLabels([bound("beta", "default-agent-claude-x"), bound("alpha", "default-agent-claude-x")], configs);
+  assert.deepEqual([...labels.entries()].sort(), [[JSON.stringify(["dev", "s", "k", "alpha"]), "Claude agent #1"], [JSON.stringify(["dev", "s", "k", "beta"]), "Claude agent #2"]]);
+});
+
+test("displayNameError allows empty and up to 63 characters without control characters", () => {
+  assert.equal(displayNameError(""), "");
+  assert.equal(displayNameError("  Docs bot  "), "");
+  assert.equal(displayNameError("é".repeat(63)), "");
+  assert.match(displayNameError("x".repeat(64)), /63/);
+  assert.match(displayNameError("a\u0007b"), /control/);
 });

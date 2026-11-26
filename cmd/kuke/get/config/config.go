@@ -213,10 +213,11 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 		}
 		// -o wide adds how each connector the Config requires resolves
 		// (issue #1548); the structured formats carry it as status.connectors.
+		// It also adds the Config's display name (issue #1692).
 		wide := format == shared.OutputFormatWide
 		headers := []string{"NAME", "REALM", "SPACE", "STACK", "SCHEDULE", "NEXT"}
 		if wide {
-			headers = append(headers, "CONNECTORS")
+			headers = append(headers, "CONNECTORS", "DISPLAY NAME")
 		}
 		rows := make([][]string, 0, len(configs))
 		for i := range configs {
@@ -230,7 +231,8 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 				nextColumn(c),
 			}
 			if wide {
-				row = append(row, dashIfEmpty(connectorsColumn(c)))
+				row = append(row, dashIfEmpty(connectorsColumn(c)),
+					dashIfEmpty(strings.TrimSpace(c.Metadata.Annotations[v1beta1.AnnotationDisplayName])))
 			}
 			rows = append(rows, row)
 		}

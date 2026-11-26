@@ -203,3 +203,24 @@ func TestConvertCellConfig_UnscheduledDocumentIsUnchanged(t *testing.T) {
 		t.Errorf("carrier Schedule = %+v, want nil", internal.Schedule)
 	}
 }
+
+// TestConvertCellConfigMetadata_CarriesAnnotations (issue #1692): the list
+// view of a Config carries its annotations beside its labels, so a client
+// shows an agent's display name.
+func TestConvertCellConfigMetadata_CarriesAnnotations(t *testing.T) {
+	doc := sampleConfigDoc()
+	doc.Metadata.Annotations = map[string]string{ext.AnnotationDisplayName: "Reviewer"}
+	internal, _, err := apischeme.NormalizeCellConfig(doc)
+	if err != nil {
+		t.Fatalf("NormalizeCellConfig() error = %v", err)
+	}
+	listed := apischeme.ConvertCellConfigMetadataToExternal(internal)
+	if listed.Metadata.Annotations[ext.AnnotationDisplayName] != "Reviewer" {
+		t.Fatalf("listed annotations = %v", listed.Metadata.Annotations)
+	}
+	// The listed map is a copy of the carrier's.
+	listed.Metadata.Annotations[ext.AnnotationDisplayName] = "changed"
+	if internal.Metadata.Annotations[ext.AnnotationDisplayName] != "Reviewer" {
+		t.Fatal("the list view shares the carrier's annotations map")
+	}
+}

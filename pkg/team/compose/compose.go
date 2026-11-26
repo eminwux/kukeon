@@ -265,6 +265,17 @@ func Compose(cfg *config.TeamDefaults, team *config.Team, opts Options) (*Result
 		if note != "" {
 			result.Notes = append(result.Notes, note)
 		}
+		if team.Spec.Configs == config.ConfigsTemplate {
+			// An agent template (issue #1692): the Configs New agent copies.
+			// The shared blueprints stay as they are.
+			pair.Config.Metadata.Labels[api.LabelTemplate] = "true"
+			for _, task := range pair.Tasks {
+				if task.Metadata.Labels == nil {
+					task.Metadata.Labels = map[string]string{}
+				}
+				task.Metadata.Labels[api.LabelTemplate] = "true"
+			}
+		}
 		result.Pairs = append(result.Pairs, pair)
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Spec.Parameters)) {

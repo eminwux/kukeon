@@ -46,11 +46,12 @@ func ConvertCellConfigDocToInternal(in ext.CellConfigDoc) (intmodel.CellConfig, 
 		}
 		return intmodel.CellConfig{
 			Metadata: intmodel.CellConfigMetadata{
-				Name:   in.Metadata.Name,
-				Realm:  in.Metadata.Realm,
-				Space:  in.Metadata.Space,
-				Stack:  in.Metadata.Stack,
-				Labels: copyLabels(in.Metadata.Labels),
+				Name:        in.Metadata.Name,
+				Realm:       in.Metadata.Realm,
+				Space:       in.Metadata.Space,
+				Stack:       in.Metadata.Stack,
+				Labels:      copyLabels(in.Metadata.Labels),
+				Annotations: copyLabels(in.Metadata.Annotations),
 			},
 			Document: document,
 			Schedule: scheduleSummary(in.Spec.Schedule),
@@ -146,8 +147,8 @@ func copyTime(in *time.Time) *time.Time {
 // ConvertCellConfigMetadataToExternal builds a metadata-only external
 // CellConfigDoc from the internal carrier's metadata (issue #644). Unlike
 // ConvertCellConfigToExternal it does not read the stored Document — the list
-// and delete verbs surface scope coordinates and name only, never the config
-// body (blueprint ref, values, slot fills). The one exception is the schedule
+// and delete verbs surface scope coordinates, name, labels and annotations
+// only, never the config body (blueprint ref, values, slot fills). The one exception is the schedule
 // (#1503): the carrier's lifted spec.schedule summary and stored schedule
 // state come along, so a list can show a Config's cadence and next fire.
 func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigDoc {
@@ -155,11 +156,12 @@ func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigD
 		APIVersion: ext.APIVersionV1Beta1,
 		Kind:       ext.KindCellConfig,
 		Metadata: ext.CellConfigMetadata{
-			Name:   in.Metadata.Name,
-			Realm:  in.Metadata.Realm,
-			Space:  in.Metadata.Space,
-			Stack:  in.Metadata.Stack,
-			Labels: copyLabels(in.Metadata.Labels),
+			Name:        in.Metadata.Name,
+			Realm:       in.Metadata.Realm,
+			Space:       in.Metadata.Space,
+			Stack:       in.Metadata.Stack,
+			Labels:      copyLabels(in.Metadata.Labels),
+			Annotations: copyLabels(in.Metadata.Annotations),
 		},
 		Status: configStatusToExternal(in),
 	}

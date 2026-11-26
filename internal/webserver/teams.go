@@ -156,8 +156,8 @@ type teamSummaryView struct {
 	Harnesses          []string `json:"harnesses"`
 	HarnessesInherited bool     `json:"harnessesInherited"`
 	Configs            []string `json:"configs"`
-	// System reports the kuke team, which is reset with kuke team init
-	// --force and is never deleted.
+	// System reports a system team, kuke or default (issue #1692), which is
+	// reset with kuke team init --force and is not deleted from the web UI.
 	System bool `json:"system,omitempty"`
 }
 
@@ -178,7 +178,7 @@ func summaryView(s kukeonv1.TeamSummary) teamSummaryView {
 		Name: s.Name, Realm: s.Realm, ProjectURL: s.ProjectURL, ProjectRef: s.ProjectRef,
 		Roles: nonNil(s.Roles), RolesInherited: s.RolesInherited,
 		Harnesses: nonNil(s.Harnesses), HarnessesInherited: s.HarnessesInherited,
-		Configs: nonNil(s.Configs), System: s.Name == config.SystemTeamName,
+		Configs: nonNil(s.Configs), System: s.Name == config.SystemTeamName || s.Name == config.DefaultTeamName,
 	}
 }
 

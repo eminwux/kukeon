@@ -148,7 +148,7 @@ function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView;
           <dt>Realm</dt><dd>{summary.realm}</dd>
           <dt>Configs</dt><dd>{summary.configs.length}</dd>
         </dl>
-        {summary.system && <p className="description">The kuke system team cannot be deleted; reset it with <code>kuke team init --force</code>.</p>}
+        {summary.system && <p className="description">The {summary.name} system team cannot be deleted; reset it with <code>kuke team init --force</code>.</p>}
         {view?.unresolved && <div className="error" role="alert"><strong>The team does not resolve</strong><p>{view.unresolved}</p></div>}
         {data.problem && <div className="error" role="alert"><strong>The team's setup could not be read</strong><p>{data.problem}</p></div>}
       </div>

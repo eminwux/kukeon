@@ -39,9 +39,10 @@ func setupReapply(t *testing.T) (InitOptions, *fakeClient) {
 	if _, err := Init(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex-health-sweep")) ||
-		!bytes.Contains(fake.raw, []byte("suspend: true")) {
-		t.Fatalf("init must render the sweep suspended:\n%s", fake.raw)
+	kuke := fake.byTeam["kuke"]
+	if !bytes.Contains(kuke, []byte("name: kuke-majordomo-codex-health-sweep")) ||
+		!bytes.Contains(kuke, []byte("suspend: true")) {
+		t.Fatalf("init must render the sweep suspended:\n%s", kuke)
 	}
 	opts.Reapply = true
 	return opts, fake
@@ -60,14 +61,17 @@ func TestReapplyEnablesTheSweepFromTheStoredTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.applies != applies+1 || fake.team != "kuke" || out.Plan.Origin.Kind != OriginStored ||
-		out.Plan.Command != "kuke team init --reapply" {
-		t.Fatalf("applies=%d team=%q plan=%+v", fake.applies, fake.team, out.Plan)
+	// --reapply recomposes the kuke team, then the default team.
+	if fake.applies != applies+2 || fake.team != "default" || out.Plan.Origin.Kind != OriginStored ||
+		out.Plan.Command != "kuke team init --reapply" || len(out.Also) != 1 || out.Also[0].Result == nil ||
+		out.Also[0].Plan.Origin.Kind != OriginStored || out.Also[0].Result.Team != "default" {
+		t.Fatalf("applies=%d team=%q plan=%+v also=%+v", fake.applies, fake.team, out.Plan, out.Also)
 	}
-	if !bytes.Contains(fake.raw, []byte("cron: '@hourly'")) && !bytes.Contains(fake.raw, []byte("cron: \"@hourly\"")) {
-		t.Fatalf("sweep schedule missing:\n%s", fake.raw)
+	kuke := fake.byTeam["kuke"]
+	if !bytes.Contains(kuke, []byte("cron: '@hourly'")) && !bytes.Contains(kuke, []byte("cron: \"@hourly\"")) {
+		t.Fatalf("sweep schedule missing:\n%s", kuke)
 	}
-	if bytes.Contains(fake.raw, []byte("suspend: true")) {
+	if bytes.Contains(kuke, []byte("suspend: true")) {
 		t.Fatal("sweep is still suspended after the stored team switched it on")
 	}
 	if !bytes.Equal(defaults, fake.defaults) {
@@ -86,7 +90,7 @@ func TestReapplyIsApplyStoredKuke(t *testing.T) {
 	if _, err := Init(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	reapplied := slices.Clone(fake.raw)
+	reapplied := slices.Clone(fake.byTeam["kuke"])
 	if _, err := ApplyStored(t.Context(), opts.Options, "kuke", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +111,16 @@ func TestReapplyDropsObsoleteConfigsFromTheApplySet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.team != "kuke" {
-		t.Fatalf("apply was not scoped to the kuke team (prune key): %q", fake.team)
+	kuke := fake.byTeam["kuke"]
+	if kuke == nil {
+		t.Fatal("apply was not scoped to the kuke team (prune key)")
 	}
 	for _, gone := range []string{"health-sweep", "kuke-majordomo-claude"} {
-		if bytes.Contains(fake.raw, []byte(gone)) {
+		if bytes.Contains(kuke, []byte(gone)) {
 			t.Errorf("%s is still in the apply set", gone)
 		}
 	}
-	if !bytes.Contains(fake.raw, []byte("name: kuke-majordomo-codex")) {
+	if !bytes.Contains(kuke, []byte("name: kuke-majordomo-codex")) {
 		t.Fatal("the remaining config is missing")
 	}
 	// The plan names what the daemon prunes.

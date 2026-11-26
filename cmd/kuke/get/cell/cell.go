@@ -62,7 +62,7 @@ cell relative to its lineage Config:
   -          - the cell carries no kukeon.io/config lineage label, so the
                Config reconciler does not track sync state for it
 
-` + "`-o wide`" + ` appends three cell-only signals:
+` + "`-o wide`" + ` appends four cell-only signals:
 
   CONTAINERS  ready/total — entries in status.containers whose
               state == Ready over the total length
@@ -70,6 +70,8 @@ cell relative to its lineage Config:
               form) or "-" when empty
   DIVERGENCE  short divergence summary from status.outOfSyncReason
               (blank for Synced or no-lineage rows)
+  DISPLAY NAME the cell's own kukeon.io/display-name annotation, the
+              name a person gave this instance, or "-"
 
 The full outOfSync / outOfSyncReason / outOfSyncError status fields
 remain on ` + "`-o yaml` / `-o json`" + ` and the cgroup path stays out of the
@@ -241,6 +243,15 @@ func renderSync(c *v1beta1.CellDoc) string {
 	return syncStateSynced
 }
 
+// displayNameColumn renders the DISPLAY NAME column of `-o wide` (issue
+// #1692): the kukeon.io/display-name annotation, or "-".
+func displayNameColumn(annotations map[string]string) string {
+	if name := strings.TrimSpace(annotations[v1beta1.AnnotationDisplayName]); name != "" {
+		return name
+	}
+	return "-"
+}
+
 // renderDivergence returns the DIVERGENCE column value for `-o wide`.
 // Returns Status.OutOfSyncReason for OutOfSync rows, empty string for
 // Synced or no-lineage rows (the column stays width-aligned via the
@@ -309,7 +320,7 @@ func printCells(
 		}
 		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE"}
 		if wide {
-			headers = append(headers, "CONTAINERS", "BRIDGE", "DIVERGENCE")
+			headers = append(headers, "CONTAINERS", "BRIDGE", "DIVERGENCE", "DISPLAY NAME")
 		}
 		now := time.Now()
 		rows := make([][]string, 0, len(cells))
@@ -326,7 +337,8 @@ func printCells(
 				shared.RenderAge(c.Status.CreatedAt, now),
 			}
 			if wide {
-				row = append(row, renderContainers(c), renderBridge(c), renderDivergence(c))
+				row = append(row, renderContainers(c), renderBridge(c), renderDivergence(c),
+					displayNameColumn(c.Metadata.Annotations))
 			}
 			rows = append(rows, row)
 		}

@@ -41,7 +41,7 @@ func TestNewCreateCmdMetadata(t *testing.T) {
 		{
 			name: "short description",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Create Kukeon resources (realm, space, stack, cell, config, blueprint, secret, volume, registry-credential, team, source)"
+				expected := "Create Kukeon resources (realm, space, stack, cell, config, blueprint, secret, volume, registry-credential, team, source, agent)"
 				if cmd.Short != expected {
 					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
 				}
@@ -87,6 +87,7 @@ func TestNewCreateCmdRegistersSubcommands(t *testing.T) {
 		{name: "registry-credential"},
 		{name: "team"},
 		{name: "source"},
+		{name: "agent"},
 	}
 
 	for _, tt := range tests {
@@ -121,6 +122,7 @@ func TestNewCreateCmd_AutocompleteRegistration(t *testing.T) {
 		"registry-credential",
 		"team",
 		"source",
+		"agent",
 	}
 	if len(completions) != len(expected) {
 		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))

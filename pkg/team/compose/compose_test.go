@@ -1380,6 +1380,77 @@ func TestFreshMajordomoComposition(t *testing.T) {
 	}
 }
 
+// defaultTeam is the system default team in the shape compose reads, like
+// majordomo().
+func defaultTeam() *config.Team {
+	team := config.DefaultTeam()
+	source := config.KukeonSource()
+	source.ClonePath = team.Spec.Sources[0].ClonePath
+	team.Spec.Sources[0] = source
+	return team
+}
+
+// TestFreshDefaultComposition composes the system default team as kuke team
+// init does (issue #1692): the agent role on both harnesses, as two agent
+// templates stamped kukeon.io/template, on the default-posture blueprints a
+// team without templates gets too.
+func TestFreshDefaultComposition(t *testing.T) {
+	result, err := compose.Compose(emptyConfig(), defaultTeam(), compose.Options{Sources: shippedSource()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Pairs) != 2 || len(result.Blueprints) != 2 || len(result.Notes) != 0 {
+		t.Fatalf("pairs=%d blueprints=%d notes=%v", len(result.Pairs), len(result.Blueprints), result.Notes)
+	}
+	for i, harnessName := range []string{"codex", "claude"} {
+		p := result.Pairs[i]
+		if p.Config.Metadata.Name != "default-agent-"+harnessName || p.Blueprint.Metadata.Name != harnessName {
+			t.Fatalf("incorrect pair identity: %s on %s", p.Config.Metadata.Name, p.Blueprint.Metadata.Name)
+		}
+		want := map[string]string{
+			api.LabelTeam: "default", api.LabelRole: "agent", api.LabelHarness: harnessName, api.LabelTemplate: "true",
+		}
+		if !reflect.DeepEqual(p.Config.Metadata.Labels, want) {
+			t.Fatalf("%s labels = %v, want %v", p.Config.Metadata.Name, p.Config.Metadata.Labels, want)
+		}
+		if p.Blueprint.Metadata.Labels[api.LabelTemplate] != "" {
+			t.Fatalf("blueprint %s is stamped as a template", p.Blueprint.Metadata.Name)
+		}
+		if len(p.Tasks) != 0 || len(p.Secrets) != 0 {
+			t.Fatalf("%s: tasks=%d secrets=%v", harnessName, len(p.Tasks), p.Secrets)
+		}
+		if got := p.Config.Spec.Values["ROLE_PATH"]; got != "team/roles/agent" {
+			t.Fatalf("%s ROLE_PATH = %q", harnessName, got)
+		}
+		if got := p.Config.Spec.Values["STATE_VOLUME"]; got != "default-agent-"+harnessName+"-state" {
+			t.Fatalf("%s STATE_VOLUME = %q", harnessName, got)
+		}
+		for _, volume := range work(t, p, interactive).Volumes {
+			if volume.Kind != api.VolumeKindVolume && volume.Target != "/opt/cni" {
+				t.Fatalf("%s mounts from the host: %+v", harnessName, volume)
+			}
+		}
+	}
+
+	// A team that is not a template team composes the same role onto the
+	// same shared blueprints, and stamps no template label.
+	plain := defaultTeam()
+	plain.Metadata.Name = "plain"
+	plain.Spec.Configs = ""
+	other, err := compose.Compose(emptyConfig(), plain, compose.Options{Sources: shippedSource()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(other.Blueprints, result.Blueprints) {
+		t.Fatal("a template team renders different blueprints from a non-template team")
+	}
+	for _, p := range other.Pairs {
+		if _, ok := p.Config.Metadata.Labels[api.LabelTemplate]; ok {
+			t.Fatalf("%s is stamped as a template", p.Config.Metadata.Name)
+		}
+	}
+}
+
 // TestMajordomoSweepOptIn is the per-install opt-in an edited team entry makes
 // (issues #1509, #1532): the sweep is switched on and told where to file, and
 // one gh-token binding enables the github connector for the whole role, so the

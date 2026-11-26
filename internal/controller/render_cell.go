@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -784,9 +785,20 @@ func lookupConfigBlueprint(
 // (cellconfig.AnnotationRenderConfigRevision): a content hash of the decoded
 // Config document with spec.schedule cleared. A schedule is a property of the
 // Config, not of the cells made from it (#1503), so adding, changing or
-// removing one must not make those cells report "config changed".
+// removing one must not make those cells report "config changed". The same
+// holds for the Config's display name (v1beta1.AnnotationDisplayName, issue
+// #1692): renaming an agent never marks its cells OutOfSync. A Config without
+// one hashes exactly as before.
 func configRevision(cfgDoc v1beta1.CellConfigDoc) string {
 	cfgDoc.Spec.Schedule = nil
+	if _, ok := cfgDoc.Metadata.Annotations[v1beta1.AnnotationDisplayName]; ok {
+		annotations := maps.Clone(cfgDoc.Metadata.Annotations)
+		delete(annotations, v1beta1.AnnotationDisplayName)
+		if len(annotations) == 0 {
+			annotations = nil
+		}
+		cfgDoc.Metadata.Annotations = annotations
+	}
 	return hashJSON(cfgDoc)
 }
 

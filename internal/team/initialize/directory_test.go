@@ -440,11 +440,11 @@ func TestDirectoryLocalSSHConfiguration(t *testing.T) {
 	}
 }
 
-// TestAddRejectsReservedNames: root and kuke (the init team) are refused as a
+// TestAddRejectsReservedNames: root, kuke and default (the init teams) are refused as a
 // positional name, as --name, and as an authored metadata.name, before any
 // daemon call.
 func TestAddRejectsReservedNames(t *testing.T) {
-	for _, name := range []string{"root", "kuke"} {
+	for _, name := range []string{"root", "kuke", "default"} {
 		for _, form := range []string{"positional", "flag", "metadata"} {
 			t.Run(name+"/"+form, func(t *testing.T) {
 				opts, _ := setupDirectoryAdd(t)

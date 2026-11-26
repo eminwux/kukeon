@@ -421,6 +421,11 @@ type TeamSpec struct {
 	// prefers these over the defaults' spec.secrets, so edits survive a
 	// recomposition.
 	Secrets []SecretBinding `yaml:"secrets,omitempty"`
+	// Configs says what the team's Configs are for. Empty: agents a person
+	// runs. ConfigsTemplate ("template"): agent templates, which composition
+	// stamps with kukeon.io/template: "true" and New agent copies (issue
+	// #1692); the system default team sets it.
+	Configs string `yaml:"configs,omitempty"`
 }
 
 // MarshalYAML writes the spec with explicit empty lists kept: Defaults'
@@ -428,6 +433,7 @@ type TeamSpec struct {
 func (s TeamSpec) MarshalYAML() (any, error) {
 	var out struct {
 		ProjectSource *Source                     `yaml:"projectSource,omitempty"`
+		Configs       string                      `yaml:"configs,omitempty"`
 		Secrets       *[]SecretBinding            `yaml:"secrets,omitempty"`
 		Connectors    *map[string]ConnectorChoice `yaml:"connectors,omitempty"`
 		Sources       *[]Source                   `yaml:"sources,omitempty"`
@@ -435,6 +441,7 @@ func (s TeamSpec) MarshalYAML() (any, error) {
 		Harnesses     *[]Harness                  `yaml:"harnesses,omitempty"`
 	}
 	out.ProjectSource = s.ProjectSource
+	out.Configs = s.Configs
 	if s.Connectors != nil {
 		out.Connectors = &s.Connectors
 	}

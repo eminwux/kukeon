@@ -193,7 +193,8 @@ func inheritingNotes(ctx context.Context, client Client) ([]string, error) {
 	}
 	var notes []string
 	for _, team := range teams {
-		if team == majordomoName {
+		// The default team is recomposed by the same init (issue #1692).
+		if team == majordomoName || team == defaultName {
 			continue
 		}
 		notes = append(notes, fmt.Sprintf(

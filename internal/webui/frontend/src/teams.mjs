@@ -5,7 +5,8 @@
 // The wizard's form logic is in team-form.mjs. No DOM, no network —
 // unit-tested with node --test.
 
-// The kuke system team: reset with `kuke team init --force`, never deleted.
+// The kuke system team: reset with `kuke team init --force`, never deleted. The default team (#1692) is a
+// system team too; the server marks both with `system: true`.
 export const systemTeam = "kuke";
 // Ref kinds a repository or a source is read at.
 export const refKinds = ["branch", "tag", "commit"];

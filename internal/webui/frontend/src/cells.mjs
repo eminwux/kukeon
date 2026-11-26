@@ -78,13 +78,64 @@ export function groupCells(rows, groupBy) {
 // (lookupLineageConfig in internal/controller/reconcile_outofsync.go).
 export const configLabel = "kukeon.io/config";
 
+// Well-known keys of the New agent flow (#1692). A template Config (kukeon.io/template: "true") is a
+// hidden agent template of the default team; an agent copy names the template it was copied from in
+// kukeon.io/agent-template; kukeon.io/display-name, on a Config or a cell, is the name the user chose.
+export const templateLabel = "kukeon.io/template";
+export const harnessLabel = "kukeon.io/harness";
+export const displayNameAnnotation = "kukeon.io/display-name";
+export const agentTemplateAnnotation = "kukeon.io/agent-template";
+
+const text = value => typeof value === "string" ? value.trim() : "";
+// isTemplate is true for a template Config, or a cell made from one (cells carry their Config's labels).
+export const isTemplate = doc => text(doc?.metadata?.labels?.[templateLabel]) === "true";
+// The display name a Config or a cell carries itself, or "".
+export const ownDisplayName = doc => text(doc?.metadata?.annotations?.[displayNameAnnotation]);
+const harnessTitle = harness => harness ? harness[0].toLocaleUpperCase() + harness.slice(1) : "";
+
+// displayNameError checks a display name the way the server does (#1692): trimmed, at most 63
+// characters, no control characters. Empty is valid: it clears the name. Returns "" when valid.
+export function displayNameError(value) {
+  const name = text(value);
+  if ([...name].length > 63) return "A display name has at most 63 characters.";
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(name)) return "A display name cannot contain control characters.";
+  return "";
+}
+
+// configDisplayName is the name an agent (one Config) is shown with: its kukeon.io/display-name, else
+// "Claude agent" / "Codex agent" for an agent copy, else "" (the caller shows the Config name). `named`
+// says whether the agent has a name of its own, so its instances are labelled by ordinal.
+export function configDisplayName(config) {
+  const own = ownDisplayName(config);
+  if (own) return { name: own, named: true };
+  if (text(config?.metadata?.annotations?.[agentTemplateAnnotation])) {
+    const harness = harnessTitle(text(config.metadata.labels?.[harnessLabel]));
+    return { name: harness ? `${harness} agent` : "Agent", named: true };
+  }
+  return { name: "", named: false };
+}
+
+// findConfig returns the Config doc of an agent: the exact scoped Config, or for a label-only agent (no
+// space/stack known) the only Config of that realm and name.
+function findConfig(configs, realm, space, stack, name) {
+  const list = Array.isArray(configs) ? configs : [];
+  const exact = list.find(config => text(config?.metadata?.realm) === realm && text(config?.metadata?.space) === space && text(config?.metadata?.stack) === stack && text(config?.metadata?.name) === name);
+  if (exact || space || stack) return exact;
+  const candidates = list.filter(config => text(config?.metadata?.realm) === realm && text(config?.metadata?.name) === name);
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 // agentGroups lists cells as agents and their instances (#1686). An agent is one Config: the cell's
 // spec.provenance binding when it has one, otherwise its realm plus its kukeon.io/config label value (the
 // label stores only the Config name). A label-only cell joins the provenance agent of the same realm and
 // name when there is one, so both ways of naming one Config land in one agent. Cells with neither go to
-// `others`. Agents are sorted by name, then realm; rows keep inventory order. `context` is what tells two
-// agents of one name apart: the realm, or the full Config scope when the realm is the same too.
-export function agentGroups(rows) {
+// `others`. Cells of a template Config (#1692) are neither agents nor others. Agents are sorted by name,
+// then realm; rows keep inventory order. `context` is what tells two agents of one name apart: the realm,
+// or the full Config scope when the realm is the same too. `configs` (the catalog list, optional) gives
+// each agent its displayName — the Config's display name, the agent-copy fallback or the Config name —
+// and `named` when the name is the agent's own rather than the Config name.
+export function agentGroups(rows, configs = []) {
+  rows = rows.filter(row => !isTemplate(row.doc));
   const keyOf = (realm, space, stack, name) => JSON.stringify([realm, space, stack, name]);
   const bound = new Map();
   for (const row of rows) {
@@ -105,17 +156,56 @@ export function agentGroups(rows) {
     else if (label) parts = JSON.parse(bound.get(JSON.stringify([row.scope[0], label])) ?? keyOf(row.scope[0], "", "", label));
     else { others.push(row); continue; }
     const key = keyOf(...parts);
-    const agent = found.get(key) ?? { id: groupId("agent", key), name: parts[3], realm: parts[0], scope: parts.slice(0, 3).filter(Boolean), rows: [] };
+    let agent = found.get(key);
+    if (!agent) {
+      const config = findConfig(configs, ...parts);
+      if (config && isTemplate(config)) continue;
+      const display = configDisplayName(config);
+      agent = { id: groupId("agent", key), name: parts[3], displayName: display.name || parts[3], named: display.named, realm: parts[0], scope: parts.slice(0, 3).filter(Boolean), rows: [] };
+    }
     agent.rows.push(row);
     found.set(key, agent);
   }
-  const agents = [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.realm.localeCompare(b.realm) || a.id.localeCompare(b.id));
+  const agents = [...found.values()].sort((a, b) => a.displayName.localeCompare(b.displayName) || a.name.localeCompare(b.name) || a.realm.localeCompare(b.realm) || a.id.localeCompare(b.id));
   for (const agent of agents) {
-    const sameName = agents.filter(other => other.name === agent.name);
+    const sameName = agents.filter(other => other.displayName === agent.displayName);
     agent.showRealm = sameName.some(other => other.realm !== agent.realm);
     agent.context = sameName.some(other => other !== agent && other.realm === agent.realm) ? agent.scope.join(" / ") : agent.showRealm ? agent.realm : "";
   }
   return { agents, others };
+}
+
+// The creation time of a cell in milliseconds, or NaN when the daemon reports none (a zero time).
+function createdAt(row) {
+  const value = row.doc.status?.createdAt;
+  return typeof value === "string" && !value.startsWith("0001-") ? Date.parse(value) : NaN;
+}
+
+// instanceLabels maps each cell (by JSON scope) to the label it is listed with (#1692): its own
+// kukeon.io/display-name, else, for an agent with a name of its own, "<agent display name> #N" where N is
+// its ordinal by creation time among the agent's instances (name order breaks ties and stands in for a
+// missing time). A cell of an agent without a name of its own keeps its cell name, so it has no entry
+// unless it carries a display name. Pass every cell, not a filtered list, so ordinals stay stable.
+export function instanceLabels(rows, configs = []) {
+  const labels = new Map();
+  for (const row of rows) {
+    const own = ownDisplayName(row.doc);
+    if (own) labels.set(JSON.stringify(row.scope), own);
+  }
+  for (const agent of agentGroups(rows, configs).agents) {
+    if (!agent.named) continue;
+    const ordered = [...agent.rows].sort((a, b) => {
+      const at = createdAt(a), bt = createdAt(b);
+      if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+      if (Number.isFinite(at) !== Number.isFinite(bt)) return Number.isFinite(at) ? -1 : 1;
+      return a.scope.join("/").localeCompare(b.scope.join("/"));
+    });
+    ordered.forEach((row, i) => {
+      const key = JSON.stringify(row.scope);
+      if (!labels.has(key)) labels.set(key, `${agent.displayName} #${i + 1}`);
+    });
+  }
+  return labels;
 }
 
 // rollupState is the one state an agent row shows: the state of the first instance that needs

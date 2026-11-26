@@ -7,7 +7,7 @@ kuke create <resource> [NAME] [flags]
 kuke c      <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `volume`, `registry-credential`, `team`, `source`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `vol`; `secret`, `team` and `source` have none, and `registry-credential` has `registry-cred`/`regcred`).
+Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `volume`, `registry-credential`, `team`, `source`, `agent`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `vol`; `secret`, `team`, `source` and `agent` have none, and `registry-credential` has `registry-cred`/`regcred`).
 
 ## kuke create realm
 
@@ -528,7 +528,7 @@ the same Team.
 
 ### Reserved team names
 
-`create team` refuses two team names, whether given positionally, with
+`create team` refuses three team names, whether given positionally, with
 `--name`, or as the directory's `metadata.name`, before anything is fetched or
 applied:
 
@@ -537,6 +537,8 @@ applied:
   applies. A project team under that name would replace its declaration and
   prune its `kuke-majordomo-*` configs, which carry the same
   `kukeon.io/team: kuke` label.
+- `default` — the system team of agent templates that `kuke team init` also
+  applies (see [The default team](kuke-team-init.md#the-default-team)).
 
 Any other name, `kukeon` included, is a project team. Team names are unique
 across realms.
@@ -712,6 +714,54 @@ Used by: default role dev, team kukeon (declared agents), team kukeon (role dev)
 
 `kuke apply -f` of a `kind: Source` document stores one without fetching (see
 [kuke apply → Teams](kuke-apply.md#teams)).
+
+## kuke create agent
+
+```
+kuke create agent --harness claude|codex [--name NAME] [--realm R [--space S [--stack T]]] [-a]
+```
+
+New agent from the CLI: a Claude or Codex agent that knows it runs in kukeon
+and needs no project. It copies the harness's agent template —
+`default-agent-claude` or `default-agent-codex`, which
+[`kuke team init`](kuke-team-init.md#the-default-team) stores with the
+`default` team — into a CellConfig of its own, then creates and starts that
+Config's first cell.
+
+| Flag             | Default        | Description                                                                      |
+| ---------------- | -------------- | -------------------------------------------------------------------------------- |
+| `--harness`      | _(required)_   | `claude` or `codex`                                                              |
+| `--name`         | —              | The agent's display name (`kukeon.io/display-name`, at most 63 characters)       |
+| `--realm`        | the template's | Realm to store the agent's Config in                                             |
+| `--space`        | the template's | Space to store it in (requires `--realm`)                                        |
+| `--stack`        | the template's | Stack to store it in (requires `--space`)                                        |
+| `-a`, `--attach` | `false`        | Attach to the cell once it is started, as `kuke run -a` does; detach with `^]^]` |
+
+The copy is named `<template>-<6 hex>` and keeps the template's spec as it is,
+so every agent of a harness mounts the template's state volume and shares its
+login. It keeps the labels `kukeon.io/role` and `kukeon.io/harness`, drops
+`kukeon.io/team` and `kukeon.io/template`, and records its template in the
+annotation `kukeon.io/agent-template`. Without a team label, applying a team
+never prunes it. The first cell gets a generated name.
+
+```
+$ sudo kuke create agent --harness claude --name "Reviewer"
+Config "default-agent-claude-3f9a1c" (Reviewer) stored in default/default/default, from template default-agent-claude
+Cell "default-agent-claude-3f9a1c-8b2e4d" created and started in default/default/default
+Attach with: kuke attach default-agent-claude-3f9a1c-8b2e4d --realm default --space default --stack default
+```
+
+Errors:
+
+- A missing template (the `default` team is not applied) fails before
+  anything is stored; run `kuke team init`.
+- An unknown harness, or a display name longer than 63 characters or with
+  control characters, is refused.
+- When creating or starting the cell fails, the Config is kept and the error
+  names it (and the cell, when it was created): finish with
+  `kuke run --from-config <config>` or `kuke start <cell>`.
+
+See [Your first agent](../guides/first-agent.md).
 
 ## Imperative vs. declarative
 

@@ -18,6 +18,7 @@
 package team
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -45,7 +46,7 @@ func NewTeamCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			if name == teamconfig.SystemTeamName {
-				return errdefs.ErrTeamReserved
+				return fmt.Errorf("team %s is a %w", name, errdefs.ErrTeamReserved)
 			}
 			realm, _ := cmd.Flags().GetString("realm")
 			if realm = strings.TrimSpace(realm); realm == "" {

@@ -1663,3 +1663,48 @@ type ReleaseGitFetchArgs struct {
 type ReleaseGitFetchReply struct {
 	Err *APIError
 }
+
+// ---- Display names (issue #1692) ----
+
+// Display-name target kinds (DisplayNameTarget.Kind).
+const (
+	DisplayNameTargetConfig = "config"
+	DisplayNameTargetCell   = "cell"
+)
+
+// DisplayNameTarget names the CellConfig or cell a SetDisplayName renames: a
+// Config by its name and scope (realm, optionally space and stack), a cell by
+// its name and full scope.
+type DisplayNameTarget struct {
+	Kind  string
+	Name  string
+	Realm string
+	Space string
+	Stack string
+}
+
+// SetDisplayNameRequest sets DisplayName on Target; an empty DisplayName
+// clears it.
+type SetDisplayNameRequest struct {
+	Target      DisplayNameTarget
+	DisplayName string
+}
+
+// SetDisplayNameResult is the target's display name after the call (empty:
+// none), its annotations, and whether the stored document changed.
+type SetDisplayNameResult struct {
+	DisplayName string
+	Annotations map[string]string
+	Changed     bool
+}
+
+// SetDisplayNameArgs is the wire request for SetDisplayName.
+type SetDisplayNameArgs struct {
+	Request SetDisplayNameRequest
+}
+
+// SetDisplayNameReply is the wire response for SetDisplayName.
+type SetDisplayNameReply struct {
+	Result SetDisplayNameResult
+	Err    *APIError
+}

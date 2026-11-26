@@ -272,6 +272,10 @@ func (FakeClient) DeleteTeam(context.Context, TeamRef) (DeleteTeamResult, error)
 	return DeleteTeamResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) SetDisplayName(context.Context, SetDisplayNameRequest) (SetDisplayNameResult, error) {
+	return SetDisplayNameResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetTeamDefaults(context.Context, string) (GetTeamDefaultsResult, error) {
 	return GetTeamDefaultsResult{}, ErrUnexpectedCall
 }

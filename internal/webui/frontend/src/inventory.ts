@@ -10,10 +10,20 @@ export type RuntimeStatus = {
   createdAt?: string; updatedAt?: string; startTime?: string; finishTime?: string; restartTime?: string;
   containers?: RuntimeStatus[]; repos?: SetupStatus[]; stages?: SetupStatus[];
 };
-export type Doc = { metadata: { name: string; labels?: Record<string, string> }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
+export type Doc = { metadata: { name: string; labels?: Record<string, string>; annotations?: Record<string, string>; realm?: string; space?: string; stack?: string }; status?: RuntimeStatus; apiVersion?: string; kind?: string; [key: string]: unknown };
 export type Row = { doc: Doc; scope: string[] };
-export type Inventory = { rows: Row[][]; failures: string[]; updatedAt: string };
-export type InventoryResource = Resource<Inventory> & { daemon: Resource<true>; upsertCell: (doc: Doc) => void };
+// configs is the CellConfig catalog (metadata only), read beside the cells so agent lists can show the
+// display names of #1692. A failed read keeps the last list (or none) and is not an inventory failure:
+// the lists then fall back to Config names.
+export type Inventory = { rows: Row[][]; failures: string[]; updatedAt: string; configs: Doc[] };
+export type ConfigRef = { name: string; realm: string; space?: string; stack?: string };
+export type InventoryResource = Resource<Inventory> & {
+  daemon: Resource<true>;
+  upsertCell: (doc: Doc) => void;
+  // A rename's result (#1692), applied in place until the next read replaces the inventory.
+  setConfigAnnotations: (config: ConfigRef, annotations: Record<string, string> | undefined) => void;
+  setCellAnnotations: (scope: string[], annotations: Record<string, string> | undefined) => void;
+};
 
 async function readJSON<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
@@ -49,6 +59,24 @@ export function useInventory(revision: number): InventoryResource {
       return { ...old, data: { ...old.data, rows } };
     });
   }, []);
+  const lastConfigs = useRef<Doc[]>([]);
+  const setConfigAnnotations = useCallback((config: ConfigRef, annotations: Record<string, string> | undefined) => {
+    const same = (doc: Doc) => doc.metadata.name === config.name && (doc.metadata.realm ?? "") === config.realm && (doc.metadata.space ?? "") === (config.space ?? "") && (doc.metadata.stack ?? "") === (config.stack ?? "");
+    setState(old => {
+      if (!old.data) return old;
+      const configs = old.data.configs.map(doc => same(doc) ? { ...doc, metadata: { ...doc.metadata, annotations } } : doc);
+      lastConfigs.current = configs;
+      return { ...old, data: { ...old.data, configs } };
+    });
+  }, []);
+  const setCellAnnotations = useCallback((scope: string[], annotations: Record<string, string> | undefined) => {
+    const key = JSON.stringify(scope);
+    setState(old => {
+      if (!old.data) return old;
+      const rows = old.data.rows.map((items, depth) => depth !== 3 ? items : items.map(row => JSON.stringify(row.scope) === key ? { ...row, doc: { ...row.doc, metadata: { ...row.doc.metadata, annotations } } } : row));
+      return { ...old, data: { ...old.data, rows } };
+    });
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && !activeRequest.current) setPulse(value => value + 1);
@@ -62,10 +90,11 @@ export function useInventory(revision: number): InventoryResource {
     setDaemon(old => ({ ...old, loading: true }));
     void (async () => {
       try {
+        const configsRead = readJSON<Doc[]>("/api/catalog/configs", controller.signal).then(docs => Array.isArray(docs) ? docs : lastConfigs.current, () => lastConfigs.current);
         const realms = await readJSON<Doc[]>("/api/realms", controller.signal);
         if (controller.signal.aborted) return;
         setDaemon({ data: true, loading: false });
-        const result: Inventory = { rows: [realms.map(doc => ({ doc, scope: [doc.metadata.name] })), [], [], []], failures: [], updatedAt: "" };
+        const result: Inventory = { rows: [realms.map(doc => ({ doc, scope: [doc.metadata.name] })), [], [], []], failures: [], updatedAt: "", configs: [] };
         for (let depth = 1; depth < 4; depth++) {
           await eachScope(result.rows[depth - 1], async parent => {
             try {
@@ -78,7 +107,9 @@ export function useInventory(revision: number): InventoryResource {
           });
           result.rows[depth].sort((a, b) => a.scope.join("/").localeCompare(b.scope.join("/")));
         }
+        result.configs = await configsRead;
         if (controller.signal.aborted) return;
+        lastConfigs.current = result.configs;
         result.updatedAt = new Date().toISOString();
         setState(old => result.failures.length && old.data
           ? { data: old.data, loading: false, error: { code: "partial", message: result.failures.join("; ") } }
@@ -98,5 +129,5 @@ export function useInventory(revision: number): InventoryResource {
       if (activeRequest.current === controller) activeRequest.current = null;
     };
   }, [revision, pulse]);
-  return { ...state, daemon, upsertCell };
+  return { ...state, daemon, upsertCell, setConfigAnnotations, setCellAnnotations };
 }

@@ -19,6 +19,7 @@ package create
 import (
 	"strings"
 
+	agentcmd "github.com/eminwux/kukeon/cmd/kuke/create/agent"
 	blueprintcmd "github.com/eminwux/kukeon/cmd/kuke/create/blueprint"
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/create/cell"
 	configcmd "github.com/eminwux/kukeon/cmd/kuke/create/config"
@@ -41,7 +42,7 @@ func NewCreateCmd() *cobra.Command {
 		Use:     "create",
 		Aliases: []string{"c"},
 		Short: "Create Kukeon resources (realm, space, stack, cell, config, blueprint, secret, volume, " +
-			"registry-credential, team, source)",
+			"registry-credential, team, source, agent)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -61,6 +62,7 @@ func NewCreateCmd() *cobra.Command {
 		registrycredentialcmd.NewRegistryCredentialCmd(),
 		teamcmd.NewTeamCmd(),
 		sourcecmd.NewSourceCmd(),
+		agentcmd.NewAgentCmd(),
 	)
 
 	return cmd
@@ -70,7 +72,7 @@ func NewCreateCmd() *cobra.Command {
 func completeCreateSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	subcommands := []string{
 		"realm", "space", "stack", "cell", "config", "blueprint", "secret", "volume", "registry-credential",
-		"team", "source",
+		"team", "source", "agent",
 	}
 
 	if toComplete == "" {
