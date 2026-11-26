@@ -5,7 +5,6 @@ export const NOT_SET = "Not set";
 export const NOT_ALLOCATED = "Not allocated";
 export const NOT_RUNNING = "Not running";
 export const ANY_PORT = "Any port";
-export const NOT_APPLIED = "Declared — not applied at runtime yet";
 
 export function formatFlag(value) {
   return value ? "Yes" : "No (default)";
@@ -66,14 +65,6 @@ export function formatContainerCNIPath(container) {
   return container.cniConfigPathSource === "container" ? container.cniConfigPath : `Inherited from space (${container.cniConfigPath})`;
 }
 
-// formatDeclaredList renders a declared ports / networks / networksAliases
-// field. notApplied is true when the field is set, since the runtime does
-// not consume these yet (#1002).
-export function formatDeclaredList(values) {
-  if (!values?.length) return { text: NOT_SET, notApplied: false };
-  return { text: values.join(", "), notApplied: true };
-}
-
 // One-line digests for the collapsed Network disclosure on cell and container pages (#1568).
 export function summarizeCellNetwork(cell) {
   const count = cell?.containers?.length ?? 0;
@@ -81,6 +72,5 @@ export function summarizeCellNetwork(cell) {
 }
 
 export function summarizeContainerNetwork(container) {
-  const ports = container?.ports?.length ?? 0;
-  return [container?.hostNetwork ? "Host network" : "Cell network namespace", container?.root ? "root container" : "", ports ? `${ports} declared ${ports === 1 ? "port" : "ports"}` : "No declared ports"].filter(Boolean).join(" · ");
+  return [container?.hostNetwork ? "Host network" : "Cell network namespace", container?.root ? "root container" : ""].filter(Boolean).join(" · ");
 }

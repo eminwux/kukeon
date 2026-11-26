@@ -829,17 +829,18 @@ test("a cell not created from a Config says so, and a failed internal read stays
 });
 
 test("the container page collapses Network and Cgroup the same way, while realm, space and stack pages keep them open", async ({ page }) => {
-  await mock(page, path => path.endsWith("/containers/web/network") ? { json: { cell: { hostNetwork: false, ipv4State: "assigned", ipv4: "10.88.1.5", rootContainer: "root" }, container: { id: "web", ports: ["8080:80"] } } }
+  await mock(page, path => path.endsWith("/containers/web/network") ? { json: { cell: { hostNetwork: false, ipv4State: "assigned", ipv4: "10.88.1.5", rootContainer: "root" }, container: { id: "web" } } }
     : path.endsWith("/containers/web/cgroup") ? { json: { cgroupPath: "/kukeon/web", exists: false, ready: false } } : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const networkPanel = page.getByRole("region", { name: "container network" });
   const cgroupPanel = page.getByRole("region", { name: "container cgroup" });
-  await expect(networkPanel.locator("summary")).toContainText("Cell network namespace · 1 declared port");
+  await expect(networkPanel.locator("summary")).toContainText("Cell network namespace");
+  await expect(networkPanel.locator("summary")).not.toContainText("declared");
   await expect(cgroupPanel.locator("summary")).toContainText("Cgroup not present");
   await expect(networkPanel.locator(".panel-body")).toBeHidden();
   await expect(cgroupPanel.locator(".panel-body")).toBeHidden();
   await expand(page, "container network");
-  await expect(networkPanel.locator("dt:text-is('Ports') + dd")).toContainText("8080:80");
+  await expect(networkPanel.locator("dt:text-is('Host network') + dd")).toHaveText("No (default)");
   await expand(page, "container cgroup");
   await expect(cgroupPanel.getByText("kukeond found no cgroup at this path")).toBeVisible();
   // A realm, space or stack page has no disclosure: its sections render open as before.
@@ -3021,7 +3022,7 @@ test("space network section renders deny rules with Any port and an unallocated 
 test("cellRead network section shows Not running for a stopped cell and the per-container summary", async ({ page }) => {
   await mock(page, path => path.endsWith("/cells/api/network") ? { json: {
     space: { networkName: "dev-shared", subnetCIDR: "10.88.1.0/24", subnetSource: "allocator", configPath: "/c.conflist", configPathSource: "default", cniNetworkExists: true, egress: { default: "allow", defaultSource: "default" } },
-    cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4State: "not-running", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web", ports: ["8080:80"] }] },
+    cell: { bridgeName: "k-0123abcd", hostNetwork: false, ipv4State: "not-running", rootContainer: "root", containers: [{ id: "root", root: true }, { id: "web" }] },
   } } : undefined);
   await page.goto(`${server.url}#/resource/dev/shared/services/api`);
   const panel = page.getByRole("region", { name: "cell network" });
@@ -3031,15 +3032,14 @@ test("cellRead network section shows Not running for a stopped cell and the per-
   await expect(panel.getByText("Not running", { exact: true })).toBeVisible();
   const containers = panel.locator("table.network-containers");
   await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("No (default)");
-  await expect(containers.locator("tr").filter({ hasText: "web" })).toContainText("Declared — not applied at runtime yet");
-  await expect(containers.locator("tr").filter({ hasText: "root" })).toContainText("Not set");
+  await expect(containers.locator("th")).toHaveText(["Container", "Host network", "Host PID"]);
 });
 
-test("container network section labels defaults, inherited CNI path and unset declarations", async ({ page }) => {
+test("container network section labels defaults and the inherited CNI path, with no declared-list rows", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers/web/network") ? { json: {
     space: { networkName: "prod-shared", subnetCIDR: "10.88.1.0/24", subnetSource: "allocator", configPath: "/s.conflist", configPathSource: "default", cniNetworkExists: true, egress: { default: "allow", defaultSource: "default" } },
     cell: { hostNetwork: true, ipv4State: "host-network", rootContainer: "root" },
-    container: { id: "web", hostNetwork: true, hostPID: false, cniConfigPath: "/s.conflist", cniConfigPathSource: "space", networks: ["backend"] },
+    container: { id: "web", hostNetwork: true, hostPID: false, cniConfigPath: "/s.conflist", cniConfigPathSource: "space" },
   } } : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
   const panel = page.getByRole("region", { name: "container network" });
@@ -3050,8 +3050,7 @@ test("container network section labels defaults, inherited CNI path and unset de
   await expect(panel.getByText("Joins the network namespace of root container")).toBeVisible();
   await expect(panel.getByText("Host", { exact: true })).toBeVisible();
   await expect(panel.getByText("Host network (no CNI attachment)").first()).toBeVisible();
-  await expect(panel.locator("dd").filter({ hasText: "backend" })).toContainText("Declared — not applied at runtime yet");
-  await expect(panel.locator("dd").filter({ hasText: /^Not set$/ })).toHaveCount(2);
+  for (const label of ["Ports", "Networks", "Network aliases"]) await expect(panel.locator(`dt:text-is('${label}')`)).toHaveCount(0);
 });
 
 test("a failed network read uses the resource error pattern", async ({ page }) => {

@@ -30,26 +30,23 @@ type ContainerMetadata struct {
 }
 
 type ContainerSpec struct {
-	ID              string
-	ContainerdID    string
-	RealmName       string
-	SpaceName       string
-	StackName       string
-	CellName        string
-	Root            bool
-	Image           string
-	Command         string
-	Args            []string
-	WorkingDir      string
-	Env             []string
-	Ports           []string
-	Volumes         []VolumeMount
-	Networks        []string
-	NetworksAliases []string
-	Privileged      bool
-	HostNetwork     bool
-	HostPID         bool
-	HostCgroup      bool
+	ID           string
+	ContainerdID string
+	RealmName    string
+	SpaceName    string
+	StackName    string
+	CellName     string
+	Root         bool
+	Image        string
+	Command      string
+	Args         []string
+	WorkingDir   string
+	Env          []string
+	Volumes      []VolumeMount
+	Privileged   bool
+	HostNetwork  bool
+	HostPID      bool
+	HostCgroup   bool
 	// NestedCgroupRuntime mirrors the parent cell's
 	// CellSpec.NestedCgroupRuntime opt-in (issue #314). When true and
 	// !HostCgroup, BuildContainerSpec/BuildRootContainerSpec append a

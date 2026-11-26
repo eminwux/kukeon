@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  ANY_PORT, NOT_ALLOCATED, NOT_RUNNING, NOT_SET, formatBridge, formatConfigPath, formatContainerCNIPath, formatDeclaredList,
+  ANY_PORT, NOT_ALLOCATED, NOT_RUNNING, formatBridge, formatConfigPath, formatContainerCNIPath,
   formatEgressDefault, formatFlag, formatIPv4, formatNetworkExists, formatNetworkMode, formatRulePorts, formatRuleTarget, formatSubnet,
   summarizeCellNetwork, summarizeContainerNetwork,
 } from "../src/network-format.js";
@@ -45,14 +45,12 @@ test("cell IPv4 reads Not running for stopped cells and states host mode", () =>
   assert.equal(formatNetworkMode({ hostNetwork: false }), "Bridged (space network)");
 });
 
-test("container flags default, CNI path inherited, declared lists Not set", () => {
+test("container flags default, CNI path inherited", () => {
   assert.equal(formatFlag(undefined), "No (default)");
   assert.equal(formatFlag(false), "No (default)");
   assert.equal(formatFlag(true), "Yes");
   assert.equal(formatContainerCNIPath({ id: "a", cniConfigPath: "/s.conflist", cniConfigPathSource: "space" }), "Inherited from space (/s.conflist)");
   assert.equal(formatContainerCNIPath({ id: "a", cniConfigPath: "/own.conflist", cniConfigPathSource: "container" }), "/own.conflist");
-  assert.deepEqual(formatDeclaredList([]), { text: NOT_SET, notApplied: false });
-  assert.deepEqual(formatDeclaredList(["8080:80"]), { text: "8080:80", notApplied: true });
 });
 
 test("the collapsed Network row summarizes the mode, the address state and the container count", () => {
@@ -60,6 +58,6 @@ test("the collapsed Network row summarizes the mode, the address state and the c
   assert.equal(summarizeCellNetwork({ ipv4State: "not-running", containers: [{ id: "root" }] }), `Bridged (space network) · ${NOT_RUNNING} · 1 container`);
   assert.equal(summarizeCellNetwork({ hostNetwork: true, ipv4State: "host-network" }), "Host · Host network (no CNI attachment)");
   assert.equal(summarizeCellNetwork(undefined), `Bridged (space network) · ${NOT_RUNNING}`);
-  assert.equal(summarizeContainerNetwork({ id: "web", ports: ["8080:80", "9090"] }), "Cell network namespace · 2 declared ports");
-  assert.equal(summarizeContainerNetwork({ id: "root", root: true, hostNetwork: true }), "Host network · root container · No declared ports");
+  assert.equal(summarizeContainerNetwork({ id: "web" }), "Cell network namespace");
+  assert.equal(summarizeContainerNetwork({ id: "root", root: true, hostNetwork: true }), "Host network · root container");
 });

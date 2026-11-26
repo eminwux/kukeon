@@ -2,7 +2,7 @@ import { useResource, ErrorNotice, failureTitle, type Resource } from "./request
 import { StoredDisclosure, disclosedKinds } from "./disclosure";
 import { apiPath, kinds } from "./routes";
 import {
-  NOT_APPLIED, formatBridge, formatConfigPath, formatContainerCNIPath, formatDeclaredList, formatEgressDefault, formatFlag,
+  formatBridge, formatConfigPath, formatContainerCNIPath, formatEgressDefault, formatFlag,
   formatIPv4, formatNetworkExists, formatNetworkMode, formatRulePorts, formatRuleTarget, formatSubnet, summarizeCellNetwork, summarizeContainerNetwork,
   type CellNetwork, type ContainerNetwork, type SpaceNetwork,
 } from "./network-format.js";
@@ -13,11 +13,6 @@ export type NetworkDetail = { space?: SpaceNetwork; cell?: CellNetwork; containe
 // networkKinds are the resource kinds with networking fields; realms and
 // stacks have none.
 export const networkKinds = ["space", "cell", "container"];
-
-function Declared({ label, values }: { label: string; values?: string[] }) {
-  const declared = formatDeclaredList(values);
-  return <><dt>{label}</dt><dd>{declared.text}{declared.notApplied && <small className="network-note"> {NOT_APPLIED}</small>}</dd></>;
-}
 
 function SpaceSection({ space }: { space: SpaceNetwork }) {
   const rules = space.egress?.allow ?? [];
@@ -57,10 +52,8 @@ function ContainersSummary({ cell }: { cell: CellNetwork }) {
   if (!cell.containers?.length) return null;
   return <>
     <h3>Containers</h3>
-    <div className="table-scroll"><table className="network-containers"><thead><tr><th>Container</th><th>Host network</th><th>Host PID</th><th>Declared ports</th></tr></thead><tbody>{cell.containers.map(c => {
-      const ports = formatDeclaredList(c.ports);
-      return <tr key={c.id}><td>{c.id}{c.root && <small className="network-note"> (root)</small>}</td><td>{formatFlag(c.hostNetwork)}</td><td>{formatFlag(c.hostPID)}</td><td>{ports.text}{ports.notApplied && <small className="network-note"> {NOT_APPLIED}</small>}</td></tr>;
-    })}</tbody></table></div>
+    <div className="table-scroll"><table className="network-containers"><thead><tr><th>Container</th><th>Host network</th><th>Host PID</th></tr></thead><tbody>{cell.containers.map(c =>
+      <tr key={c.id}><td>{c.id}{c.root && <small className="network-note"> (root)</small>}</td><td>{formatFlag(c.hostNetwork)}</td><td>{formatFlag(c.hostPID)}</td></tr>)}</tbody></table></div>
   </>;
 }
 
@@ -72,9 +65,6 @@ function ContainerSection({ container, cell }: { container: ContainerNetwork; ce
       <dt>Host PID</dt><dd>{formatFlag(container.hostPID)}</dd>
       <dt>CNI config path</dt><dd><code>{formatContainerCNIPath(container)}</code></dd>
       <dt>Shared namespaces</dt><dd>{container.root ? "Owns the cell network namespace" : <>Joins the network namespace of root container <code>{cell?.rootContainer}</code></>}</dd>
-      <Declared label="Ports" values={container.ports} />
-      <Declared label="Networks" values={container.networks} />
-      <Declared label="Network aliases" values={container.networksAliases} />
     </dl>
   </>;
 }

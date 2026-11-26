@@ -22,7 +22,6 @@ export const containerFields = [
   { key: "env", label: "Environment variables", kind: "env", help: "Values are redacted in previews and server errors. Prefer Secret references for credentials." },
   { key: "attachable", label: "Attachable terminal", kind: "boolean" },
   { key: "root", label: "Explicitly mark this container as the root", kind: "boolean", advanced: true, help: "Leave off to let kukeon add its default root container." },
-  { key: "ports", label: "Ports", kind: "strings", advanced: true, help: "Use the supported port format, one entry per row." },
   { key: "volumes", label: "Volumes and mounts", kind: "objects", advanced: true, itemLabel: "Mount", fields: [
     { key: "kind", label: "Mount kind", kind: "enum", options: ["bind", "tmpfs", "volume"] },
     { key: "source", label: "Source / volume name", kind: "text" },
@@ -36,8 +35,6 @@ export const containerFields = [
       { key: "space", label: "Space", kind: "text" }, { key: "stack", label: "Stack", kind: "text" },
     ] },
   ] },
-  { key: "networks", label: "Networks", kind: "strings", advanced: true },
-  { key: "networksAliases", label: "Network aliases", kind: "strings", advanced: true },
   { key: "privileged", label: "Privileged mode", kind: "boolean", advanced: true },
   { key: "hostNetwork", label: "Host network namespace", kind: "boolean", advanced: true },
   { key: "hostPID", label: "Host PID namespace", kind: "boolean", advanced: true },

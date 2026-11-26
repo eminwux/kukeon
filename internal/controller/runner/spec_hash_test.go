@@ -133,7 +133,7 @@ func TestComputeContainerSpecHash_BreakingFieldsChangeHash(t *testing.T) {
 }
 
 // TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash locks that
-// fields `apply.DiffCell` classifies as Compatible (env, ports, repos) are
+// fields `apply.DiffCell` classifies as Compatible (env, repos) are
 // *not* part of the hash. Hashing them would force a recreate-or-refuse on
 // every `kuke apply -f` that only tweaked a compatible field, defeating the
 // in-place UpdateCell path the apply layer already exercises for those
@@ -152,7 +152,6 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 		mut  func(s *intmodel.ContainerSpec)
 	}{
 		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }},
-		{"ports", func(s *intmodel.ContainerSpec) { s.Ports = []string{"8080:80"} }},
 		{"repos", func(s *intmodel.ContainerSpec) {
 			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
 		}},
@@ -253,7 +252,6 @@ func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 		}, true},
 		// Compatible domain — must NOT change the hash.
 		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }, false},
-		{"ports", func(s *intmodel.ContainerSpec) { s.Ports = []string{"8080:80"} }, false},
 		{"repos", func(s *intmodel.ContainerSpec) {
 			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
 		}, false},

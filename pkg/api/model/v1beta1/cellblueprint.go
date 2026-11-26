@@ -252,10 +252,7 @@ type BlueprintContainer struct {
 	Args                   []string               `json:"args,omitempty"                   yaml:"args,omitempty"`
 	WorkingDir             string                 `json:"workingDir,omitempty"             yaml:"workingDir,omitempty"`
 	Env                    []string               `json:"env,omitempty"                    yaml:"env,omitempty"`
-	Ports                  []string               `json:"ports,omitempty"                  yaml:"ports,omitempty"`
 	Volumes                []VolumeMount          `json:"volumes,omitempty"                yaml:"volumes,omitempty"`
-	Networks               []string               `json:"networks,omitempty"               yaml:"networks,omitempty"`
-	NetworksAliases        []string               `json:"networksAliases,omitempty"        yaml:"networksAliases,omitempty"`
 	Privileged             bool                   `json:"privileged,omitempty"             yaml:"privileged,omitempty"`
 	HostNetwork            bool                   `json:"hostNetwork,omitempty"            yaml:"hostNetwork,omitempty"`
 	HostPID                bool                   `json:"hostPID,omitempty"                yaml:"hostPID,omitempty"`

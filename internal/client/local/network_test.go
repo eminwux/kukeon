@@ -120,7 +120,7 @@ func TestCellNetworkDetail(t *testing.T) {
 	bridged := v1beta1.CellDoc{
 		Spec: v1beta1.CellSpec{Containers: []v1beta1.ContainerSpec{
 			{ID: "root", Root: true},
-			{ID: "app", Ports: []string{"8080"}},
+			{ID: "app"},
 		}},
 		Status: v1beta1.CellStatus{Network: v1beta1.CellNetworkStatus{BridgeName: "k-0123abcd"}},
 	}
@@ -205,10 +205,7 @@ func TestContainerNetworkDetail(t *testing.T) {
 			}
 		})
 	}
-	got := containerNetworkDetail(v1beta1.ContainerSpec{
-		ID: "root", Ports: []string{"80"}, Networks: []string{"n"}, NetworksAliases: []string{"a"},
-	}, "root", spacePath)
-	if !got.Root || len(got.Ports) != 1 || len(got.Networks) != 1 || len(got.NetworksAliases) != 1 {
-		t.Errorf("declared fields not carried: %+v", got)
+	if got := containerNetworkDetail(v1beta1.ContainerSpec{ID: "root"}, "root", spacePath); !got.Root {
+		t.Errorf("Root = false for the root container: %+v", got)
 	}
 }

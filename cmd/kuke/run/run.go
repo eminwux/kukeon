@@ -1104,9 +1104,9 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 // divergedFields names the fields where the on-disk cell disagrees with the
 // file. The check covers structural identity (container count, container id
 // set, cell location) and the operator-controlled per-container fields the
-// runner does NOT rewrite at create time (image, command, args, env, ports,
-// volumes, networks, host-namespace opts, privileged, attachable,
-// restartPolicy, workingDir). Per the AC for issue #468, a genuine spec
+// runner does NOT rewrite at create time (image, command, args, env,
+// volumes, host-namespace opts, privileged, attachable, restartPolicy,
+// workingDir). Per the AC for issue #468, a genuine spec
 // rewrite — including an image swap — must route through `kuke apply -f`
 // instead of silently no-opping under `kuke run -f`.
 //
@@ -1192,9 +1192,8 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 // actual disagrees with desired. Restricted to fields the runner does NOT
 // fill in or normalize at create/start time (so a fresh cell never
 // false-flags on the next `kuke run -f` of the same file): image, command,
-// args, workingDir, env, ports, volumes, networks, networksAliases,
-// privileged, hostNetwork, hostPID, hostCgroup, attachable, restartPolicy,
-// secrets, tty.
+// args, workingDir, env, volumes, privileged, hostNetwork, hostPID,
+// hostCgroup, attachable, restartPolicy, secrets, tty.
 // Fields that inherit from `space.spec.defaults.container` (see
 // internal/modelhub.ApplySpaceDefaultsToContainer) are deliberately
 // excluded — their on-disk value is post-merge while the YAML side is
@@ -1216,17 +1215,8 @@ func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
 	if !stringSlicesEqual(actual.Env, desired.Env) {
 		fields = append(fields, focusedSliceDiff("env", actual.Env, desired.Env))
 	}
-	if !stringSlicesEqual(actual.Ports, desired.Ports) {
-		fields = append(fields, sliceDiff("ports", actual.Ports, desired.Ports))
-	}
 	if !volumeMountsEqual(actual.Volumes, desired.Volumes) {
 		fields = append(fields, valueDiff("volumes", actual.Volumes, desired.Volumes))
-	}
-	if !stringSlicesEqual(actual.Networks, desired.Networks) {
-		fields = append(fields, sliceDiff("networks", actual.Networks, desired.Networks))
-	}
-	if !stringSlicesEqual(actual.NetworksAliases, desired.NetworksAliases) {
-		fields = append(fields, sliceDiff("networksAliases", actual.NetworksAliases, desired.NetworksAliases))
 	}
 	if actual.Privileged != desired.Privileged {
 		fields = append(fields, boolDiff("privileged", actual.Privileged, desired.Privileged))

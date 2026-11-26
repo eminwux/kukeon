@@ -180,6 +180,8 @@ spec:
 	invoke(append([]string{"restart", directCell}, scope...)...)
 	assertAttachedEnvironment(t, host, runPath, realm, space, stack, directCell, "v2:kept")
 
+	// ports, networks and networksAliases are no longer container fields. They
+	// stay in this manifest to prove a manifest that still carries them applies.
 	makeStandaloneContainer := func(msg string) string {
 		return fmt.Sprintf(`apiVersion: v1beta1
 kind: Container
