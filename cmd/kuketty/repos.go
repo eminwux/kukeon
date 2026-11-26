@@ -200,21 +200,40 @@ func applyRepoConfig(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit
 
 // cloneRepo clones the repo's effective URL into repo.Target. When repo.Ref is
 // set the clone fetches the default branch (plus all refs/tags) and then
-// detaches HEAD at the pinned ref — supports both a tag name and a full commit
-// SHA. Otherwise repo.Branch (if set) is forwarded to `git clone --branch`.
+// detaches HEAD at the pinned ref (checkoutRef) — supports both a tag name and
+// a full commit SHA. Otherwise repo.Branch (if set) is forwarded to
+// `git clone --branch`.
 func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) error {
 	args := append(rg.configFlags(), "clone")
 	if repo.Ref != "" {
 		if err := runGit(ctx, rg.env, "", append(args, rg.url, repo.Target)...); err != nil {
 			return err
 		}
-		return runGit(ctx, rg.env, repo.Target, "checkout", "--detach", repo.Ref)
+		return checkoutRef(ctx, repo, rg)
 	}
 	if repo.Branch != "" {
 		args = append(args, "--branch", repo.Branch)
 	}
 	args = append(args, rg.url, repo.Target)
 	return runGit(ctx, rg.env, "", args...)
+}
+
+// checkoutRef detaches HEAD at the pinned repo.Ref. A clone and a
+// `fetch --tags` bring every branch and tag, which holds any tag and any
+// commit on a branch. A commit that is on neither — the merge commit of a
+// pull request, which a forge keeps under its own ref namespace — is not in
+// the checkout yet: the remote is asked for it by name, as the host does when
+// it reads a Source at a commit, and HEAD is detached at what it sent. When
+// that fetch fails too, the error is the checkout's, which names the ref.
+func checkoutRef(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) error {
+	checkoutErr := runGit(ctx, rg.env, repo.Target, "checkout", "--detach", repo.Ref)
+	if checkoutErr == nil {
+		return nil
+	}
+	if err := runGit(ctx, rg.env, repo.Target, "fetch", "origin", repo.Ref); err != nil {
+		return checkoutErr
+	}
+	return runGit(ctx, rg.env, repo.Target, "checkout", "--detach", "FETCH_HEAD")
 }
 
 // fetchRepo updates an existing checkout. For a Ref-pinned repo (immutable tag
@@ -228,7 +247,7 @@ func fetchRepo(ctx context.Context, repo v1beta1.ContainerRepo, rg repoGit) erro
 		if err := runGit(ctx, rg.env, repo.Target, "fetch", "--prune", "--tags", "origin"); err != nil {
 			return err
 		}
-		return runGit(ctx, rg.env, repo.Target, "checkout", "--detach", repo.Ref)
+		return checkoutRef(ctx, repo, rg)
 	}
 	if err := runGit(ctx, rg.env, repo.Target, "fetch", "--prune", "origin"); err != nil {
 		return err

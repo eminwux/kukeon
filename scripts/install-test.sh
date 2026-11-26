@@ -27,6 +27,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="${REPO_ROOT}/scripts/install.sh"
 WORK="$(mktemp -d -t kuke-install-test.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
+# A case that fails where no failure is expected ends the script (set -e) with
+# its output captured in a variable: say where, and print what it printed.
+LAST_OUT="${WORK}/last.out"
+trap 'printf "install-test.sh: aborted at line %s; the last installer run printed:\n" "$LINENO" >&2; cat "$LAST_OUT" >&2 2>/dev/null || true' ERR
 
 failures=0
 pass() { printf 'ok   %s\n' "$1"; }
@@ -79,6 +83,13 @@ for tool in bash cat sed awk grep head tr mktemp install rm sleep id printf env 
         ln -sf "$path" "${BASE_BIN}/${tool}"
     fi
 done
+# Run as a non-root user (CI), the installer refuses to load without sudo.
+# Nothing here needs root: the stub runs its arguments as the current user.
+cat >"${BASE_BIN}/sudo" <<'EOF'
+#!/bin/bash
+exec "$@"
+EOF
+chmod +x "${BASE_BIN}/sudo"
 
 # new_case <name> makes an empty stub directory and prefix for one case and
 # points CASE_BIN / CASE_PREFIX / CASE_LOG at them.
@@ -106,6 +117,7 @@ EOF
 # the installer's own functions and assignments; `exit` inside them ends only
 # that shell.
 in_installer() {
+    local rc=0
     env -i HOME="$WORK" PATH="${CASE_BIN}:${BASE_BIN}" NO_COLOR=1 TMPDIR="$WORK" \
         KUKE_INSTALL_LIB=1 KUKE_INSTALL_PREFIX="$CASE_PREFIX" \
         ${SUDO_USER_FOR_CASE:+SUDO_USER="$SUDO_USER_FOR_CASE"} \
@@ -120,7 +132,9 @@ in_installer() {
             SUDO=""
             WEB_UI_SETTLE_SECONDS=0
             eval "$script"
-        ' install-test "$INSTALLER" "$1" 2>&1
+        ' install-test "$INSTALLER" "$1" >"$LAST_OUT" 2>&1 || rc=$?
+    cat "$LAST_OUT"
+    return "$rc"
 }
 
 # --- The unit file ------------------------------------------------------------

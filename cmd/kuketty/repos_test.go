@@ -298,6 +298,53 @@ func TestProcessRepos_RefPinAcceptsCommitSHA(t *testing.T) {
 	}
 }
 
+// TestProcessRepos_RefPinAcceptsCommitOnNoBranch pins a commit that no branch
+// or tag holds: the merge commit of a pull request, which a forge keeps under
+// refs/pull/<N>/merge. A clone does not bring it, so the checkout asks the
+// remote for it by SHA; a restart (the fetch path) resolves it again.
+func TestProcessRepos_RefPinAcceptsCommitOnNoBranch(t *testing.T) {
+	src := makeSourceRepo(t, "README.md")
+	gitRun(t, src, "checkout", "--detach")
+	if err := os.WriteFile(filepath.Join(src, "merged.txt"), []byte("merge\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, src, "add", ".")
+	gitRun(t, src, "commit", "-m", "merge of a pull request")
+	mergeSHA := strings.TrimSpace(gitCapture(t, src, "rev-parse", "HEAD"))
+	gitRun(t, src, "update-ref", "refs/pull/1/merge", mergeSHA)
+	gitRun(t, src, "checkout", "main")
+
+	target := filepath.Join(t.TempDir(), "checkout")
+	repos := []v1beta1.ContainerRepo{
+		{Name: "pinned", Target: target, Ref: mergeSHA, URL: src, Required: true},
+	}
+	for _, pass := range []string{"clone", "restart"} {
+		statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+		if err != nil {
+			t.Fatalf("%s: processRepos: %v", pass, err)
+		}
+		if len(statuses) != 1 || statuses[0].Commit != mergeSHA {
+			t.Fatalf("%s: want checkout pinned at %q, got %+v", pass, mergeSHA, statuses)
+		}
+		if _, statErr := os.Stat(filepath.Join(target, "merged.txt")); statErr != nil {
+			t.Errorf("%s: the pinned commit's file is missing: %v", pass, statErr)
+		}
+	}
+
+	// A commit the remote does not have still fails, with the checkout's error.
+	missing := []v1beta1.ContainerRepo{{
+		Name: "missing", Target: filepath.Join(t.TempDir(), "checkout"),
+		Ref: strings.Repeat("0", 39) + "1", URL: src, Required: true,
+	}}
+	statuses, err := processRepos(context.Background(), missing, nil, discardLogger())
+	if err == nil {
+		t.Fatalf("want an error for a commit the remote does not have, got %+v", statuses)
+	}
+	if len(statuses) != 1 || !strings.Contains(statuses[0].Error, "checkout --detach") {
+		t.Errorf("want the checkout's error, got %+v", statuses)
+	}
+}
+
 func TestProcessRepos_RequiredFailureAfterSuccessStillPropagates(t *testing.T) {
 	src := makeSourceRepo(t, "README.md")
 	dir := t.TempDir()

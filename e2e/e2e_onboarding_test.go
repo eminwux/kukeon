@@ -138,6 +138,17 @@ func TestOnboarding_WebUI(t *testing.T) {
 	if runErr := cmd.Run(); runErr != nil {
 		t.Errorf("onboarding browser run failed: %v (traces are under %s)",
 			runErr, filepath.Join(frontend, "test-results"))
+		// What the cells ended as: a cell that did not reach Ready carries
+		// the reason (a failed checkout, a failed pull) in its status.
+		getArgs := []string{
+			"--host", host, "get", "cells",
+			"--realm", config.DefaultRealm,
+			"--space", consts.KukeonDefaultSpaceName,
+			"--stack", consts.KukeonDefaultStackName,
+			"-o", "yaml",
+		}
+		_, stdout, stderr := runBinary(t, nil, kuke, getArgs...)
+		t.Logf("kuke get cells -o yaml:\n%s%s", stdout, stderr)
 		logKukeondTail(t, runPath)
 	}
 }
