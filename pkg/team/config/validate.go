@@ -415,6 +415,12 @@ func validateConnectors(field string, choices map[string]ConnectorChoice) error 
 		if choice.Method != "" && !ValidName(choice.Method) {
 			return fmt.Errorf("%s.%s.method: invalid method name %q", field, name, choice.Method)
 		}
+		switch choice.State {
+		case "", StatePersistent, StateEphemeral:
+		default:
+			return fmt.Errorf("%s.%s.state: want %s or %s, got %q",
+				field, name, StatePersistent, StateEphemeral, choice.State)
+		}
 		if choice.Identity == "" {
 			continue
 		}

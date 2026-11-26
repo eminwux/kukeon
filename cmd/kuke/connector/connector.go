@@ -28,6 +28,7 @@ import (
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/connector/gitimport"
+	"github.com/eminwux/kukeon/internal/connector/loginidentity"
 	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -51,6 +52,9 @@ type Client interface {
 	ListRealms(context.Context) ([]v1beta1.RealmDoc, error)
 	ListSecrets(ctx context.Context, realm, space, stack, cell string) ([]v1beta1.SecretDoc, error)
 	CreateSecret(context.Context, v1beta1.SecretDoc) (kukeonv1.CreateSecretResult, error)
+	// A login identity is a Volume, and logging in runs an identity cell.
+	loginidentity.Client
+	KillCell(context.Context, v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
 }
 
 var _ Client = kukeonv1.Client(nil)
@@ -76,7 +80,8 @@ func NewConnectorCmdWithCatalog(catalog *connector.Catalog) *cobra.Command {
 			"and a Realm, Space or Stack default names the identity every cell in it uses.\n\n" +
 			"  kuke connector list                         connectors, identities and realm defaults\n" +
 			"  kuke connector import git [--default]       store your git identity from this host\n" +
-			"  kuke connector default git <name[@realm]>   set a realm's default git identity",
+			"  kuke connector default git <name[@realm]>   set a realm's default git identity\n" +
+			"  kuke connector login <connector> [name]     create a login identity and log in",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -84,6 +89,7 @@ func NewConnectorCmdWithCatalog(catalog *connector.Catalog) *cobra.Command {
 	cmd.AddCommand(newListCmd(catalog))
 	cmd.AddCommand(newImportCmd(catalog))
 	cmd.AddCommand(newDefaultCmd(catalog))
+	cmd.AddCommand(newLoginCmd(catalog))
 	return cmd
 }
 

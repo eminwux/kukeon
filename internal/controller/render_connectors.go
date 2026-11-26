@@ -25,6 +25,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/connector"
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -37,16 +38,6 @@ import (
 // keeps no catalog: everything it knows about a connector is the descriptor
 // the component carries, plus the two delivery handlers written here (the
 // secret-slot one shared by env and file, and git).
-
-// stateVolumeScopeValues are the Config values naming the realm, space and
-// stack of the state volume.
-//
-//nolint:gochecknoglobals // read-only list of value names.
-var stateVolumeScopeValues = [3]string{"STATE_VOLUME_REALM", "STATE_VOLUME_SPACE", "STATE_VOLUME_STACK"}
-
-// stateVolumeValue is the Config value naming the volume a harness keeps its
-// state — and therefore its login — in.
-const stateVolumeValue = "STATE_VOLUME"
 
 // connectorRequirement is one connector a Config requires: an enabled
 // blueprint component carrying a connector descriptor.
@@ -83,14 +74,16 @@ func connectorRequirements(bp v1beta1.CellBlueprintDoc, enabled []string) []conn
 // It returns the overrides as they are recorded in the cell's provenance — a
 // reference without a realm is looked up in the cell's own.
 //
-// An override must name a connector the Config requires, and that connector
-// must take an identity. reqs already reflects a per-cell method choice
-// (#1551), so the identity fills the slot of the method the cell uses.
+// An override must name a connector the Config requires. reqs already
+// reflects a per-cell method choice (#1551), so the identity fills the slot of
+// the method the cell uses. For a method that keeps a login in the state
+// volume the override names a Volume — a login identity (#1685) — and is
+// returned apart, as the state volume the cell mounts.
 func cellConnectorLayer(
 	cfgName, realm string, reqs []connectorRequirement, overrides map[string]v1beta1.ContainerSecretRef,
-) (*v1beta1.ScopeDefaults, map[string]v1beta1.ContainerSecretRef, error) {
+) (*v1beta1.ScopeDefaults, map[string]v1beta1.ContainerSecretRef, map[string]v1beta1.VolumeRef, error) {
 	if len(overrides) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	names := make([]string, 0, len(overrides))
 	for name := range overrides {
@@ -99,18 +92,19 @@ func cellConnectorLayer(
 	sort.Strings(names)
 
 	layer := &v1beta1.ScopeDefaults{}
-	recorded := make(map[string]v1beta1.ContainerSecretRef, len(overrides))
+	recorded := map[string]v1beta1.ContainerSecretRef{}
+	volumes := map[string]v1beta1.VolumeRef{}
 	for _, name := range names {
 		req, ok := findRequirement(reqs, name)
 		if !ok {
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"%w: config %q requires no connector %q (its connectors: %s)",
 				errdefs.ErrConnectorUnknown, cfgName, name, requirementNames(reqs))
 		}
 		ref := trimSecretRef(overrides[name])
 		if ref.Name == "" {
-			return nil, nil, fmt.Errorf(
-				"%w: connector %q: the override names no secret", errdefs.ErrConnectorIdentity, name)
+			return nil, nil, nil, fmt.Errorf(
+				"%w: connector %q: the override names no identity", errdefs.ErrConnectorIdentity, name)
 		}
 		if ref.Realm == "" {
 			ref.Realm = realm
@@ -124,14 +118,34 @@ func cellConnectorLayer(
 			}
 			fill := ref
 			layer.Secrets[req.Slot] = v1beta1.CellConfigSecretFill{SecretRef: &fill}
+		case v1beta1.ConnectorDeliveryStateVolume:
+			if ref.Cell != "" || (ref.Stack != "" && ref.Space == "") {
+				return nil, nil, nil, fmt.Errorf(
+					"%w: connector %q: a login identity is a Volume, scoped to a realm, space or stack "+
+						"(<volume>[@realm[/space[/stack]]])",
+					errdefs.ErrVolumeIdentity, name)
+			}
+			if len(volumes) > 0 {
+				return nil, nil, nil, fmt.Errorf(
+					"%w: connector %q: a cell has one state volume, and another --connector already names it",
+					errdefs.ErrVolumeIdentity, name)
+			}
+			volumes[name] = v1beta1.VolumeRef{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+			continue
 		default:
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"%w: config %q uses connector %q through its %q method (%s delivery), which takes no identity",
 				errdefs.ErrConnectorIdentity, cfgName, name, req.Connector.Method, req.Connector.Delivery)
 		}
 		recorded[name] = ref
 	}
-	return layer, recorded, nil
+	if len(recorded) == 0 {
+		recorded = nil
+	}
+	if len(volumes) == 0 {
+		volumes = nil
+	}
+	return layer, recorded, volumes, nil
 }
 
 // cellMethodComponents applies the per-cell `--connector-method` choices
@@ -606,6 +620,21 @@ func (e *gitIdentityExpander) identity() (*v1beta1.ContainerSecretRef, string) {
 	return nil, ""
 }
 
+// harnessState is the state choice in effect for a cell and the Config it is
+// rendered from: what connectorStatuses needs beyond the merged fill.
+type harnessState struct {
+	// state is persistent or ephemeral.
+	state string
+	// cfg is the Config being resolved; its labels name its team and role.
+	cfg v1beta1.CellConfigMetadata
+	// cellVolume reports that the cell itself named the state volume
+	// (`--connector <connector>=<volume>`), by connector.
+	cellVolume map[string]bool
+	// self is the cell being rendered: its own pick of a login identity is
+	// not another cell's. Its name is empty before the cell is named.
+	self applypkg.CellKey
+}
+
 // connectorStatuses reports how every requirement resolves against the merged
 // Config: the identity that fills it and the level it came from, or why
 // nothing does.
@@ -615,6 +644,7 @@ func connectorStatuses(
 	merged v1beta1.CellConfigDoc,
 	values []v1beta1.RenderedValue,
 	git *gitIdentityExpander,
+	hs harnessState,
 ) []v1beta1.ConnectorStatus {
 	origins := map[string]string{}
 	gitOrigin := ""
@@ -628,6 +658,8 @@ func connectorStatuses(
 			}
 		}
 	}
+	volume := strings.TrimSpace(merged.Spec.Values[applypkg.StateVolumeValue])
+	volumeRef := applypkg.StateVolumeRef(merged.Spec.Values)
 
 	out := make([]v1beta1.ConnectorStatus, 0, len(reqs))
 	for _, req := range reqs {
@@ -647,29 +679,113 @@ func connectorStatuses(
 			gitStatus(&status, merged.Spec.Git, gitOrigin, git)
 		case v1beta1.ConnectorDeliveryEnv, v1beta1.ConnectorDeliveryFile:
 			slotStatus(r, &status, desc, merged.Spec.Secrets[req.Slot], origins[req.Slot])
+			// A token method of a harness connector still keeps harness
+			// state: in the state volume, or nowhere that outlives the cell.
+			if desc.Harness != "" && volume != "" {
+				status.HarnessState = hs.state
+				if hs.state != v1beta1.HarnessStateEphemeral {
+					status.Volume, status.VolumeRef = volume, volumeRef
+				}
+			}
 		default:
-			// A login kept in the harness state volume has no stored identity.
+			// A login kept in the harness state volume: the volume is the
+			// identity (#1685).
 			status.State = v1beta1.ConnectorResolved
-			status.Volume = strings.TrimSpace(merged.Spec.Values[stateVolumeValue])
-			status.VolumeRef = stateVolumeRef(status.Volume, merged.Spec.Values)
+			status.Volume, status.VolumeRef = volume, volumeRef
+			status.HarnessState = v1beta1.HarnessStatePersistent
+			if hs.cellVolume[desc.Name] {
+				status.Origin = v1beta1.RenderOriginCell
+			}
+			loginVolumeStatus(r, &status, desc, hs)
 		}
 		out = append(out, status)
 	}
 	return out
 }
 
-// stateVolumeRef is the state volume with the scope the Config names for it,
-// or nil when the Config names no realm or an incomplete scope (a stack
-// without a space).
-func stateVolumeRef(name string, values map[string]string) *v1beta1.VolumeRef {
-	var scope [3]string
-	for i, key := range stateVolumeScopeValues {
-		scope[i] = strings.TrimSpace(values[key])
+// loginVolumeStatus checks the Volume a stateVolume connector keeps its login
+// in and reports its login state. A Volume the Config names need not exist —
+// the cell's start creates it — but one the cell itself picked must; a Volume
+// tagged for another connector, or already used by Configs of another role,
+// cannot be used. Only the Volume's tag and the marker's existence are read.
+func loginVolumeStatus(
+	r runner.Runner, status *v1beta1.ConnectorStatus, desc v1beta1.BlueprintConnector, hs harnessState,
+) {
+	ref := status.VolumeRef
+	if ref == nil {
+		return
 	}
-	if name == "" || scope[0] == "" || (scope[2] != "" && scope[1] == "") {
+	where := formatVolumeRef(*ref)
+	fail := func(format string, args ...any) {
+		status.State = v1beta1.ConnectorUnresolved
+		status.Message = fmt.Sprintf(format, args...)
+	}
+	md := intmodel.VolumeMetadata{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+	// The ref comes from Config values: check it is a Volume coordinate
+	// before anything reads the volumes tree with it.
+	if err := validateVolumeLookup(md); err != nil {
+		fail("volume %s: %v", where, err)
+		return
+	}
+	got, err := r.GetVolume(intmodel.Volume{Metadata: md})
+	switch {
+	case errors.Is(err, errdefs.ErrVolumeNotFound):
+		if hs.cellVolume[desc.Name] {
+			fail("volume %s does not exist; create it with `kuke connector login %s %s`",
+				where, desc.Name, ref.Name)
+			return
+		}
+		if desc.Login != nil && desc.Login.Marker != "" {
+			status.Login = &v1beta1.LoginStatus{State: v1beta1.LoginStateEmpty}
+		}
+	case err != nil:
+		fail("read volume %s: %v", where, err)
+		return
+	default:
+		if tag := got.Spec.Connector; tag != "" && tag != desc.Name {
+			fail("volume %s is a login identity of connector %q, not %q", where, tag, desc.Name)
+			return
+		}
+		status.Login = loginStatusOf(r, got, desc)
+	}
+	// One role per login identity. A Config's own binding is checked when the
+	// Config is stored (apply.validateLoginIdentityRole), so the role already
+	// using an identity keeps working; a cell's pick is checked here.
+	if !hs.cellVolume[desc.Name] {
+		return
+	}
+	if other := applypkg.OtherRoleOnStateVolume(r, *ref, hs.cfg, hs.self); other != "" {
+		fail("volume %s is the login identity of role %s; role %s cannot share it "+
+			"(the harness keeps role content in its state directory)",
+			where, other, applypkg.RoleName(hs.cfg.Labels))
+	}
+}
+
+// loginStatusOf is the login state of a stored Volume used through desc: its
+// own, when it is already tagged with a marker; otherwise the state of the
+// marker desc declares, so a Volume that predates tagging is not reported
+// empty before its first start.
+func loginStatusOf(r runner.Runner, vol intmodel.Volume, desc v1beta1.BlueprintConnector) *v1beta1.LoginStatus {
+	if vol.Status.Login == nil && desc.Login != nil && desc.Login.Marker != "" && vol.Spec.LoginMarker == "" {
+		probe := vol
+		probe.Spec.Connector, probe.Spec.LoginMarker = desc.Name, desc.Login.Marker
+		vol.Status.Login = r.VolumeLoginStatus(probe)
+	}
+	if vol.Status.Login == nil {
 		return nil
 	}
-	return &v1beta1.VolumeRef{Name: name, Realm: scope[0], Space: scope[1], Stack: scope[2]}
+	return &v1beta1.LoginStatus{State: vol.Status.Login.State, Since: vol.Status.Login.Since}
+}
+
+// formatVolumeRef renders a Volume reference as `name@realm[/space[/stack]]`.
+func formatVolumeRef(ref v1beta1.VolumeRef) string {
+	parts := []string{ref.Realm}
+	for _, part := range []string{ref.Space, ref.Stack} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return ref.Name + "@" + strings.Join(parts, "/")
 }
 
 // gitStatus fills the status of the git connector from the merged git block.
@@ -743,6 +859,10 @@ func connectorError(cfgName string, statuses []v1beta1.ConnectorStatus, git *git
 				"%w: config %q, connector %q: the identity set at the %s level cannot be used: %s",
 				errdefs.ErrConnectorIdentity, cfgName, status.Connector, status.Origin, status.Message)
 		}
+		if status.Delivery == v1beta1.ConnectorDeliveryStateVolume {
+			return fmt.Errorf("%w: config %q, connector %q: %s",
+				errdefs.ErrVolumeIdentity, cfgName, status.Connector, status.Message)
+		}
 		if !status.Required {
 			continue
 		}
@@ -761,19 +881,64 @@ func connectorError(cfgName string, statuses []v1beta1.ConnectorStatus, git *git
 	return nil
 }
 
-// connectorOverridesFromProvenance converts the overrides a cell recorded back
-// into the binding a re-render uses.
+// connectorOverridesFromProvenance converts the overrides a cell recorded —
+// the Secrets and the login-identity Volumes — back into the binding a
+// re-render uses.
 func connectorOverridesFromProvenance(
-	in map[string]intmodel.ContainerSecretRef,
+	in map[string]intmodel.ContainerSecretRef, volumes map[string]intmodel.VolumeRef,
 ) map[string]v1beta1.ContainerSecretRef {
-	if len(in) == 0 {
+	if len(in) == 0 && len(volumes) == 0 {
 		return nil
 	}
-	out := make(map[string]v1beta1.ContainerSecretRef, len(in))
+	out := make(map[string]v1beta1.ContainerSecretRef, len(in)+len(volumes))
 	for name, ref := range in {
 		out[name] = v1beta1.ContainerSecretRef{
 			Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack, Cell: ref.Cell,
 		}
 	}
+	for name, ref := range volumes {
+		out[name] = v1beta1.ContainerSecretRef{Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack}
+	}
 	return out
+}
+
+// effectiveHarnessState picks the harness state of a cell: its own `--state`
+// when set, else its Config's, else persistent.
+func effectiveHarnessState(cfgName, cfgState, cellState string) (string, error) {
+	state := strings.TrimSpace(cellState)
+	if state == "" {
+		state = strings.TrimSpace(cfgState)
+	}
+	switch state {
+	case "", v1beta1.HarnessStatePersistent:
+		return v1beta1.HarnessStatePersistent, nil
+	case v1beta1.HarnessStateEphemeral:
+		return v1beta1.HarnessStateEphemeral, nil
+	default:
+		return "", fmt.Errorf("%w: config %q: harness state %q must be %s or %s",
+			errdefs.ErrConfig, cfgName, state, v1beta1.HarnessStatePersistent, v1beta1.HarnessStateEphemeral)
+	}
+}
+
+// dropStateVolumeMounts removes the state volume's mount from a rendered
+// cell: with ephemeral harness state the state directory is part of the
+// container's own filesystem and goes away with the cell.
+func dropStateVolumeMounts(cell *v1beta1.CellDoc, values map[string]string) {
+	name := strings.TrimSpace(values[applypkg.StateVolumeValue])
+	if name == "" {
+		return
+	}
+	ref := applypkg.StateVolumeRef(values)
+	for ci := range cell.Spec.Containers {
+		volumes := cell.Spec.Containers[ci].Volumes
+		cell.Spec.Containers[ci].Volumes = slices.DeleteFunc(volumes, func(m v1beta1.VolumeMount) bool {
+			if m.Kind != v1beta1.VolumeKindVolume {
+				return false
+			}
+			if m.VolumeRef != nil {
+				return m.VolumeRef.Name == name && (ref == nil || *m.VolumeRef == *ref)
+			}
+			return m.Source == name
+		})
+	}
 }

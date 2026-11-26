@@ -258,7 +258,10 @@ type runFlags struct {
 	// connectorMethodArgs are the `--connector-method <connector>=<method>`
 	// per-cell method choices (--from-config).
 	connectorMethodArgs []string
-	paramFile           string
+	// state is the `--state persistent|ephemeral` harness state choice
+	// (--from-config).
+	state     string
+	paramFile string
 	// mode is the harness mode (`--mode`) of a --from-config / --clone run.
 	mode string
 	// envArgs are the validated `KEY=VALUE` --env entries. On the existing-cell
@@ -375,6 +378,14 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	}
 	flags.connectorMethodArgs = connectorMethodArgs
 
+	if cmd.Flags().Lookup("state") != nil {
+		state, stateErr := cmd.Flags().GetString("state")
+		if stateErr != nil {
+			return runFlags{}, stateErr
+		}
+		flags.state = strings.TrimSpace(state)
+	}
+
 	envRaw, err := cmd.Flags().GetStringArray("env")
 	if err != nil {
 		return runFlags{}, err
@@ -438,6 +449,9 @@ func validateSourceFlagCompat(flags runFlags) error {
 	}
 	if len(flags.connectorMethodArgs) > 0 && flags.configName == "" {
 		return errors.New("--connector-method is only valid with --from-config")
+	}
+	if flags.state != "" && flags.configName == "" {
+		return errors.New("--state is only valid with --from-config")
 	}
 	if flags.fused() {
 		return nil
@@ -591,6 +605,7 @@ func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error 
 		ParamArgs:           flags.paramArgs,
 		ConnectorArgs:       flags.connectorArgs,
 		ConnectorMethodArgs: flags.connectorMethodArgs,
+		State:               flags.state,
 		ParamFile:           flags.paramFile,
 		Mode:                flags.mode,
 		EnvArgs:             flags.envArgs,

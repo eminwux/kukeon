@@ -419,6 +419,11 @@ type pairPlan struct {
 	choices map[string]config.ConnectorChoice
 	// git is the Config's git block: the git identity the team chose.
 	git *api.ContainerGit
+	// harnessConnector is the connector that authenticates the pair's
+	// harness and harnessMethod the method the pair uses; empty when the
+	// harness has none.
+	harnessConnector string
+	harnessMethod    connector.Method
 	// notes are operator-facing remarks about the pair.
 	notes []string
 }

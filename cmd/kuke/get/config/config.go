@@ -279,14 +279,22 @@ func nextColumn(c *v1beta1.CellConfigDoc) string {
 // and the level it comes from (`gh-token (realm)`), the method for a connector
 // that keeps a login in the state volume (`login`), `MISSING` for a required
 // connector nothing resolves — a cell cannot be created until one does — and
-// `none` for one the cell starts without.
+// `none` for one the cell starts without. A connector that authenticates a
+// harness adds, in brackets, where the harness keeps its state: the login
+// identity and its login state (`login [kukeon-dev-state, logged in]`), or
+// the state volume of a token method (`tok (realm) [state kukeon-dev-state]`,
+// `[state ephemeral]`).
 func connectorsColumn(c *v1beta1.CellConfigDoc) string {
 	if c.Status == nil {
 		return ""
 	}
 	parts := make([]string, 0, len(c.Status.Connectors))
 	for _, status := range c.Status.Connectors {
-		parts = append(parts, status.Connector+"="+status.Fill())
+		part := status.Connector + "=" + status.Fill()
+		if state := status.StateText(); state != "" {
+			part += " [" + state + "]"
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ", ")
 }

@@ -31,6 +31,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -107,6 +108,9 @@ type Method struct {
 	Requires []string `json:"requires,omitempty"    yaml:"requires,omitempty"`
 	// Secret is where the identity lands; absent for stateVolume delivery.
 	Secret *MethodSecret `json:"secret,omitempty"      yaml:"secret,omitempty"`
+	// Login says how the login of a stateVolume method is detected (marker)
+	// and started (command). stateVolume delivery only.
+	Login *api.ConnectorLogin `json:"login,omitempty"       yaml:"login,omitempty"`
 }
 
 // MethodSecret is the secret slot of an env or file method.
@@ -258,6 +262,14 @@ func validateMethod(field string, method Method) error {
 		if secret != nil {
 			return fmt.Errorf("%s: a stateVolume method keeps a login and declares no secret", field)
 		}
+		if login := method.Login; login != nil {
+			if login.Marker != "" && !filepath.IsLocal(login.Marker) {
+				return fmt.Errorf("%s.login.marker: must be a path inside the state directory", field)
+			}
+			if slices.Contains(login.Command, "") {
+				return fmt.Errorf("%s.login.command: empty argument", field)
+			}
+		}
 		return nil
 	case api.ConnectorDeliveryEnv:
 		if secret == nil || !envPattern.MatchString(secret.EnvName) || secret.MountPath != "" {
@@ -269,6 +281,9 @@ func validateMethod(field string, method Method) error {
 		}
 	default:
 		return fmt.Errorf("%s.delivery: expected env, file or stateVolume", field)
+	}
+	if method.Login != nil {
+		return fmt.Errorf("%s.login: only a stateVolume method keeps a login", field)
 	}
 	if !namePattern.MatchString(secret.Name) {
 		return fmt.Errorf("%s.secret.name: invalid name", field)
@@ -339,7 +354,35 @@ func (c *Connector) Descriptor(method Method) api.BlueprintConnector {
 		Scopes:      slices.Clone(c.Spec.Scopes),
 		Fields:      slices.Clone(c.Spec.Identity.Fields),
 		Optional:    c.Spec.Optional,
+		Harness:     c.Spec.Harness,
+		Login:       cloneLogin(method.Login),
 	}
+}
+
+func cloneLogin(in *api.ConnectorLogin) *api.ConnectorLogin {
+	if in == nil {
+		return nil
+	}
+	return &api.ConnectorLogin{Marker: in.Marker, Command: slices.Clone(in.Command)}
+}
+
+// LoginMethod returns the connector's method that keeps a login in the state
+// volume: the named one, or — for an empty name — the default method when it
+// is one, else the first that is.
+func (c *Connector) LoginMethod(name string) (Method, bool) {
+	if name != "" {
+		method, ok := c.Method(name)
+		return method, ok && method.Delivery == api.ConnectorDeliveryStateVolume
+	}
+	if method, ok := c.Method(""); ok && method.Delivery == api.ConnectorDeliveryStateVolume {
+		return method, true
+	}
+	for _, method := range c.Spec.Methods {
+		if method.Delivery == api.ConnectorDeliveryStateVolume {
+			return method, true
+		}
+	}
+	return Method{}, false
 }
 
 // Find returns the named connector.

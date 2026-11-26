@@ -7,7 +7,7 @@ kuke create <resource> [NAME] [flags]
 kuke c      <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `registry-credential`, `team`, `source`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `secret`, `team` and `source` have none, and `registry-credential` has `registry-cred`/`regcred`).
+Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `volume`, `registry-credential`, `team`, `source`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `vol`; `secret`, `team` and `source` have none, and `registry-credential` has `registry-cred`/`regcred`).
 
 ## kuke create realm
 
@@ -59,7 +59,8 @@ sudo kuke create stack wordpress --realm default --space blog
 kuke create cell [NAME] --realm <r> --space <s> --stack <t>
                        ( --image <ref> [--command <cmd>]
                        | --from-blueprint <bp> [--param K=V]... [--param-file <path>]
-                       | --from-config <cfg> [--env K=V]... [--connector C=SECRET]... [--connector-method C=METHOD]... [--dry-run [--explain]]
+                       | --from-config <cfg> [--env K=V]... [--connector C=IDENTITY]... [--connector-method C=METHOD]...
+                                             [--state persistent|ephemeral] [--dry-run [--explain]]
                        | --clone <cell> [--param K=V]... [--env K=V]... )
 ```
 
@@ -74,28 +75,33 @@ Four source modes (exactly one of `--image` / `--from-blueprint` / `--from-confi
 
 **`--connector` (per-cell identity).** `--connector <connector>=<secret>[@realm[/space[/stack]]]` uses another stored identity for one [connector](../concepts/connectors.md) of this cell — for example `--connector github=other-github`. It is valid with `--from-config` only and repeatable, once per connector; `--clone` of such a cell carries the source's overrides over unchanged. A secret named without a scope is looked up in the cell's realm. The override wins over the Config's fill and every Realm/Space/Stack default, is recorded in `Spec.Provenance.connectorOverrides`, and so survives `kuke restart` and a reconcile-driven recreate. A connector the Config does not require, a missing Secret, or a Secret tagged for another connector or of a type the connector does not accept is rejected. A Config whose required connector resolves to no identity cannot be previewed or created: the error names the connector.
 
+With a connector method that keeps its login in the harness state volume (`login`), the value names a [login identity](../concepts/connectors.md#login-identities) instead: `--connector <connector>=<volume>[@realm[/space[/stack]]]`, for example `--connector claude=personal-max`. That Volume becomes the cell's state volume; a name without a scope is a realm-scoped Volume of the Config's realm. The choice is recorded in `Spec.Provenance.connectorVolumes` and survives `kuke restart`, a reconcile-driven recreate and `--clone`. A Volume that does not exist, one tagged for another connector, and one that Configs of another role already use are rejected before anything is created; the last error names both roles.
+
+**`--state` (per-cell harness state).** `--state persistent|ephemeral` picks where the harness of this one cell keeps its [state](../concepts/connectors.md#harness-state-persistent-or-ephemeral): `persistent` mounts the Config's state volume, `ephemeral` mounts none, so the state directory lives and dies with the cell and the cell authenticates from its Secret. Empty keeps the Config's `spec.state` (default `persistent`). Valid with `--from-config` only; recorded in `Spec.Provenance.state`, so it survives `kuke restart`, a reconcile-driven recreate and `--clone`. `ephemeral` with a method that keeps its login in the state volume is rejected: the login would not survive the cell.
+
 **`--connector-method` (per-cell method).** `--connector-method <connector>=<method>` uses another [method](../concepts/connectors.md#per-cell-overrides) of a connector for this cell — for example `--connector-method codex=api-key` on a Config that uses `login`. The blueprint component of that method is enabled in place of the one the Config enables; the method's identity then resolves through `--connector`, the Config and the Realm/Space/Stack defaults. Valid with `--from-config` only and repeatable, once per connector; recorded in `Spec.Provenance.connectorMethods`, so it survives `kuke restart`, a reconcile-driven recreate and `--clone`. A connector the Config's blueprint declares no methods for, a method it does not declare, or a connector the Config does not require (a method pick swaps a method, it never adds a connector) is rejected.
 
 **`--param` / `--env` symmetry.** Blueprints take render-time `--param`; Configs take persisted per-cell `--env`. `--param`/`--param-file` are valid with `--from-blueprint` and rejected with `--from-config` (a Config carries its own `spec.values` — edit the Config instead); symmetrically, `--env KEY=VALUE` is valid with `--from-config` (a per-cell override layered on the Config's resolved values, baked into the CellDoc and recorded in `Spec.Provenance.envOverrides`) and rejected with `--from-blueprint`. On `--clone`, the source's lineage decides which applies: `--param` on a Blueprint-lineage source, `--env` on a Config-lineage source. The same `cell.ValidateOverrideSymmetry` gate enforces this on `kuke run` and `kuke create cell` alike.
 
-| Flag                  | Default             | Description                                                                                                                                                                                     |
-| --------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[NAME]` (positional) | _(generated)_       | The cell name. Optional: omitted → generated `<prefix>-<6hex>` (`<source-name>-<6hex>` with `--clone`); explicit name used verbatim                                                             |
-| `--realm`             | `default`           | Realm that owns the cell                                                                                                                                                                        |
-| `--space`             | `default`           | Space that owns the cell                                                                                                                                                                        |
-| `--stack`             | `default`           | Stack that owns the cell                                                                                                                                                                        |
-| `--image`             | `""`                | Image ref to synthesize a single attachable container from. A fourth source; mutually exclusive with `--from-blueprint`/`--from-config`/`--clone`. Rejects `--param`/`--param-file`/`--env`     |
-| `--command`           | `""`                | With `--image`: override the synthesized container's entrypoint (default `/bin/sh`). Only valid with `--image`                                                                                  |
-| `--from-blueprint`    | `""`                | Daemon-stored CellBlueprint name. Exactly one of `--image`/`--from-blueprint`/`--from-config`/`--clone` is required; the four are mutually exclusive                                            |
-| `--from-config`       | `""`                | Daemon-stored CellConfig name. Exactly one of `--image`/`--from-blueprint`/`--from-config`/`--clone` is required; the four are mutually exclusive                                               |
-| `--clone`             | `""`                | Existing cell to fork. Re-materialises from the source's provenance binding, copies its provenance, inherits its lineage label, stamps `kukeon.io/source-cell=<src>`                            |
-| `--param`             | (empty, repeatable) | Scalar parameter override `KEY=VALUE`. Valid with `--from-blueprint` (and a Blueprint-lineage `--clone`); rejected with `--from-config` (a Config carries its own `spec.values`)                |
-| `--param-file`        | `""`                | File of `KEY=VALUE` lines seeding scalar parameters. Same declaration rules as `--param`; `--param` wins on dups. Rejected with `--from-config`                                                 |
-| `--env`               | (empty, repeatable) | Persisted per-cell override `KEY=VALUE`. Valid with `--from-config` (and a Config-lineage `--clone`); baked into the CellDoc + `Spec.Provenance.envOverrides`. Rejected with `--from-blueprint` |
-| `--connector`         | (empty, repeatable) | Per-cell identity override `CONNECTOR=SECRET[@realm[/space[/stack]]]`. Valid with `--from-config` only; recorded in `Spec.Provenance.connectorOverrides`                                        |
-| `--connector-method`  | (empty, repeatable) | Per-cell method `CONNECTOR=METHOD`: enable that method's component instead of the Config's. Valid with `--from-config` only; recorded in `Spec.Provenance.connectorMethods`                     |
-| `--dry-run`           | `false`             | With `--from-config`: ask kukeond to render the cell and print it without creating anything. Rejected with other sources                                                                        |
-| `--explain`           | `false`             | With `--from-config`: print every merged value with its origin (`realm`, `space`, `stack`, `config`, `blueprint`) and the render digest                                                         |
+| Flag                  | Default             | Description                                                                                                                                                                                                                             |
+| --------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[NAME]` (positional) | _(generated)_       | The cell name. Optional: omitted → generated `<prefix>-<6hex>` (`<source-name>-<6hex>` with `--clone`); explicit name used verbatim                                                                                                     |
+| `--realm`             | `default`           | Realm that owns the cell                                                                                                                                                                                                                |
+| `--space`             | `default`           | Space that owns the cell                                                                                                                                                                                                                |
+| `--stack`             | `default`           | Stack that owns the cell                                                                                                                                                                                                                |
+| `--image`             | `""`                | Image ref to synthesize a single attachable container from. A fourth source; mutually exclusive with `--from-blueprint`/`--from-config`/`--clone`. Rejects `--param`/`--param-file`/`--env`                                             |
+| `--command`           | `""`                | With `--image`: override the synthesized container's entrypoint (default `/bin/sh`). Only valid with `--image`                                                                                                                          |
+| `--from-blueprint`    | `""`                | Daemon-stored CellBlueprint name. Exactly one of `--image`/`--from-blueprint`/`--from-config`/`--clone` is required; the four are mutually exclusive                                                                                    |
+| `--from-config`       | `""`                | Daemon-stored CellConfig name. Exactly one of `--image`/`--from-blueprint`/`--from-config`/`--clone` is required; the four are mutually exclusive                                                                                       |
+| `--clone`             | `""`                | Existing cell to fork. Re-materialises from the source's provenance binding, copies its provenance, inherits its lineage label, stamps `kukeon.io/source-cell=<src>`                                                                    |
+| `--param`             | (empty, repeatable) | Scalar parameter override `KEY=VALUE`. Valid with `--from-blueprint` (and a Blueprint-lineage `--clone`); rejected with `--from-config` (a Config carries its own `spec.values`)                                                        |
+| `--param-file`        | `""`                | File of `KEY=VALUE` lines seeding scalar parameters. Same declaration rules as `--param`; `--param` wins on dups. Rejected with `--from-config`                                                                                         |
+| `--env`               | (empty, repeatable) | Persisted per-cell override `KEY=VALUE`. Valid with `--from-config` (and a Config-lineage `--clone`); baked into the CellDoc + `Spec.Provenance.envOverrides`. Rejected with `--from-blueprint`                                         |
+| `--connector`         | (empty, repeatable) | Per-cell identity override `CONNECTOR=SECRET[@realm[/space[/stack]]]`, or `CONNECTOR=VOLUME[@…]` for a login method. Valid with `--from-config` only; recorded in `Spec.Provenance.connectorOverrides` (a Volume in `connectorVolumes`) |
+| `--state`             | (the Config's)      | Harness state of this cell: `persistent` or `ephemeral`. Valid with `--from-config` only; recorded in `Spec.Provenance.state`                                                                                                           |
+| `--connector-method`  | (empty, repeatable) | Per-cell method `CONNECTOR=METHOD`: enable that method's component instead of the Config's. Valid with `--from-config` only; recorded in `Spec.Provenance.connectorMethods`                                                             |
+| `--dry-run`           | `false`             | With `--from-config`: ask kukeond to render the cell and print it without creating anything. Rejected with other sources                                                                                                                |
+| `--explain`           | `false`             | With `--from-config`: print every merged value with its origin (`realm`, `space`, `stack`, `config`, `blueprint`) and the render digest                                                                                                 |
 
 ```bash
 # Synthesize a single-container cell from an image, stopped (the quick-start path)
@@ -251,6 +257,37 @@ sudo kuke create secret me --connector git --author 'Me <me@example.com>'
 ```
 
 `kuke get secrets` lists each secret's `TYPE` and `CONNECTOR` (`-o wide` adds its readable `IDENTITY` fields); only a named `kuke get secret <name> -o yaml|json` prints a value.
+
+## kuke create volume
+
+```
+kuke create volume <name> [--realm <r>] [--space <s>] [--stack <t>]
+                          [--connector <c> [--method <m>]]
+```
+
+Create a standalone, daemon-managed Volume: the on-host directory a `kind: volume` mount binds into a container. A Volume is scoped to a realm, space or stack — never a cell, so it outlives the cells that mount it. Creating a Volume that exists re-asserts its directory and keeps the spec it has.
+
+**`--connector <name>`** creates a [login identity](../concepts/connectors.md#login-identities): the Volume is tagged with the connector and its login method (`spec.connector`, `spec.method`), carries the connector's login marker (`spec.loginMarker`) and is created with `reclaimPolicy: Retain`. On an existing untagged Volume it adds the tag — the way to tag a state volume by hand. A Volume already tagged for another connector, an unknown connector, and a connector with no method that keeps a login are rejected. `--method` names the login method when the connector has more than one, and needs `--connector`.
+
+This creates the identity without logging in. [`kuke connector login`](kuke-connector.md#kuke-connector-login) creates it and logs in.
+
+| Flag          | Default   | Description                                                          |
+| ------------- | --------- | -------------------------------------------------------------------- |
+| `--realm`     | `default` | Realm that owns the volume                                           |
+| `--space`     | (empty)   | Space that owns the volume                                           |
+| `--stack`     | (empty)   | Stack that owns the volume; needs `--space`                          |
+| `--connector` | (empty)   | Tag the volume as a login identity of this connector                 |
+| `--method`    | (empty)   | Login method of `--connector`; default: the connector's login method |
+
+```bash
+# A plain volume
+sudo kuke create volume data --realm default --space agents
+
+# A login identity, not logged in yet
+sudo kuke create volume personal-max --connector claude
+```
+
+`kuke get volumes -o wide` shows the `CONNECTOR`, `METHOD` and `LOGIN` of each volume.
 
 ## kuke create registry-credential
 

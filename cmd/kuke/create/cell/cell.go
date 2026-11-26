@@ -223,7 +223,17 @@ func RegisterSourceFlags(cmd *cobra.Command) {
 			"named without a scope is looked up in the Config's realm. It overrides the identity "+
 			"the Config or a Realm/Space/Stack default resolves, for the method the cell uses "+
 			"(see --connector-method), and is recorded in Spec.Provenance.connectorOverrides, so a "+
-			"restart and a recreate keep it.")
+			"restart and a recreate keep it. For a method that keeps a login in the harness state "+
+			"volume the value names a login identity instead — a Volume, <connector>=<volume>"+
+			"[@realm[/space[/stack]]], realm-scoped when no scope is given — which becomes the "+
+			"cell's state volume and is recorded in Spec.Provenance.connectorVolumes.")
+
+	cmd.Flags().String("state", "",
+		"Harness state for this cell only: persistent (mount the Config's state volume) or "+
+			"ephemeral (mount none; the state directory lives and dies with the cell). Valid with "+
+			"--from-config. Empty keeps the Config's spec.state. ephemeral is refused with a "+
+			"connector method that keeps its login in the state volume. Recorded in "+
+			"Spec.Provenance.state, so a restart and a recreate keep it.")
 
 	cmd.Flags().StringArray("connector-method", nil,
 		"Method of a connector for this cell only, as <connector>=<method> (e.g. codex=api-key); "+
@@ -283,6 +293,9 @@ type SourceFlags struct {
 	// ConnectorMethodArgs holds the `--connector-method <connector>=<method>`
 	// per-cell method choices, valid on the --from-config path. Issue #1551.
 	ConnectorMethodArgs []string
+	// State is the `--state persistent|ephemeral` harness state choice of
+	// the cell, valid on the --from-config path. Issue #1685.
+	State string
 	// IgnoreDiskPressure threads `--ignore-disk-pressure` onto the
 	// transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
@@ -392,6 +405,13 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error
 		}
 		flags.ConnectorMethodArgs = methodArgs
 	}
+	if cmd.Flags().Lookup("state") != nil {
+		state, stateErr := cmd.Flags().GetString("state")
+		if stateErr != nil {
+			return SourceFlags{}, stateErr
+		}
+		flags.State = strings.TrimSpace(state)
+	}
 
 	return flags, nil
 }
@@ -424,6 +444,12 @@ func ValidateOverrideSymmetry(flags SourceFlags) error {
 	if len(flags.ConnectorMethodArgs) > 0 && flags.ConfigName == "" {
 		return errors.New(
 			"--connector-method is only valid with --from-config; a connector method is picked for a cell " +
+				"created from a CellConfig",
+		)
+	}
+	if flags.State != "" && flags.ConfigName == "" {
+		return errors.New(
+			"--state is only valid with --from-config; harness state is chosen for a cell " +
 				"created from a CellConfig",
 		)
 	}
@@ -608,6 +634,18 @@ func rejectBindingKnobsWithImage(cmd *cobra.Command) error {
 		if len(connectorArgs) > 0 {
 			return errors.New(
 				"--connector is only valid with --from-config; a connector identity is picked for a cell " +
+					"created from a CellConfig",
+			)
+		}
+	}
+	if cmd.Flags().Lookup("state") != nil {
+		state, stateErr := cmd.Flags().GetString("state")
+		if stateErr != nil {
+			return stateErr
+		}
+		if strings.TrimSpace(state) != "" {
+			return errors.New(
+				"--state is only valid with --from-config; harness state is chosen for a cell " +
 					"created from a CellConfig",
 			)
 		}

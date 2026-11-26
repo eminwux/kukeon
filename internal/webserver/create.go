@@ -49,6 +49,9 @@ type createConfigRequest struct {
 	// Methods are the connector methods picked for this cell only, keyed by
 	// connector name — only the ones that differ from the Config's (#1551).
 	Methods map[string]string `json:"methods,omitempty"`
+	// State is the harness state picked for this cell only: persistent or
+	// ephemeral (issue #1685). Empty keeps the Config's.
+	State string `json:"state,omitempty"`
 	// TargetSpace and TargetStack place the cell below the Config's own
 	// scope (#1603). Empty keeps the Config's scope; the daemon refuses a
 	// coordinate the Config pins.
@@ -151,6 +154,13 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 	if err != nil {
 		return empty, err
 	}
+	state := strings.TrimSpace(input.State)
+	switch state {
+	case "", v1beta1.HarnessStatePersistent, v1beta1.HarnessStateEphemeral:
+	default:
+		return empty, fmt.Errorf("%w: state must be %s or %s",
+			errdefs.ErrConfig, v1beta1.HarnessStatePersistent, v1beta1.HarnessStateEphemeral)
+	}
 	targetSpace, targetStack := strings.TrimSpace(input.TargetSpace), strings.TrimSpace(input.TargetStack)
 	if targetSpace != "" && !safeSegment(targetSpace) {
 		return empty, fmt.Errorf("%w: unsafe target space", errdefs.ErrConfig)
@@ -166,6 +176,7 @@ func configCell(ctx context.Context, c kukeonv1.Client, input createConfigReques
 		EnvOverrides:       normalized,
 		ConnectorOverrides: overrides,
 		ConnectorMethods:   methods,
+		State:              state,
 		TargetSpace:        targetSpace,
 		TargetStack:        targetStack,
 	}
@@ -357,6 +368,7 @@ func renderError(err error) error {
 		// default" or "pick an identity" for it instead of a generic error.
 		errdefs.ErrConnectorUnresolved, errdefs.ErrConnectorIdentity,
 		errdefs.ErrConnectorUnknown, errdefs.ErrConnectorMethod, errdefs.ErrConnectorInvalid,
+		errdefs.ErrVolumeIdentity,
 	} {
 		if errors.Is(err, sentinel) {
 			return err

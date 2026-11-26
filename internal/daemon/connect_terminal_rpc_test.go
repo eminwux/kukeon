@@ -202,10 +202,21 @@ func TestConnectContainerTerminal_PassedConnCompletesSbshPing(t *testing.T) {
 	if len(core.handed) != 2 {
 		t.Fatalf("daemon dialed %d times, want 2", len(core.handed))
 	}
-	// The daemon must not keep its copy of a passed socket open.
+	// The daemon must not keep its copy of a passed socket open. The codec
+	// closes it only after the reply is on the wire, so the client can get
+	// here first: wait for the close instead of checking once.
+	deadline := time.Now().Add(2 * time.Second)
 	for i, c := range core.handed {
-		if _, err := c.Write([]byte("x")); !errors.Is(err, net.ErrClosed) {
-			t.Errorf("daemon copy %d still open after the reply (write err %v)", i, err)
+		for {
+			_, err := c.Write([]byte("x"))
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("daemon copy %d still open after the reply (write err %v)", i, err)
+				break
+			}
+			time.Sleep(time.Millisecond)
 		}
 	}
 }

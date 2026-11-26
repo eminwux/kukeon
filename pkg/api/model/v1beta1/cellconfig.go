@@ -117,6 +117,13 @@ type CellConfigSpec struct {
 	// It is not part of the rendered cell: changing or removing it never marks
 	// the Config's existing cells OutOfSync.
 	Schedule *CellConfigSchedule `json:"schedule,omitempty"   yaml:"schedule,omitempty"`
+	// State says where the harness of this Config's cells keeps its state
+	// directory: `persistent` (the default when empty) mounts the state
+	// volume the Config names, `ephemeral` mounts none, so the directory
+	// lives and dies with each cell. `ephemeral` needs a connector method
+	// that delivers a token: a login kept in the state volume would not
+	// survive the cell. Issue #1685.
+	State string `json:"state,omitempty"      yaml:"state,omitempty"`
 }
 
 // ConcurrencyPolicyForbid skips a scheduled fire while a cell an earlier fire

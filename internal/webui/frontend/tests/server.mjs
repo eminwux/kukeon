@@ -58,7 +58,7 @@ export const testConnectors = [
   {
     name: "demo", title: "Demo", description: "How a demo harness authenticates.", group: "demo-auth", harness: "demo", scopes: ["realm", "space", "stack"], secretTypes: ["opaque"], fields: [],
     methods: [
-      { name: "login", component: "demo-login", delivery: "stateVolume", description: "The login kept in the state volume." },
+      { name: "login", component: "demo-login", delivery: "stateVolume", login: true, description: "The login kept in the state volume." },
       { name: "key", component: "demo-key", default: true, delivery: "env", slot: "demo-key", envName: "DEMO_KEY", description: "An API key." },
     ],
   },
@@ -86,7 +86,7 @@ export const testBlueprint = {
       ...testConnectors.flatMap(connector => connector.methods.length
         ? connector.methods.map(method => ({
           kind: "connector", name: method.component, optional: true, description: method.description, ...(connector.group ? { group: connector.group } : {}),
-          connector: { name: connector.name, title: connector.title, method: method.name, delivery: method.delivery, secretTypes: connector.secretTypes, scopes: connector.scopes, fields: connector.fields },
+          connector: { name: connector.name, title: connector.title, method: method.name, delivery: method.delivery, secretTypes: connector.secretTypes, scopes: connector.scopes, fields: connector.fields, ...(connector.harness ? { harness: connector.harness } : {}) },
           ...(method.slot ? { secrets: [{ name: method.slot, envName: method.envName, required: !connector.optional }] } : {}),
         }))
         : connector.delivery === "git" ? [{ kind: "connector", name: connector.name, optional: true, description: connector.description, connector: { name: connector.name, title: connector.title, delivery: "git", secretTypes: connector.secretTypes, scopes: connector.scopes, fields: connector.fields, optional: true } }] : []),
@@ -122,6 +122,15 @@ export function connectorWorld() {
       { name: "registry-ghcr.io", realm: "dev", type: "basic-auth", connector: "pulls" },
       { name: "untagged", realm: "dev" },
     ],
+    // Volumes (#1685): a login identity carries its connector tag and whether it holds a login
+    // (`state`); a plain volume carries neither. The team's own state volume exists untagged.
+    volumes: [
+      { name: "kukeon-dev-demo-state", realm: "dev", space: "shared", stack: "services" },
+      { name: "demo-personal", realm: "dev", connector: "demo", method: "login", state: "empty" },
+      { name: "scratch", realm: "dev" },
+    ],
+    // Login sessions running right now, by volume path.
+    sessions: {},
     // scope path → "<connector>:<method>" → Secret reference.
     defaults: {},
     configs: [
@@ -167,20 +176,57 @@ export function connectorStatuses(world, config, overrides = {}) {
     const { connector, method } = found;
     const delivery = method?.delivery ?? connector.delivery;
     const base = { connector: connector.name, title: connector.title, component, ...(method ? { method: method.name } : {}), delivery, ...(method?.slot ? { slot: method.slot } : {}) };
+    const values = config.spec.values ?? {};
+    const ownVolume = values.STATE_VOLUME && values.STATE_VOLUME_REALM ? { name: values.STATE_VOLUME, realm: values.STATE_VOLUME_REALM, ...(values.STATE_VOLUME_SPACE ? { space: values.STATE_VOLUME_SPACE } : {}), ...(values.STATE_VOLUME_STACK ? { stack: values.STATE_VOLUME_STACK } : {}) } : undefined;
     if (delivery === "stateVolume") {
-      const values = config.spec.values ?? {};
-      const volumeRef = values.STATE_VOLUME && values.STATE_VOLUME_REALM ? { name: values.STATE_VOLUME, realm: values.STATE_VOLUME_REALM, ...(values.STATE_VOLUME_SPACE ? { space: values.STATE_VOLUME_SPACE } : {}), ...(values.STATE_VOLUME_STACK ? { stack: values.STATE_VOLUME_STACK } : {}) } : undefined;
-      return [{ ...base, state: "resolved", volume: values.STATE_VOLUME ?? "", ...(volumeRef ? { volumeRef } : {}) }];
+      // A login identity (#1685): the cell's pick, else the Config's state volume. One picked for a
+      // cell must exist and be the connector's.
+      const picked = refOf(overrides[connector.name]);
+      const volumeRef = picked ?? ownVolume;
+      const volume = volumeRef ? (world.volumes ?? []).find(item => refPath(item) === refPath(volumeRef)) : undefined;
+      const problem = picked && !volume ? `volume ${refPath(picked)} does not exist` : volume?.connector && volume.connector !== connector.name ? `volume ${refPath(volumeRef)} is a login identity of connector "${volume.connector}", not "${connector.name}"` : "";
+      return [{ ...base, state: problem ? "unresolved" : "resolved", volume: volumeRef?.name ?? values.STATE_VOLUME ?? "", ...(volumeRef ? { volumeRef } : {}), harnessState: "persistent", ...(picked ? { origin: "cell" } : {}), login: { state: volume?.state ?? "empty" }, ...(problem ? { message: problem } : {}) }];
     }
+    // A token method of a connector that authenticates a harness keeps harness state too.
+    const harness = connector.harness ? (config.spec.state === "ephemeral" || overrides.state === "ephemeral" ? { harnessState: "ephemeral" } : { harnessState: "persistent", volume: values.STATE_VOLUME ?? "", ...(ownVolume ? { volumeRef: ownVolume } : {}) }) : {};
     const required = !connector.optional;
     const fill = refOf(delivery === "git" ? config.spec.git?.identityRef : config.spec.secrets?.[method.slot]?.secretRef);
     const inherited = defaultAt(world, scope, targetKey(connector, method));
     const [identity, origin] = overrides[connector.name] ? [refOf(overrides[connector.name]), "cell"] : fill ? [fill, "config"] : [inherited.effective, inherited.origin];
-    if (!identity) return [{ ...base, state: "unresolved", ...(required ? { required } : {}), message: method?.slot ? `no identity fills secret slot "${method.slot}" on the cell, the Config or a Realm, Space or Stack default` : "no git identity is set on the cell, the Config or a Realm, Space or Stack default" }];
+    if (!identity) return [{ ...base, ...harness, state: "unresolved", ...(required ? { required } : {}), message: method?.slot ? `no identity fills secret slot "${method.slot}" on the cell, the Config or a Realm, Space or Stack default` : "no git identity is set on the cell, the Config or a Realm, Space or Stack default" }];
     const secret = world.secrets.find(item => refPath(item) === refPath(identity));
     const problem = !secret ? `secret ${refPath(identity)} does not exist` : secret.connector !== connector.name ? `secret ${refPath(identity)}: it is not an identity of connector "${connector.name}"` : "";
-    return [{ ...base, state: problem ? "unresolved" : "resolved", ...(required ? { required } : {}), identity, origin, ...(problem ? { message: problem } : {}) }];
+    return [{ ...base, ...harness, state: problem ? "unresolved" : "resolved", ...(required ? { required } : {}), identity, origin, ...(problem ? { message: problem } : {}) }];
   });
+}
+// loginIdentities answers GET /api/connectors/logins the way the server does: every tagged Volume,
+// and every state volume a Config logs in through, with its login state, users and running session.
+export function loginIdentities(world) {
+  const out = [];
+  const entry = ref => {
+    let found = out.find(item => refPath(item.volume) === refPath(ref));
+    if (!found) out.push(found = { connector: "", volume: refOf(ref), exists: false, tagged: false, usedBy: [] });
+    return found;
+  };
+  for (const volume of world.volumes ?? []) {
+    if (!volume.connector) continue;
+    Object.assign(entry(volume), { connector: volume.connector, method: volume.method ?? "login", exists: true, tagged: true, login: { state: volume.state ?? "empty" } });
+  }
+  for (const config of world.configs) {
+    for (const status of connectorStatuses(world, config)) {
+      if (!status.volumeRef) continue;
+      const known = out.find(item => refPath(item.volume) === refPath(status.volumeRef));
+      if (!known && status.delivery !== "stateVolume") continue;
+      const item = entry(status.volumeRef);
+      if (!item.tagged && status.delivery === "stateVolume") {
+        const stored = (world.volumes ?? []).find(volume => refPath(volume) === refPath(status.volumeRef));
+        Object.assign(item, { connector: status.connector, method: status.method, exists: !!stored, login: { state: stored?.state ?? "empty" } });
+      }
+      item.usedBy.push({ name: config.metadata.name, realm: config.metadata.realm, ...(config.metadata.space ? { space: config.metadata.space } : {}), ...(config.metadata.stack ? { stack: config.metadata.stack } : {}) });
+    }
+  }
+  for (const item of out) { const session = world.sessions?.[refPath(item.volume)]; if (session) item.session = session; }
+  return out;
 }
 // withMethods applies a cell's per-cell method picks (#1551) the way the
 // daemon does: the picked method's component replaces the Config's.
@@ -201,6 +247,8 @@ const secretDoc = secret => ({
   spec: { ...(secret.type ? { type: secret.type } : {}), ...(secret.connector ? { connector: secret.connector } : {}), ...(secret.identity ? { identity: secret.identity } : {}) },
 });
 function renderFailure(statuses, name) {
+  const badLogin = statuses.find(status => status.state !== "resolved" && status.delivery === "stateVolume");
+  if (badLogin) return fail(400, "connector_invalid", `config "${name}", connector "${badLogin.connector}": ${badLogin.message}`);
   const broken = statuses.find(status => status.state !== "resolved" && status.identity);
   if (broken) return fail(400, "connector_invalid", `config "${name}", connector "${broken.connector}": the identity set at the ${broken.origin} level cannot be used: ${broken.message}`);
   const missing = statuses.find(blocks);
@@ -229,6 +277,7 @@ export async function mockConnectorAPI(page, world) {
     const url = new URL(request.url());
     const parts = url.pathname.split("/").filter(Boolean);
     if (request.method() === "GET" && parts.length === 2) return route.fulfill({ json: world.connectors });
+    if (request.method() === "GET" && parts[2] === "logins") return route.fulfill({ json: loginIdentities(world) });
     if (request.method() === "GET" && parts[2] === "status") {
       return route.fulfill({ json: world.connectors.map(connector => {
         const rows = world.configs.flatMap(config => connectorStatuses(world, config).filter(status => status.connector === connector.name).map(status => ({ config, status })));
@@ -270,6 +319,27 @@ export async function mockConnectorAPI(page, world) {
         secrets: [{ name, realm, action: index >= 0 ? "updated" : "created" }], ...(made ? { default: made } : {}),
       } });
     }
+    // Login identities (#1685): "logins" creates the tagged Volume; "login" also starts the identity
+    // cell, or returns the session already running for that Volume.
+    if (parts[3] === "logins" || parts[3] === "login") {
+      const method = connector.methods.find(item => item.delivery === "stateVolume" && (!body.method || item.name === body.method));
+      if (!method) return route.fulfill(fail(400, "invalid_request", `connector "${connector.name}" has no method that keeps a login in the state volume, so it has no login identities`));
+      const ref = refOf({ name: body.name, ...body.scope });
+      if (!ref?.name || !ref.realm) return route.fulfill(fail(400, "invalid_request", "a login identity needs a safe name"));
+      let volume = world.volumes.find(item => refPath(item) === refPath(ref));
+      if (volume?.connector && volume.connector !== connector.name) return route.fulfill(fail(400, "invalid_request", `volume ${refPath(ref)} is a login identity of connector "${volume.connector}", not "${connector.name}"`));
+      const usedAsLogin = loginIdentities(world).some(item => refPath(item.volume) === refPath(ref) && item.connector === connector.name);
+      if (volume && !volume.connector && !usedAsLogin) return route.fulfill(fail(400, "invalid_request", `volume ${refPath(ref)} exists and is not a login identity of connector "${connector.name}"`));
+      const created = !volume;
+      if (!volume) world.volumes.push(volume = { ...ref, connector: connector.name, method: method.name, state: "empty" });
+      let attached = false;
+      if (parts[3] === "login") {
+        attached = !!world.sessions[refPath(ref)];
+        world.sessions[refPath(ref)] ??= { realm: ref.realm, space: ref.space ?? "default", stack: ref.stack ?? "default", cell: `login-${ref.name}`, container: "login" };
+      }
+      const identity = loginIdentities(world).find(item => refPath(item.volume) === refPath(ref));
+      return route.fulfill({ json: { identity, created, ...(attached ? { attached } : {}) } });
+    }
     const level = body.scope?.stack ? "stack" : body.scope?.space ? "space" : "realm";
     if (!connector.scopes.includes(level)) return route.fulfill(fail(400, "invalid_request", `connector "${connector.name}" is set at ${connector.scopes.join(" or ")} level, not ${level}`));
     if (parts[3] === "defaults") {
@@ -293,7 +363,8 @@ export async function mockConnectorAPI(page, world) {
     const request = route.request();
     const url = new URL(request.url());
     const [, , kind, name, action] = url.pathname.split("/").filter(Boolean);
-    const docs = kind === "secrets" ? world.secrets.map(secretDoc) : kind === "configs" ? world.configs.map(config => withStatus(world, config)) : kind === "blueprints" ? world.blueprints : [];
+    const volumeDoc = volume => ({ apiVersion: "v1beta1", kind: "Volume", metadata: refOf(volume), spec: volume.connector ? { connector: volume.connector, method: volume.method ?? "login", reclaimPolicy: "Retain" } : {}, ...(volume.connector ? { status: { login: { state: volume.state ?? "empty" } } } : {}) });
+    const docs = kind === "secrets" ? world.secrets.map(secretDoc) : kind === "configs" ? world.configs.map(config => withStatus(world, config)) : kind === "blueprints" ? world.blueprints : kind === "volumes" ? (world.volumes ?? []).map(volumeDoc) : [];
     if (!name) return route.fulfill({ json: docs });
     const found = scoped(docs, url);
     if (!found) return route.fulfill(fail(404, "not_found", `${kind} ${decodeURIComponent(name)} not found`));
@@ -314,6 +385,14 @@ export async function mockConnectorAPI(page, world) {
     const status = connectorStatuses(world, config).find(item => item.connector === body.connector);
     if (!status) return route.fulfill(fail(400, "invalid_request", `config "${config.metadata.name}" requires no connector "${body.connector}"`));
     if (status.delivery === "git") { if (body.identity) config.spec.git = { ...config.spec.git, identityRef: refOf(body.identity) }; else delete config.spec.git; }
+    else if (status.delivery === "stateVolume") {
+      // A login identity becomes the Config's state volume (#1685); it cannot be cleared.
+      const ref = refOf(body.identity);
+      if (!ref) return route.fulfill(fail(400, "invalid_request", `connector "${status.connector}" keeps its login in the state volume; pick another login identity instead of clearing it`));
+      const volume = world.volumes.find(item => refPath(item) === refPath(ref));
+      if (!volume) return route.fulfill(fail(400, "invalid_request", `volume "${ref.name}" does not exist`));
+      config.spec.values = { ...config.spec.values, STATE_VOLUME: ref.name, STATE_VOLUME_REALM: ref.realm, STATE_VOLUME_SPACE: ref.space ?? "", STATE_VOLUME_STACK: ref.stack ?? "" };
+    }
     else {
       const secrets = { ...config.spec.secrets };
       if (body.identity) secrets[status.slot] = { secretRef: refOf(body.identity) }; else delete secrets[status.slot];
@@ -326,7 +405,9 @@ export async function mockConnectorAPI(page, world) {
     const body = record(route.request());
     const config = world.configs.find(item => refPath(item.metadata) === refPath(body.config));
     if (!config) return route.fulfill(fail(404, "not_found", "config not found"));
-    const statuses = connectorStatuses(world, withMethods(world, config, body.methods ?? {}), body.connectors ?? {});
+    const picked = withMethods(world, config, body.methods ?? {});
+    if (body.state === "ephemeral" && connectorStatuses(world, picked).some(status => status.delivery === "stateVolume")) return route.fulfill(fail(400, "invalid_request", `config "${config.metadata.name}": ephemeral harness state cannot be used with a method that keeps its login in the state volume`));
+    const statuses = connectorStatuses(world, picked, { ...(body.connectors ?? {}), ...(body.state ? { state: body.state } : {}) });
     const failure = renderFailure(statuses, config.metadata.name);
     if (failure) return route.fulfill(failure);
     const document = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: body.name || body.resolvedName || `${config.metadata.name}-abc123` }, spec: { realmId: config.metadata.realm, spaceId: config.metadata.space || "default", stackId: config.metadata.stack || "default", containers: [] } };

@@ -104,7 +104,34 @@ type BlueprintConnector struct {
 	// Optional marks a connector whose cells start without an identity. By
 	// default an enabled connector that needs an identity must resolve one.
 	Optional bool `json:"optional,omitempty"    yaml:"optional,omitempty"`
+	// Harness names the harness the connector authenticates; empty for a
+	// connector that is not a harness login (git, a forge token). A cell of
+	// such a connector keeps harness state, whatever the method (#1685).
+	Harness string `json:"harness,omitempty"     yaml:"harness,omitempty"`
+	// Login says how a login kept in the state volume is detected and
+	// started. stateVolume delivery only.
+	Login *ConnectorLogin `json:"login,omitempty"       yaml:"login,omitempty"`
 }
+
+// ConnectorLogin describes the login of a stateVolume method (issue #1685).
+type ConnectorLogin struct {
+	// Marker is the path, relative to the harness state directory, whose
+	// presence means the volume holds a login. The daemon only checks that it
+	// exists.
+	Marker string `json:"marker,omitempty"  yaml:"marker,omitempty"`
+	// Command is the argv an identity cell runs to log in.
+	Command []string `json:"command,omitempty" yaml:"command,omitempty"`
+}
+
+// Harness state choices of a Config or a cell (issue #1685).
+const (
+	// HarnessStatePersistent keeps the harness state directory in the state
+	// volume. The default.
+	HarnessStatePersistent = "persistent"
+	// HarnessStateEphemeral mounts no state volume: the state directory
+	// lives and dies with the cell.
+	HarnessStateEphemeral = "ephemeral"
+)
 
 // Connector resolution states.
 const (
@@ -121,36 +148,45 @@ const (
 // never its material.
 type ConnectorStatus struct {
 	// Connector is the connector's name.
-	Connector string `json:"connector"           yaml:"connector"`
+	Connector string `json:"connector"              yaml:"connector"`
 	// Title is the connector's display name.
-	Title string `json:"title,omitempty"     yaml:"title,omitempty"`
+	Title string `json:"title,omitempty"        yaml:"title,omitempty"`
 	// Component is the blueprint component that requires it.
-	Component string `json:"component"           yaml:"component"`
+	Component string `json:"component"              yaml:"component"`
 	// Method is the connector method the Config uses.
-	Method string `json:"method,omitempty"    yaml:"method,omitempty"`
+	Method string `json:"method,omitempty"       yaml:"method,omitempty"`
 	// Delivery is the handler delivering the identity.
-	Delivery string `json:"delivery"            yaml:"delivery"`
+	Delivery string `json:"delivery"               yaml:"delivery"`
 	// Slot is the secret slot the identity fills (env and file delivery).
-	Slot string `json:"slot,omitempty"      yaml:"slot,omitempty"`
+	Slot string `json:"slot,omitempty"         yaml:"slot,omitempty"`
 	// State is resolved or unresolved.
-	State string `json:"state"               yaml:"state"`
+	State string `json:"state"                  yaml:"state"`
 	// Required reports whether a cell cannot be created while the connector
 	// is unresolved.
-	Required bool `json:"required,omitempty"  yaml:"required,omitempty"`
+	Required bool `json:"required,omitempty"     yaml:"required,omitempty"`
 	// Identity is the Secret that fills the connector; nil when unresolved
 	// or when the delivery needs none (a login kept in the state volume).
-	Identity *ContainerSecretRef `json:"identity,omitempty"  yaml:"identity,omitempty"`
+	Identity *ContainerSecretRef `json:"identity,omitempty"     yaml:"identity,omitempty"`
 	// Origin is the level the identity came from: cell, config, stack, space
 	// or realm.
-	Origin string `json:"origin,omitempty"    yaml:"origin,omitempty"`
-	// Volume is the state volume holding the login of a stateVolume
-	// connector.
-	Volume string `json:"volume,omitempty"    yaml:"volume,omitempty"`
+	Origin string `json:"origin,omitempty"       yaml:"origin,omitempty"`
+	// Volume is the state volume of a connector that authenticates a harness:
+	// it holds the login of a stateVolume method, and the harness state of
+	// any other method unless the state is ephemeral.
+	Volume string `json:"volume,omitempty"       yaml:"volume,omitempty"`
 	// VolumeRef is that state volume with its scope, when the Config names
 	// one (STATE_VOLUME_REALM, and optionally _SPACE and _STACK).
-	VolumeRef *VolumeRef `json:"volumeRef,omitempty" yaml:"volumeRef,omitempty"`
+	VolumeRef *VolumeRef `json:"volumeRef,omitempty"    yaml:"volumeRef,omitempty"`
+	// Login is the login state of the state volume of a stateVolume
+	// connector: logged in or empty. Nil when the connector declares no
+	// login marker.
+	Login *LoginStatus `json:"login,omitempty"        yaml:"login,omitempty"`
+	// HarnessState is where the harness keeps its state when the connector
+	// authenticates one: `persistent` (Volume names the state volume) or
+	// `ephemeral`. Empty for a connector that is not a harness login.
+	HarnessState string `json:"harnessState,omitempty" yaml:"harnessState,omitempty"`
 	// Message says why the connector is unresolved.
-	Message string `json:"message,omitempty"   yaml:"message,omitempty"`
+	Message string `json:"message,omitempty"      yaml:"message,omitempty"`
 }
 
 // Fill says what fills the connector, as kuke get configs -o wide prints it
@@ -177,5 +213,26 @@ func (s ConnectorStatus) Fill() string {
 		return "MISSING"
 	default:
 		return "none"
+	}
+}
+
+// StateText says where the connector's harness keeps its state, for display
+// beside Fill (issue #1685): the login identity of a method that keeps a
+// login in the state volume, with its login state (`kukeon-dev-state, logged
+// in`); the state volume of a token method (`state kukeon-dev-state`), or
+// `state ephemeral`. Empty for a connector that keeps no harness state.
+func (s ConnectorStatus) StateText() string {
+	switch {
+	case s.Delivery == ConnectorDeliveryStateVolume && s.Volume != "":
+		if s.Login != nil && s.Login.State != "" {
+			return s.Volume + ", " + s.Login.State
+		}
+		return s.Volume
+	case s.HarnessState == HarnessStateEphemeral:
+		return "state " + HarnessStateEphemeral
+	case s.HarnessState != "" && s.Volume != "":
+		return "state " + s.Volume
+	default:
+		return ""
 	}
 }

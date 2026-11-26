@@ -3,13 +3,13 @@ import { teamsLink } from "./teams.mjs";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
-import { newCellLink } from "./routes";
+import { workspaceLink } from "./routes";
 import {
-  allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, deliveryStateVolume, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
-  formatSecretReference, identitiesFor, identityErrors, identityFields, identityPayload, originLabel, refKey, refLabel, refScope, scopeAt, scopeLevels, scopeParts,
-  secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, stateResolved, storesNoValue, takesIdentity, targetScope, teamOf,
+  allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
+  formatSecretReference, harnessEphemeral, identitiesFor, identityErrors, identityFields, identityPayload, keepsLogin, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeLevels, scopeParts,
+  secretBasicAuth, secretRef, secretSSHKey, secretTypesOf, sessionScope, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf,
 } from "./connectors.mjs";
-import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
+import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
 // Shared pieces of the connectors UI (#1548, §7). Nothing here names a
 // connector: every label, field and choice comes from GET /api/connectors, the
@@ -27,7 +27,7 @@ export async function sendJSON<T>(path: string, body: unknown): Promise<T> {
   if (!response.ok) throw result.error ?? { code: "http_error", message: `HTTP ${response.status}` };
   return result as T;
 }
-export function connectorAPI(connector: string, action: "defaults" | "identities" | "import"): string {
+export function connectorAPI(connector: string, action: "defaults" | "identities" | "import" | "logins" | "login"): string {
   return `/api/connectors/${encodeURIComponent(connector)}/${action}`;
 }
 export function connectorsLink(connector?: string, scope?: Partial<Scope>): string {
@@ -54,20 +54,97 @@ export function ConnectorStateBadge({ status }: { status: ConnectorStatus }) {
   return <span className={`state-badge tone-${tone}`}><span className="state-dot" aria-hidden="true" />{status.state === stateResolved ? "Resolved" : blocksCells(status) ? "Unresolved" : "Not set"}</span>;
 }
 
-function volumeLink(ref: VolumeRef): string { return "#/volumes/" + [ref.realm, ref.space, ref.stack, ref.name].filter(Boolean).map(value => encodeURIComponent(value as string)).join("/"); }
-// StateVolume names the volume keeping a login: a link to the Volume when the
-// Config names its scope, the bare name otherwise.
+export function volumeLink(ref: VolumeRef): string { return "#/volumes/" + [ref.realm, ref.space, ref.stack, ref.name].filter(Boolean).map(value => encodeURIComponent(value as string)).join("/"); }
+// StateVolume names a state volume: a link to the Volume when the Config names
+// its scope, the bare name otherwise.
 function StateVolume({ status }: { status: ConnectorStatus }) {
   if (status.volumeRef) return <a className="resource-name" href={volumeLink(status.volumeRef)}><code>{status.volumeRef.name}</code></a>;
   return status.volume ? <code>{status.volume}</code> : <>of the harness</>;
 }
+// LoginStateBadge says whether a login identity holds a login.
+export function LoginStateBadge({ state }: { state: string | undefined }) {
+  return <span className={`state-badge tone-${loginTone(state)}`}><span className="state-dot" aria-hidden="true" />{loginStateText(state)}</span>;
+}
+// HarnessState says where the harness of a token method keeps its state
+// (#1685): its state volume, or ephemeral.
+function HarnessState({ status }: { status: ConnectorStatus }) {
+  if (!stateText(status)) return null;
+  return <span className="connector-harness-state"> · State: {status.harnessState === harnessEphemeral ? <>ephemeral <span className="description">(no state volume)</span></> : <StateVolume status={status} />}</span>;
+}
 
 // StatusIdentity names the identity a connector resolved to and the level it
-// came from. Only Secret coordinates are shown — never material.
+// came from: a Secret, or — for a method that keeps a login — the login
+// identity (a Volume) with its login state. Only coordinates are shown, never
+// material.
 export function StatusIdentity({ status, team = "" }: { status: ConnectorStatus; team?: string }) {
-  if (status.delivery === deliveryStateVolume) return <span>Login kept in state volume <StateVolume status={status} /> — no stored identity.</span>;
-  if (!status.identity) return <span>No identity{status.required ? " — required" : ""}</span>;
-  return <span><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span>{status.origin && <> <span className="badge">{originLabel(status.origin, team)}</span></>}</span>;
+  if (keepsLogin(status)) return <span>Login identity <StateVolume status={status} />{status.volumeRef && <> <span className="description">{refScope(status.volumeRef).join(" / ")}</span></>}{status.origin && <> <span className="badge">{originLabel(status.origin, team)}</span></>}{status.login && <> <LoginStateBadge state={status.login.state} /></>}</span>;
+  if (!status.identity) return <span>No identity{status.required ? " — required" : ""}<HarnessState status={status} /></span>;
+  return <span><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span>{status.origin && <> <span className="badge">{originLabel(status.origin, team)}</span></>}<HarnessState status={status} /></span>;
+}
+
+// startLogin makes sure a login identity exists and an identity cell is logging
+// in to it, then opens that cell's terminal (#1685). A session already running
+// is attached to instead of starting a second one. The identity cell mounts
+// only the identity's Volume and deletes itself when the login ends.
+export async function startLogin(connector: string, volume: Partial<SecretRef>, method?: string): Promise<LoginIdentity | undefined> {
+  const result = await sendJSON<LoginResult>(connectorAPI(connector, "login"), loginBody(volume.name ?? "", volume, method));
+  const [identity] = loginIdentitiesFor([result.identity], connector);
+  if (identity?.session) window.location.hash = workspaceLink(sessionScope(identity.session));
+  return identity;
+}
+
+// LoginButton logs in to one login identity: "Log in", "Log in again" once it
+// holds a login, or "Open login session" while one is running.
+export function LoginButton({ connector, title, volume, state, running = false, method, disabled = false, onStarted }: {
+  connector: string;
+  title: string;
+  volume: Partial<SecretRef>;
+  state?: string;
+  running?: boolean;
+  method?: string;
+  disabled?: boolean;
+  onStarted?: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<Failure>();
+  const label = running ? "Open login session" : state === loginLoggedIn ? "Log in again" : "Log in";
+  async function run() {
+    if (pending) return;
+    setPending(true); setError(undefined);
+    try { await startLogin(connector, volume, method); onStarted?.(); }
+    catch (caught) { setError(toFailure(caught)); }
+    finally { setPending(false); }
+  }
+  return <>
+    <button type="button" className="subtle-button" aria-label={`${label}: ${title} identity ${refLabel(volume)}`} disabled={disabled || pending} onClick={() => void run()}>{pending ? "Starting…" : label}</button>
+    {error && <ErrorNotice error={error} kind="Identity" />}
+  </>;
+}
+
+// LoginIdentitySelect picks a login identity of one connector: the Volumes
+// tagged with it, plus the one already in use. The empty choice is the
+// caller's "use the Config's".
+export function LoginIdentitySelect({ label, identities, value, onChange, emptyLabel, extra = [], disabled = false, help }: {
+  label: string;
+  identities: LoginIdentity[];
+  value: Partial<SecretRef> | undefined;
+  onChange: (value: SecretRef | undefined) => void;
+  emptyLabel: string;
+  extra?: Array<SecretRef | undefined>;
+  disabled?: boolean;
+  help?: ReactNode;
+}) {
+  const id = useId();
+  const options = identities.map(identity => ({ ref: identity.volume, text: `${refLabel(identity.volume)} — ${loginStateText(identity.state)}${identity.usedBy.length ? `, used by ${identity.usedBy[0].name}${identity.usedBy.length > 1 ? ` (+${identity.usedBy.length - 1})` : ""}` : ""}` }));
+  for (const ref of extra) if (ref && !options.some(option => sameRef(option.ref, ref))) options.push({ ref, text: refLabel(ref) });
+  const current = refKey(value);
+  return <div className="schema-field secret-picker"><label htmlFor={id}><span>{label}</span></label>
+    <select id={id} value={options.some(option => refKey(option.ref) === current) ? current : ""} disabled={disabled} onChange={event => onChange(options.find(option => refKey(option.ref) === event.target.value)?.ref)}>
+      <option value="">{emptyLabel}</option>
+      {options.map(option => <option key={refKey(option.ref)} value={refKey(option.ref)}>{option.text}</option>)}
+    </select>
+    {help && <small>{help}</small>}
+  </div>;
 }
 
 // IdentitySelect picks an identity of one connector: the Secrets tagged with
@@ -281,8 +358,9 @@ function SetDefault({ status, connector, scope, identities, secrets, onChanged, 
 
 // PickForConfig saves a Config fill ("Pick for this Config"): the identity
 // wins over every scope default for that one Config.
-function PickForConfig({ status, config, identities, onChanged, onClose }: { status: ConnectorStatus; config: ConfigMetadata; identities: Identity[]; onChanged: () => void; onClose: () => void }) {
-  const [choice, setChoice] = useState<Partial<SecretRef> | undefined>(status.origin === "config" ? status.identity : undefined);
+function PickForConfig({ status, config, identities, logins = [], onChanged, onClose }: { status: ConnectorStatus; config: ConfigMetadata; identities: Identity[]; logins?: LoginIdentity[]; onChanged: () => void; onClose: () => void }) {
+  const login = keepsLogin(status);
+  const [choice, setChoice] = useState<Partial<SecretRef> | undefined>(login ? statusIdentity(status) : status.origin === "config" ? status.identity : undefined);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure>();
   const { notify } = useNotify();
@@ -299,11 +377,13 @@ function PickForConfig({ status, config, identities, onChanged, onClose }: { sta
     finally { setPending(false); }
   }
   return <div className="connector-fix" role="group" aria-label={`Pick ${title} identity for this Config`}>
-    <p className="description">Saved in the Config itself: it wins over the Realm, Space and Stack defaults for this Config only.</p>
-    <div className="schema-fields"><IdentitySelect label={`${title} identity for this Config`} identities={identities} value={choice} extra={[status.identity]} emptyLabel="Select an identity…" disabled={pending} realm={config.realm} onChange={setChoice} /></div>
+    <p className="description">{login ? <>Saved in the Config as its state volume: every cell of this Config keeps its {title} login — and the rest of its harness state — there. One login identity serves one role.</> : <>Saved in the Config itself: it wins over the Realm, Space and Stack defaults for this Config only.</>}</p>
+    <div className="schema-fields">{login
+      ? <LoginIdentitySelect label={`${title} login identity for this Config`} identities={logins} value={choice} extra={[statusIdentity(status)]} emptyLabel="Select a login identity…" disabled={pending} onChange={setChoice} />
+      : <IdentitySelect label={`${title} identity for this Config`} identities={identities} value={choice} extra={[status.identity]} emptyLabel="Select an identity…" disabled={pending} realm={config.realm} onChange={setChoice} />}</div>
     <div className="connector-actions">
-      <button type="button" disabled={!ref || pending} onClick={() => void save(ref ?? null)}>{pending ? "Saving…" : "Save for this Config"}</button>
-      {status.origin === "config" && <button type="button" className="subtle-button" disabled={pending} onClick={() => void save(null)}>Use the default instead</button>}
+      <button type="button" disabled={!ref || pending || (login && sameRef(ref, statusIdentity(status)))} onClick={() => void save(ref ?? null)}>{pending ? "Saving…" : "Save for this Config"}</button>
+      {!login && status.origin === "config" && <button type="button" className="subtle-button" disabled={pending} onClick={() => void save(null)}>Use the default instead</button>}
       <button type="button" className="subtle-button" disabled={pending} onClick={onClose}>Cancel</button>
     </div>
     {error && <ErrorNotice error={error} kind="Config" />}
@@ -313,17 +393,32 @@ function PickForConfig({ status, config, identities, onChanged, onClose }: { sta
 // ConnectorFixes offers the two ways to give a connector an identity: a scope
 // default, or a pick saved in the Config. A team-owned Config offers only the
 // default — applying the team re-renders its fills.
-export function ConnectorFixes({ status, connector, config, identities, secrets, onChanged }: {
+export function ConnectorFixes({ status, connector, config, identities, logins = [], secrets, onChanged }: {
   status: ConnectorStatus;
   connector: Connector | undefined;
   config: ConfigMetadata;
   identities: Identity[];
+  logins?: LoginIdentity[];
   secrets: unknown[] | undefined;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState<"" | "default" | "pick">("");
   const title = connectorTitle(status);
   const team = teamOf({ metadata: config });
+  // A login identity has no scope default: it is logged in to, and — on a
+  // Config no team owns — picked.
+  if (keepsLogin(status)) {
+    const identity = statusIdentity(status);
+    const known = logins.find(item => sameRef(item.volume, identity));
+    return <div className="connector-fixes">
+      <div className="connector-actions">
+        {identity && <LoginButton connector={status.connector} title={title} volume={identity} state={known?.state ?? status.login?.state} running={!!known?.session} method={status.method} onStarted={onChanged} />}
+        {!team && <button type="button" aria-expanded={open === "pick"} aria-label={`Pick ${title} login identity for this Config`} onClick={() => setOpen(open === "pick" ? "" : "pick")}>Pick a login identity</button>}
+        <a className="document-action" href={connectorsLink(status.connector, targetScope(config))}>Manage {title} login identities</a>
+      </div>
+      {open === "pick" && !team && <PickForConfig status={status} config={config} identities={identities} logins={logins} onChanged={onChanged} onClose={() => setOpen("")} />}
+    </div>;
+  }
   if (!takesIdentity(status.delivery)) return null;
   return <div className="connector-fixes">
     <div className="connector-actions">
@@ -361,11 +456,12 @@ export function ConnectorIdentities({ statuses, team = "" }: { statuses: Connect
 // connector it requires, the identity each resolves to and the level it comes
 // from, and the fixes for one that does not resolve. A team-owned Config shows
 // the same read-only, and offers only a scope default.
-export function ConfigConnectors({ doc, scope, revision, onChanged }: { doc: ConfigDoc; scope: string[]; revision: number; onChanged: () => void }) {
+export function ConfigConnectors({ doc, revision, onChanged }: { doc: ConfigDoc; scope?: string[]; revision: number; onChanged: () => void }) {
   const statuses = connectorStatuses(doc);
   // Nothing is fetched for a Config that requires no connector.
   const catalog = useResource<Connector[]>(statuses.length ? "/api/connectors" : null, revision);
   const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/api/catalog/secrets" : null, revision);
+  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/api/connectors/logins" : null, revision);
   if (!statuses.length) return null;
   const team = teamOf(doc);
   const blocking = statuses.filter(blocksCells);
@@ -381,9 +477,8 @@ export function ConfigConnectors({ doc, scope, revision, onChanged }: { doc: Con
           <div><strong>{connectorTitle(status)}</strong> <span className="badge">{status.connector}</span>{status.method && <> <span className="badge">{status.method}</span></>} <ConnectorStateBadge status={status} /></div>
           <p className="description"><StatusIdentity status={status} team={team} /></p>
           {status.state !== stateResolved && status.message && <p className="setup-error">{status.message}</p>}
-          {status.delivery === deliveryStateVolume ? <a className="document-action" href={newCellLink(scope)} aria-label={`Log in to ${connectorTitle(status)}`}>Log in</a>
-            : <ConnectorFixes status={status} connector={catalog.data?.find(item => item.name === status.connector)} config={doc.metadata} identities={identitiesFor(secrets.data, status.connector)} secrets={secrets.data} onChanged={onChanged} />}
-          {status.delivery === deliveryStateVolume && <p className="description">Log in once from an interactive cell of this Config: the login stays in the state volume and every cell of the same role reuses it.</p>}
+          <ConnectorFixes status={status} connector={catalog.data?.find(item => item.name === status.connector)} config={doc.metadata} identities={identitiesFor(secrets.data, status.connector)} logins={loginIdentitiesFor(logins.data, status.connector)} secrets={secrets.data} onChanged={onChanged} />
+          {keepsLogin(status) && <p className="description">Log in opens a short-lived identity cell that mounts only this login identity and runs the {connectorTitle(status)} login; every cell of the same role then reuses it.</p>}
         </div>
       </li>)}</ul>
     </div>

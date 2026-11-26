@@ -18,6 +18,7 @@ package cell_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -508,5 +509,42 @@ func TestClone_ConfigLineageRendersInSourceScope(t *testing.T) {
 	}
 	if got.Spec.SpaceID != "a" || got.Spec.StackID != "b" {
 		t.Errorf("clone scope = %s/%s, want a/b", got.Spec.SpaceID, got.Spec.StackID)
+	}
+}
+
+// TestClone_CarriesLoginIdentityAndState: a clone of a cell that picked a
+// login identity (`--connector <connector>=<volume>`) and a harness state
+// (`--state`) asks the daemon for the same, next to the source's Secret
+// overrides (issue #1685).
+func TestClone_CarriesLoginIdentityAndState(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	lastConfigRequest = kukeonv1.CellFromConfigRequest{}
+	src := sourceConfigCell()
+	src.Spec.Provenance.ConnectorOverrides = map[string]v1beta1.ContainerSecretRef{
+		"forge": {Name: "forge-token", Realm: "default"},
+	}
+	src.Spec.Provenance.ConnectorVolumes = map[string]v1beta1.VolumeRef{
+		"agent": {Name: "personal-max", Realm: "default", Space: "teams"},
+	}
+	src.Spec.Provenance.State = "ephemeral"
+	var got v1beta1.CellDoc
+	fc := cloneFakeClient(t, src, &got)
+	cmd, _ := newTestExecCmd(t, fc)
+	setSourceScope(t, cmd, src)
+	setFlag(t, cmd, "clone", src.Metadata.Name)
+	cmd.SetArgs([]string{"lclone"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]v1beta1.ContainerSecretRef{
+		"forge": {Name: "forge-token", Realm: "default"},
+		"agent": {Name: "personal-max", Realm: "default", Space: "teams"},
+	}
+	if !reflect.DeepEqual(lastConfigRequest.ConnectorOverrides, want) {
+		t.Errorf("request overrides = %+v, want %+v", lastConfigRequest.ConnectorOverrides, want)
+	}
+	if lastConfigRequest.State != "ephemeral" {
+		t.Errorf("request state = %q, want the source's ephemeral", lastConfigRequest.State)
 	}
 }

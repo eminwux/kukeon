@@ -5,7 +5,11 @@ export type Parameter = {
 export type SecretSlot = { name: string; envName: string; required: boolean };
 export type RepoSlot = { name: string; target: string; required: boolean };
 export type ComponentMode = { name: string; description: string; parameters: Parameter[]; secrets: SecretSlot[] };
-export type ComponentConnector = { name: string; title: string; method: string; delivery: string; optional: boolean; secretTypes: string[]; scopes: string[] };
+export type ComponentConnector = { name: string; title: string; method: string; delivery: string; optional: boolean; harness: string; secretTypes: string[]; scopes: string[] };
+export const stateVolumeValues: string[];
+export function keepsLoginState(form: BlueprintForm, answers: Answers): boolean;
+export function offersState(form: BlueprintForm, answers: Answers): boolean;
+export function stateChoice(form: BlueprintForm, answers: Answers): string;
 export type Component = {
   kind: string; name: string; description: string; optional: boolean; group: string; connector: ComponentConnector | null; requires: string[];
   parameters: Parameter[]; secrets: SecretSlot[]; modes: ComponentMode[];
@@ -32,6 +36,8 @@ export type Answers = {
   repos: Record<string, RepoAnswer>;
   secrets: Record<string, Partial<SecretRef>>;
   git: DefaultGitAnswer | null;
+  // state is the harness state: "" (persistent, the default) or "ephemeral".
+  state: string;
 };
 export type FormSection = { key: string; title: string; kind: string; description?: string; parameters: Parameter[]; secrets: SecretSlot[]; connector?: ComponentConnector; component?: string };
 export type InventoryImage = { name: string; capabilities?: string[] };

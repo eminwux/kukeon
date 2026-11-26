@@ -346,3 +346,12 @@ func socketPresent(socketPath string) bool {
 	_, err := os.Stat(socketPath)
 	return err == nil
 }
+
+// AttachCell attaches the terminal to one attachable container of a running
+// cell and returns when the session ends: detached=true when the operator
+// detached (^]^]) and the cell is still running, false when the workload
+// ended. It is the attach half of `kuke run`, for commands that start a cell
+// of their own (`kuke connector login`).
+func AttachCell(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc, container string) (bool, error) {
+	return runAttachLoop(cmd, client, doc, container)
+}

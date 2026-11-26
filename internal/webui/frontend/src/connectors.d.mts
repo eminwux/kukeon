@@ -15,12 +15,17 @@ export const stateResolved: string;
 export const statePending: string;
 export const teamLabel: string;
 export const defaultScopeName: string;
+export const loginLoggedIn: string;
+export const loginEmpty: string;
+export const harnessPersistent: string;
+export const harnessEphemeral: string;
+export const harnessStates: string[];
 
 export type SecretRef = { name: string; realm: string; space?: string; stack?: string };
 export type Scope = { realm: string; space?: string; stack?: string };
 export type ConnectorField = { name: string; type?: string; required?: boolean; help?: string; enum?: string[]; secretTypes?: string[] };
 export type FormField = { name: string; type: string; required: boolean; help: string; enum: string[] };
-export type ConnectorMethod = { name: string; component: string; description?: string; default?: boolean; delivery: string; slot?: string; envName?: string; mountPath?: string };
+export type ConnectorMethod = { name: string; component: string; description?: string; default?: boolean; delivery: string; slot?: string; envName?: string; mountPath?: string; login?: boolean };
 export type Connector = {
   name: string; title: string; description?: string; delivery?: string; group?: string; harness?: string; optional?: boolean;
   scopes: string[]; secretTypes: string[]; fields: ConnectorField[]; methods: ConnectorMethod[];
@@ -28,7 +33,12 @@ export type Connector = {
 export type ConnectorStatus = {
   connector: string; title?: string; component: string; method?: string; delivery: string; slot?: string; state: string;
   required?: boolean; identity?: SecretRef; origin?: string; volume?: string; volumeRef?: VolumeRef; message?: string;
+  login?: { state: string; since?: string }; harnessState?: string;
 };
+export type LoginSession = { realm: string; space: string; stack: string; cell: string; container: string };
+export type ConfigRef = { name: string; realm: string; space?: string; stack?: string };
+export type LoginIdentity = { connector: string; method: string; volume: SecretRef; exists: boolean; tagged: boolean; state: string; since: string; usedBy: ConfigRef[]; session?: LoginSession };
+export type LoginResult = { identity: unknown; created: boolean; attached?: boolean };
 export type VolumeRef = { name: string; realm: string; space?: string; stack?: string };
 export type ConfigMetadata = { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
 export type ConnectorMissing = { config: ConfigMetadata; component: string; method?: string; slot?: string; delivery: string; message?: string };
@@ -74,6 +84,16 @@ export function isRegistry(connector: Connector | undefined): boolean;
 export function usageFor(usage: ConnectorUsage[] | undefined, connector: string): { configs: number; missing: ConnectorMissing[] };
 export function groupComponents<T extends GroupMember>(components: T[] | undefined): { groups: Array<{ group: string; members: T[] }>; ungrouped: T[] };
 export function defaultGroupChoices(components: GroupMember[] | undefined, connectors: Connector[] | undefined): Record<string, string>;
+export function keepsLogin(status: { delivery?: string } | undefined): boolean;
+export function picksIdentity(status: { delivery?: string } | undefined): boolean;
+export function statusIdentity(status: ConnectorStatus | undefined): SecretRef | undefined;
+export function loginIdentitiesFor(logins: unknown[] | undefined, connector: string): LoginIdentity[];
+export function loginStateText(state: string | undefined): string;
+export function loginTone(state: string | undefined): string;
+export function sessionScope(session: LoginSession | undefined): string[];
+export function loginBody(name: string, scope: Partial<Scope> | undefined, method?: string): { name: string; scope: Scope; method?: string };
+export function loginNameError(name: string | undefined): string;
+export function stateText(status: ConnectorStatus | undefined): string;
 export function pickableStatuses(statuses: ConnectorStatus[] | undefined): ConnectorStatus[];
 export function changedPicks(statuses: ConnectorStatus[] | undefined, picks: Record<string, Partial<SecretRef> | undefined> | undefined): Record<string, SecretRef>;
 export function methodChoices(connector: Connector | undefined): ConnectorMethod[];

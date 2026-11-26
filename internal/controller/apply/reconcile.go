@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
@@ -936,6 +937,9 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
+	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
+		return result, roleErr
+	}
 	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
 	}
@@ -978,6 +982,9 @@ func ValidateConfig(r runner.Runner, desired intmodel.CellConfig) error {
 	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
 	if bpErr != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
+	}
+	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
+		return roleErr
 	}
 	return validateConfigAgainstBlueprint(cfgDoc, bpDoc)
 }
@@ -1025,6 +1032,9 @@ func CreateConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
+	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
+		return result, roleErr
+	}
 	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
 	}
@@ -1138,6 +1148,33 @@ func rematerializeChanges(cell intmodel.Cell) []string {
 	return changes
 }
 
+// validateConfigState checks spec.state (issue #1685): persistent or
+// ephemeral, and never ephemeral together with a connector method that keeps
+// its login in the state volume — the login would not survive a cell.
+func validateConfigState(cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc, enabled []string) error {
+	switch strings.TrimSpace(cfgDoc.Spec.State) {
+	case "", ext.HarnessStatePersistent:
+		return nil
+	case ext.HarnessStateEphemeral:
+	default:
+		return fmt.Errorf("%w: config %q: spec.state %q must be %s or %s",
+			errdefs.ErrConfig, cfgDoc.Metadata.Name, cfgDoc.Spec.State,
+			ext.HarnessStatePersistent, ext.HarnessStateEphemeral)
+	}
+	for _, comp := range bpDoc.Spec.Components {
+		if comp.Connector == nil || comp.Connector.Delivery != ext.ConnectorDeliveryStateVolume ||
+			!slices.Contains(enabled, comp.Name) {
+			continue
+		}
+		return fmt.Errorf(
+			"%w: config %q: spec.state ephemeral cannot be used with the %q method of connector %q: "+
+				"the login is kept in the state volume and would not survive the cell; "+
+				"use a token method or persistent state",
+			errdefs.ErrConfig, cfgDoc.Metadata.Name, comp.Connector.Method, comp.Connector.Name)
+	}
+	return nil
+}
+
 // validateConfigAgainstBlueprint is the apply-time gate of a CellConfig against
 // the blueprint it references. The blueprint is first flattened into its
 // validation view (cellblueprint.FlattenOptions.All): every component and
@@ -1169,6 +1206,9 @@ func validateConfigAgainstBlueprint(cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlue
 	flat, err := cellblueprint.Flatten(bpDoc, opts)
 	if err != nil {
 		return fmt.Errorf("config %q: %w", cfgDoc.Metadata.Name, err)
+	}
+	if err = validateConfigState(cfgDoc, bpDoc, flat.Components); err != nil {
+		return err
 	}
 	if cfgDoc.Spec.Schedule == nil {
 		return nil

@@ -81,6 +81,8 @@ var kindToSentinel = map[string]error{
 	"ConnectorIdentity":       errdefs.ErrConnectorIdentity,
 	"ConnectorMethod":         errdefs.ErrConnectorMethod,
 	"VolumeInUse":             errdefs.ErrVolumeInUse,
+	"VolumeIdentity":          errdefs.ErrVolumeIdentity,
+	"VolumeConnectorInvalid":  errdefs.ErrVolumeConnectorInvalid,
 	"TeamNotFound":            errdefs.ErrTeamNotFound,
 	"TeamDefaultsNotFound":    errdefs.ErrTeamDefaultsNotFound,
 	"TeamApplyOnly":           errdefs.ErrTeamApplyOnly,

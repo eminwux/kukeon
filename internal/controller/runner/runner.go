@@ -204,6 +204,10 @@ type Runner interface {
 	// Volume carries no body, so the scope and name come from the path. Returns
 	// errdefs.ErrVolumeNotFound when the directory is absent.
 	GetVolume(volume intmodel.Volume) (intmodel.Volume, error)
+	// VolumeLoginStatus reports whether the login marker the carrier's spec
+	// names exists in the Volume (issue #1685). It checks existence only and
+	// never reads the marker. Nil when the spec names no connector or marker.
+	VolumeLoginStatus(volume intmodel.Volume) *intmodel.LoginStatus
 	// ListVolumes enumerates the metadata of every Volume bound to the filter
 	// scope or any scope nested within it (issue #1018). An empty realmName
 	// lists across all realms; the filter is a subtree prefix bounded at stack

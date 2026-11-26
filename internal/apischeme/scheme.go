@@ -1428,6 +1428,15 @@ func convertCellProvenanceToInternal(in *ext.CellProvenance) *intmodel.CellProve
 		Mode:             in.Mode,
 		ParamOverrides:   copyStringMap(in.ParamOverrides),
 		ConnectorMethods: copyStringMap(in.ConnectorMethods),
+		State:            in.State,
+	}
+	if in.ConnectorVolumes != nil {
+		out.ConnectorVolumes = make(map[string]intmodel.VolumeRef, len(in.ConnectorVolumes))
+		for name, ref := range in.ConnectorVolumes {
+			out.ConnectorVolumes[name] = intmodel.VolumeRef{
+				Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
+			}
+		}
 	}
 	if in.ConnectorOverrides != nil {
 		out.ConnectorOverrides = make(map[string]intmodel.ContainerSecretRef, len(in.ConnectorOverrides))
@@ -1463,6 +1472,15 @@ func buildCellProvenanceExternalFromInternal(in *intmodel.CellProvenance) *ext.C
 		Mode:             in.Mode,
 		ParamOverrides:   copyStringMap(in.ParamOverrides),
 		ConnectorMethods: copyStringMap(in.ConnectorMethods),
+		State:            in.State,
+	}
+	if in.ConnectorVolumes != nil {
+		out.ConnectorVolumes = make(map[string]ext.VolumeRef, len(in.ConnectorVolumes))
+		for name, ref := range in.ConnectorVolumes {
+			out.ConnectorVolumes[name] = ext.VolumeRef{
+				Name: ref.Name, Realm: ref.Realm, Space: ref.Space, Stack: ref.Stack,
+			}
+		}
 	}
 	if in.ConnectorOverrides != nil {
 		out.ConnectorOverrides = make(map[string]ext.ContainerSecretRef, len(in.ConnectorOverrides))

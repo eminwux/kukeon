@@ -161,6 +161,10 @@ test("connectors: the first choice declares the list; clearing a choice drops it
   next = withConnector(next, "claude", { method: "" });
   assert.deepEqual(next.connectors, { inherit: false, items: {} });
   assert.deepEqual(withConnectorsInherit(next, true).connectors, { inherit: true, items: {} });
+  // A harness state choice the definition carries survives an edit of the method (#1685).
+  const stated = { ...form(), connectors: { inherit: false, items: { claude: { method: "api-key", identity: "", state: "ephemeral" } } } };
+  assert.deepEqual(withConnector(stated, "claude", { method: "subscription" }).connectors.items.claude, { method: "subscription", identity: "", state: "ephemeral" });
+  assert.deepEqual(withConnector(stated, "claude", { method: "" }).connectors.items.claude, { method: "", identity: "", state: "ephemeral" });
 });
 
 test("request bodies: a new team sends the Project inputs, the form and the draft's declaration unchanged", () => {

@@ -149,8 +149,24 @@ type ConnectorChoice struct {
 	// `name[@realm[/space[/stack]]]`; without a scope it is looked up in the
 	// team's realm. Empty leaves the identity to the scope defaults, so a
 	// later change of a default reaches the team's cells without a re-render.
+	//
+	// With a method that keeps its login in the harness state volume
+	// (`login`) it names a login identity instead: the Volume the role's cells
+	// keep their harness state in, in the same notation. Empty keeps the
+	// team's own `<team>-<role>-<harness>-state` (issue #1685).
 	Identity string `yaml:"identity,omitempty"`
+	// State says where the harness keeps its state, for the connector that
+	// authenticates a harness: `persistent` (the default) mounts the state
+	// volume, `ephemeral` mounts none, so the state directory lives and dies
+	// with each cell. `ephemeral` needs a token method (issue #1685).
+	State string `yaml:"state,omitempty"`
 }
+
+// Harness state choices of a connector (ConnectorChoice.State).
+const (
+	StatePersistent = "persistent"
+	StateEphemeral  = "ephemeral"
+)
 
 // MarshalYAML keeps explicit empty lists and an explicit empty connectors
 // map instead of erasing them with omitempty: empty selects nothing, omitted

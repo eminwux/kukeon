@@ -1,7 +1,8 @@
 # kuke connector
 
 List connectors and their identities, import your git identity from this host,
-and set the default identity a Realm gives its cells.
+set the default identity a Realm gives its cells, and create and log in to a
+login identity.
 
 ```
 kuke connector list
@@ -10,15 +11,19 @@ kuke connector import git [--key PATH] [--passphrase-file FILE] [--known-hosts F
                           [--default] [--dry-run]
 kuke connector default <connector> [<identity>[@realm[/space[/stack]]]]
                        [--realm REALM] [--method METHOD] [--clear]
+kuke connector login <connector> [<name>] [--realm REALM] [--space SPACE] [--stack STACK]
+                     [--method METHOD] [--image IMAGE]
 ```
 
 A [connector](../concepts/connectors.md) is a kind of access a cell needs — a
 harness login, an API token, a git identity, a registry credential. Its
-identities are Secrets tagged with the connector, and a Realm, Space or Stack
-default names the identity every cell in it uses.
+identities are Secrets tagged with the connector — and, for a method that
+keeps a login in the harness state directory, Volumes tagged with it
+([login identities](../concepts/connectors.md#login-identities)). A Realm,
+Space or Stack default names the Secret identity every cell in it uses.
 
 Every subcommand talks to kukeond and honours `--host` / `KUKEON_HOST`. No
-subcommand prints secret material.
+subcommand prints secret material or the content of a login.
 
 ## Subcommands
 
@@ -27,6 +32,7 @@ subcommand prints secret material.
 | `kuke connector list`       | Print each connector's identities and each Realm's default identity |
 | `kuke connector import git` | Store your SSH key and global gitconfig author as one git identity  |
 | `kuke connector default`    | Set or clear a Realm's default identity for a connector             |
+| `kuke connector login`      | Create a login identity and log in to it from an identity cell      |
 
 ## kuke connector list
 
@@ -34,21 +40,36 @@ subcommand prints secret material.
 kuke connector list
 ```
 
-Prints two tables. `IDENTITIES` has one row per Secret tagged with a connector;
-a connector with no identity gets a row of dashes. `REALM DEFAULTS` has one row
-per Realm default, the identity written `name@realm[/space[/stack]]`. The
-command reads Secret metadata only, never the material.
+Prints two tables. `IDENTITIES` has one row per identity of a connector: each
+Secret tagged with it (`TYPE` `opaque`, `basic-auth` or `ssh-key`) and each
+login identity — a Volume holding a harness login (`TYPE` `login`). A connector
+with no identity gets a row of dashes. `REALM DEFAULTS` has one row per Realm
+default, the identity written `name@realm[/space[/stack]]`. The command reads
+Secret and Volume metadata only, never secret material or a login file.
+
+| Column      | Meaning                                                                              |
+| ----------- | ------------------------------------------------------------------------------------ |
+| `CONNECTOR` | The connector                                                                        |
+| `IDENTITY`  | The Secret's or the Volume's name                                                    |
+| `SCOPE`     | `realm[/space[/stack]]` it is stored at                                              |
+| `TYPE`      | The Secret type, or `login` for a login identity                                     |
+| `STATUS`    | Login identities: `logged in` or `empty`; `-` for a Secret or an unknown state       |
+| `USED BY`   | Login identities: a Config whose status names the Volume, and how many more (`(+4)`) |
+
+A team's state volume a Config logs in through is listed even before a cell
+start has tagged it.
 
 ```console
 $ kuke connector list
 IDENTITIES
-CONNECTOR  IDENTITY     SCOPE    TYPE
----------  -----------  -------  -------
-claude     -            -        -
-codex      -            -        -
-git        git-ssh      default  ssh-key
-github     work-github  default  opaque
-registry   -            -        -
+CONNECTOR  IDENTITY                 SCOPE                    TYPE     STATUS     USED BY
+---------  -----------------------  -----------------------  -------  ---------  ----------------------
+claude     kukeon-dev-claude-state  default/default/default  login    logged in  kukeon-dev-claude (+4)
+claude     personal-max             default                  login    empty      -
+codex      -                        -                        -        -          -
+git        git-ssh                  default                  ssh-key  -          -
+github     work-github              default                  opaque   -          -
+registry   -                        -                        -        -          -
 
 REALM DEFAULTS
 CONNECTOR  METHOD  REALM    IDENTITY
@@ -202,6 +223,64 @@ kuke connector default claude claude-team --method subscription
 
 # Remove the default
 kuke connector default git --clear
+```
+
+## kuke connector login
+
+```
+kuke connector login <connector> [<name>] [--realm REALM] [--space SPACE] [--stack STACK]
+                     [--method METHOD] [--image IMAGE]
+```
+
+Creates a [login identity](../concepts/connectors.md#login-identities) of a
+connector and logs in to it. The command:
+
+1. creates the Volume `<name>` tagged with the connector when it does not
+   exist, with `reclaimPolicy: Retain`;
+2. starts an **identity cell**: one container on the harness image that mounts
+   only that Volume, at the harness state directory, and runs the connector's
+   login command;
+3. attaches your terminal to it;
+4. deletes the cell when the login ends, and prints the identity's status.
+
+With an existing identity it logs in again. The identity cell has no role, no
+repos, no secrets and no other connector, so the command works on a realm with
+no team in it. A team's own state volume
+(`<team>-<role>-<harness>-state`) takes the same command.
+
+| Argument / flag     | Meaning                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `<connector>`       | A connector with a method that keeps its login in the state volume                                      |
+| `<name>`            | The identity's — the Volume's — name. Default: the connector's name                                     |
+| `--realm`           | Realm of the identity. Default `default`                                                                |
+| `--space`,`--stack` | Scope the identity to a Space or Stack. Default: realm-scoped. `--stack` needs `--space`                |
+| `--method`          | The connector's login method, when it has more than one                                                 |
+| `--image`           | Image the identity cell runs. Default: the image of a Config using the identity, else the harness image |
+
+Detach with `^]^]` to leave the login running. Running the command again while
+the session runs attaches to it instead of starting a second one.
+
+The command exits non-zero when the login did not complete — the identity is
+still `empty` after the session — and for a connector without a login method,
+a Volume tagged for another connector, and an existing Volume that is not a
+login identity (tag it with `kuke create volume <name> --connector
+<connector>`, or pick another name).
+
+### Examples
+
+```bash
+# A personal login identity, realm-scoped, on a realm with no team
+kuke connector login claude personal-max
+
+# Log in to a team's own state volume
+kuke connector login codex kukeon-dev-codex-state --space teams --stack kukeon
+```
+
+```console
+$ kuke connector login claude personal-max
+Created login identity personal-max@default (connector claude).
+…the harness login runs in your terminal…
+Login identity personal-max@default: logged in
 ```
 
 ## Related

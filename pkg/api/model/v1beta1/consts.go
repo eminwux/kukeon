@@ -138,6 +138,21 @@ const (
 	// objects that the new roster no longer declares — converging the
 	// project's slice without touching other teams' objects.
 	LabelTeam = "kukeon.io/team"
+	// LabelIdentityCell marks an identity cell: the short-lived cell that
+	// mounts one login identity — a Volume tagged with its connector — and
+	// runs the harness login (issue #1685). Its value is the Volume's name
+	// and scope, `name@realm[/space[/stack]]`, so a client finds a login
+	// session already running for that Volume and attaches to it instead of
+	// starting a second one, and two Volumes of one name at different scopes
+	// never share a session.
+	LabelIdentityCell = "kukeon.io/identity-cell"
+	// LabelIdentitySession tells apart the starts of one identity cell: the
+	// client that starts it stamps a value of its own, so a start that fails
+	// removes only the cell it created, never one another client started.
+	LabelIdentitySession = "kukeon.io/identity-session"
+	// LabelIdentityConnector names, on an identity cell, the connector whose
+	// login the cell runs.
+	LabelIdentityConnector = "kukeon.io/identity-connector"
 	// LabelTask names the role task a `kuke team` task CellConfig runs
 	// headless (issue #1491). It sits beside LabelTeam, so a task config is
 	// pruned with the team's other configs once its task is deselected.

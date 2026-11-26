@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/apply/parser"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -273,6 +274,9 @@ func TestCreateVolume_Provisions(t *testing.T) {
 	mock := &fakeRunner{
 		GetRealmFn: func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
 		GetSpaceFn: func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		GetVolumeFn: func(intmodel.Volume) (intmodel.Volume, error) {
+			return intmodel.Volume{}, errdefs.ErrVolumeNotFound
+		},
 		WriteVolumeFn: func(v intmodel.Volume) (bool, error) {
 			wrote = append(wrote, v)
 			return true, nil
@@ -299,6 +303,7 @@ func TestCreateVolume_Provisions(t *testing.T) {
 func TestCreateVolume_ReReportsUpdated(t *testing.T) {
 	mock := &fakeRunner{
 		GetRealmFn:    func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+		GetVolumeFn:   func(v intmodel.Volume) (intmodel.Volume, error) { return v, nil },
 		WriteVolumeFn: func(intmodel.Volume) (bool, error) { return false, nil },
 	}
 	ctrl := setupTestController(t, mock)
@@ -373,4 +378,71 @@ func TestApplyDocuments_VolumeRoutesToReconcile(t *testing.T) {
 	if len(result.Resources) != 1 || result.Resources[0].Action != "created" {
 		t.Errorf("apply result = %+v, want one created Volume", result.Resources)
 	}
+}
+
+// TestCreateVolume_LoginIdentityTag: creating a Volume that exists keeps the
+// spec it has when the request states none, tags an untagged one, and never
+// re-tags a login identity for another connector (#1685).
+func TestCreateVolume_LoginIdentityTag(t *testing.T) {
+	stored := intmodel.VolumeSpec{
+		ReclaimPolicy: intmodel.ReclaimRetain, Connector: "claude", Method: "login", LoginMarker: ".credentials.json",
+	}
+	newCtrl := func(existing intmodel.VolumeSpec, wrote *[]intmodel.Volume) *controller.Exec {
+		return setupTestController(t, &fakeRunner{
+			GetRealmFn: func(r intmodel.Realm) (intmodel.Realm, error) { return r, nil },
+			GetVolumeFn: func(v intmodel.Volume) (intmodel.Volume, error) {
+				v.Spec = existing
+				return v, nil
+			},
+			WriteVolumeFn: func(v intmodel.Volume) (bool, error) {
+				*wrote = append(*wrote, v)
+				return false, nil
+			},
+		})
+	}
+	md := intmodel.VolumeMetadata{Name: "dev-state", Realm: "default"}
+
+	t.Run("a bare create keeps the stored spec", func(t *testing.T) {
+		var wrote []intmodel.Volume
+		if _, err := newCtrl(stored, &wrote).CreateVolume(intmodel.Volume{Metadata: md}); err != nil {
+			t.Fatalf("CreateVolume() error = %v", err)
+		}
+		if len(wrote) != 1 || wrote[0].Spec != stored {
+			t.Fatalf("wrote = %+v, want the stored spec %+v", wrote, stored)
+		}
+	})
+
+	t.Run("an untagged volume is tagged", func(t *testing.T) {
+		var wrote []intmodel.Volume
+		tag := intmodel.VolumeSpec{Connector: "claude", Method: "login"}
+		existing := intmodel.VolumeSpec{ReclaimPolicy: intmodel.ReclaimRetain}
+		if _, err := newCtrl(existing, &wrote).CreateVolume(intmodel.Volume{Metadata: md, Spec: tag}); err != nil {
+			t.Fatalf("CreateVolume() error = %v", err)
+		}
+		want := tag
+		want.ReclaimPolicy = intmodel.ReclaimRetain
+		if len(wrote) != 1 || wrote[0].Spec != want {
+			t.Fatalf("wrote = %+v, want %+v", wrote, want)
+		}
+	})
+
+	t.Run("another connector is refused", func(t *testing.T) {
+		var wrote []intmodel.Volume
+		_, err := newCtrl(stored, &wrote).CreateVolume(intmodel.Volume{
+			Metadata: md, Spec: intmodel.VolumeSpec{Connector: "codex", Method: "login"},
+		})
+		if !errors.Is(err, errdefs.ErrVolumeIdentity) || len(wrote) != 0 {
+			t.Fatalf("error = %v, wrote = %+v; want ErrVolumeIdentity and no write", err, wrote)
+		}
+	})
+
+	t.Run("a malformed tag is refused", func(t *testing.T) {
+		var wrote []intmodel.Volume
+		_, err := newCtrl(intmodel.VolumeSpec{}, &wrote).CreateVolume(intmodel.Volume{
+			Metadata: md, Spec: intmodel.VolumeSpec{Connector: "claude", LoginMarker: "../x"},
+		})
+		if !errors.Is(err, errdefs.ErrVolumeConnectorInvalid) {
+			t.Fatalf("error = %v, want ErrVolumeConnectorInvalid", err)
+		}
+	})
 }

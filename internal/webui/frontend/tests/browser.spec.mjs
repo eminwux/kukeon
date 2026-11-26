@@ -3744,7 +3744,7 @@ test("Connectors page lists the catalog with the Configs missing an identity, an
   await expect(list.getByRole("row")).toHaveCount(4);
   await expect(listRow("Example")).toContainText("example-token");
   await expect(listRow("Example")).toContainText("token — environment variable EXAMPLE_TOKEN");
-  await expect(listRow("Demo")).toContainText("login — login kept in the harness state volume (no identity)");
+  await expect(listRow("Demo")).toContainText("login — login kept in a login identity");
   await expect(listRow("Repo")).toContainText("the cell's git identity");
   await expect(listRow("Pulls")).toHaveCount(0);
   // Example: three identities, three Configs require it, two of them have nothing to fill it.
@@ -3892,10 +3892,11 @@ test("an identity form follows the connector's secret types and field types", as
     scope: { realm: "dev" }, name: "repo-author", type: "opaque", identity: { author: "Dev <dev@example.com>" },
   });
 
-  // A connector whose every method keeps a login in the state volume would have no identity; this one
-  // has one login method and says so.
+  // A method that keeps a login in the state volume has login identities, not a default: the page says
+  // so and lists them in a panel of their own (#1685).
   await page.goto(`${server.url}#/connectors/demo`);
-  await expect(page.getByRole("region", { name: "Demo connector" })).toContainText("The login method has no identity");
+  await expect(page.getByRole("region", { name: "Demo connector" })).toContainText("The login method keeps its login in a login identity");
+  await expect(page.getByRole("region", { name: "Demo login identities" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Demo default identity" }).getByRole("group", { name: /^Demo .* default$/ })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Demo default identity" }).getByRole("group", { name: "Demo key default" })).toBeVisible();
 });
@@ -4098,8 +4099,8 @@ test("Config detail shows each connector's identity and level and fixes an unres
   expect(world.posts("/api/configs/connector")[1].body).toEqual({ config: { name: "mine", realm: "dev", space: "shared", stack: "services" }, connector: "example-token", identity: null });
 });
 
-test("a team-owned Config shows its identities read-only with only Set default, and a login names its state volume", async ({ page }) => {
-  await mockConnectors(page);
+test("a team-owned Config shows its identities read-only with only Set default, and a login names its login identity", async ({ page }) => {
+  const world = await mockConnectors(page);
   await page.goto(`${server.url}#/configs/dev/shared/services/teams`);
   const panel = connectorsPanel(page);
   await expect(panel.getByRole("note")).toContainText("Identities are set by team kukeon");
@@ -4110,15 +4111,176 @@ test("a team-owned Config shows its identities read-only with only Set default, 
   await expect(example.getByRole("button", { name: "Set default for Example" })).toBeVisible();
   await expect(panel.getByRole("button", { name: /^Pick .* identity for this Config$/ })).toHaveCount(0);
   await expect(example.getByRole("button")).toHaveCount(1);
-  // A login has no identity: the status names the state volume and "Log in" opens the New Cell flow.
+  // A login's identity is its login identity — a Volume — named with its login status (#1685).
   const demo = panel.getByRole("listitem", { name: "Demo connector" });
-  await expect(demo).toContainText("Login kept in state volume kukeon-dev-demo-state");
+  await expect(demo).toContainText("Login identity kukeon-dev-demo-state");
+  await expect(demo).toContainText("Empty");
   // The Config names the volume's scope, so the volume is a linked Volume reference.
   await expect(demo.getByRole("link", { name: "kukeon-dev-demo-state" })).toHaveAttribute("href", "#/volumes/dev/shared/services/kukeon-dev-demo-state");
-  await expect(demo.getByRole("button")).toHaveCount(0);
-  await expect(demo.getByRole("link", { name: "Log in to Demo" })).toHaveAttribute("href", newCellFor("teams"));
-  await demo.getByRole("link", { name: "Log in to Demo" }).click();
-  await expect(page.getByRole("region", { name: "Cell", exact: true })).toBeVisible();
+  // A team owns the Config: no picker, only Log in — which starts the identity cell, not a role cell.
+  await expect(demo.getByRole("button", { name: /Pick .* login identity/ })).toHaveCount(0);
+  await expect(demo.getByRole("button")).toHaveCount(1);
+  await expect(demo.getByRole("link", { name: "Manage Demo login identities" })).toHaveAttribute("href", `#/connectors/demo?scope=${encodeURIComponent(JSON.stringify(["dev", "shared", "services"]))}`);
+  await demo.getByRole("button", { name: "Log in: Demo identity kukeon-dev-demo-state — dev / shared / services" }).click();
+  await expect.poll(() => world.posts("/api/connectors/demo/login").length).toBe(1);
+  expect(world.posts("/api/connectors/demo/login")[0].body).toEqual({ name: "kukeon-dev-demo-state", scope: { realm: "dev", space: "shared", stack: "services" }, method: "login" });
+  // The browser lands on the identity cell's terminal; no role cell was asked for.
+  await expect(page).toHaveURL(/#\/workspace\/dev\/shared\/services\/login-kukeon-dev-demo-state$/);
+  expect(world.posts("/api/cells/from-config/create")).toHaveLength(0);
+});
+
+// Login identities (#1685): a method that keeps its login in the harness state volume has identities
+// too — Volumes tagged with the connector. Everything asserted here comes from GET /api/connectors and
+// GET /api/connectors/logins; no connector is known by name.
+test("a connector page lists its login identities, creates one, logs in through an identity cell and reopens a running session", async ({ page }) => {
+  const world = await mockConnectors(page);
+  await page.goto(`${server.url}#/connectors/demo`);
+  const panel = page.getByRole("region", { name: "Demo login identities" });
+  const table = panel.getByRole("table", { name: "Demo login identities" });
+  const row = name => table.getByRole("row").filter({ hasText: name });
+  await expect(panel.locator(".panel-heading")).toContainText("2 stored");
+  // A tagged Volume nothing uses, and the team's own state volume — listed before any cell tagged it.
+  await expect(row("demo-personal").getByRole("cell")).toHaveText(["demo-personal", "dev", "Empty", "—", "Log in"]);
+  await expect(row("kukeon-dev-demo-state")).toContainText("dev / shared / services");
+  await expect(row("kukeon-dev-demo-state").getByRole("link", { name: "teams" })).toHaveAttribute("href", "#/configs/dev/shared/services/teams");
+  await expect(row("demo-personal").getByRole("link", { name: "demo-personal" })).toHaveAttribute("href", "#/volumes/dev/demo-personal");
+  // A plain Volume is no identity, and no login content is ever part of the page.
+  await expect(table).not.toContainText("scratch");
+  // The catalog list counts them with the Secret identities.
+  await page.goto(`${server.url}#/connectors`);
+  await expect(page.getByRole("region", { name: "Connectors list" }).getByRole("row").filter({ has: page.getByRole("link", { name: "Demo", exact: true }) }).getByRole("cell").nth(2)).toHaveText("3");
+
+  // New login identity: a name and a scope. Creating it starts no cell.
+  await page.goto(`${server.url}#/connectors/demo`);
+  await panel.getByRole("button", { name: "New login identity" }).click();
+  const form = panel.getByRole("form", { name: "New Demo login identity" });
+  await form.getByRole("combobox", { name: "Login identity realm" }).selectOption("dev");
+  await form.getByLabel("Login identity name").fill("Not A Name");
+  await form.getByRole("button", { name: "Create without logging in" }).click();
+  await expect(form.getByRole("alert")).toContainText("Use lowercase letters");
+  expect(world.posts("/api/connectors/demo/logins")).toHaveLength(0);
+  await form.getByLabel("Login identity name").fill("fresh");
+  await form.getByRole("button", { name: "Create without logging in" }).click();
+  await expect.poll(() => world.posts("/api/connectors/demo/logins").length).toBe(1);
+  expect(world.posts("/api/connectors/demo/logins")[0].body).toEqual({ name: "fresh", scope: { realm: "dev" } });
+  await expect(row("fresh").getByRole("cell")).toHaveText(["fresh", "dev", "Empty", "—", "Log in"]);
+  expect(world.posts("/api/connectors/demo/login")).toHaveLength(0);
+  expect(Object.keys(world.sessions)).toHaveLength(0);
+
+  // Log in starts the identity cell and opens its terminal.
+  await row("demo-personal").getByRole("button", { name: "Log in: Demo identity demo-personal — dev" }).click();
+  await expect.poll(() => world.posts("/api/connectors/demo/login").length).toBe(1);
+  expect(world.posts("/api/connectors/demo/login")[0].body).toEqual({ name: "demo-personal", scope: { realm: "dev" }, method: "login" });
+  await expect(page).toHaveURL(/#\/workspace\/dev\/default\/default\/login-demo-personal$/);
+
+  // While the session runs the row says so, and a second click opens the same session.
+  await page.goto(`${server.url}#/connectors/demo`);
+  await expect(row("demo-personal")).toContainText("Login running");
+  await row("demo-personal").getByRole("button", { name: "Open login session: Demo identity demo-personal — dev" }).click();
+  await expect.poll(() => world.posts("/api/connectors/demo/login").length).toBe(2);
+  await expect(page).toHaveURL(/#\/workspace\/dev\/default\/default\/login-demo-personal$/);
+  expect(Object.keys(world.sessions)).toEqual(["dev/demo-personal"]);
+
+  // The login ends: the identity cell is gone and the Volume holds a login. The row follows by itself.
+  await page.goto(`${server.url}#/connectors/demo`);
+  await expect(row("demo-personal")).toContainText("Login running");
+  world.sessions = {};
+  world.volumes.find(volume => volume.name === "demo-personal").state = "logged in";
+  await expect(row("demo-personal")).toContainText("Logged in", { timeout: 10000 });
+  await expect(row("demo-personal")).not.toContainText("Login running");
+  await expect(row("demo-personal").getByRole("button", { name: "Log in again: Demo identity demo-personal — dev" })).toBeVisible();
+
+  // Create and log in does both in one step, for a new identity.
+  await panel.getByRole("button", { name: "New login identity" }).click();
+  await form.getByRole("combobox", { name: "Login identity realm" }).selectOption("dev");
+  await form.getByLabel("Login identity name").fill("another");
+  await form.getByRole("button", { name: "Create and log in" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/dev\/default\/default\/login-another$/);
+  expect(world.volumes.find(volume => volume.name === "another")).toMatchObject({ connector: "demo", method: "login" });
+
+  // A Volume that is another connector's cannot be logged in to through this one.
+  world.volumes.push({ name: "foreign", realm: "dev", connector: "example-token", method: "login", state: "empty" });
+  await page.goto(`${server.url}#/connectors/demo`);
+  await panel.getByRole("button", { name: "New login identity" }).click();
+  await form.getByRole("combobox", { name: "Login identity realm" }).selectOption("dev");
+  await form.getByLabel("Login identity name").fill("foreign");
+  await form.getByRole("button", { name: "Create and log in" }).click();
+  await expect(form.getByRole("alert")).toContainText('is a login identity of connector "example-token"');
+});
+
+test("a Config no team owns picks a login identity, and a Volume page shows its tag and login status", async ({ page }) => {
+  const world = await mockConnectors(page);
+  // A stand-alone Config on the login method, with a state volume of its own.
+  world.volumes.push({ name: "solo-state", realm: "dev", space: "shared", stack: "services" });
+  world.configs.push({ apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "solo", realm: "dev", space: "shared", stack: "services" }, spec: { blueprint: { name: "demo", realm: "dev" }, components: ["demo-login"], values: { STATE_VOLUME: "solo-state", STATE_VOLUME_REALM: "dev", STATE_VOLUME_SPACE: "shared", STATE_VOLUME_STACK: "services" } } });
+  await page.goto(`${server.url}#/configs/dev/shared/services/solo`);
+  const demo = connectorsPanel(page).getByRole("listitem", { name: "Demo connector" });
+  await expect(demo).toContainText("Login identity solo-state");
+  await demo.getByRole("button", { name: "Pick Demo login identity for this Config" }).click();
+  const picker = demo.getByRole("combobox", { name: "Demo login identity for this Config" });
+  await expect(picker.locator("option:checked")).toHaveText("solo-state — dev / shared / services — Empty, used by solo");
+  // Re-picking the identity already in use saves nothing.
+  await expect(demo.getByRole("button", { name: "Save for this Config" })).toBeDisabled();
+  await expect(demo.getByRole("button", { name: "Use the default instead" })).toHaveCount(0);
+  await picker.selectOption({ label: "demo-personal — dev — Empty" });
+  await demo.getByRole("button", { name: "Save for this Config" }).click();
+  await expect.poll(() => world.posts("/api/configs/connector").length).toBe(1);
+  expect(world.posts("/api/configs/connector")[0].body).toEqual({ config: { name: "solo", realm: "dev", space: "shared", stack: "services" }, connector: "demo", identity: { name: "demo-personal", realm: "dev" } });
+  // The pick is the Config's state volume, scope included.
+  expect(world.configs.find(config => config.metadata.name === "solo").spec.values).toEqual({ STATE_VOLUME: "demo-personal", STATE_VOLUME_REALM: "dev", STATE_VOLUME_SPACE: "", STATE_VOLUME_STACK: "" });
+  await expect(demo).toContainText("Login identity demo-personal");
+
+  // The Volume says what it is: its connector, its login status, and a Log in of its own.
+  await page.goto(`${server.url}#/volumes/dev/demo-personal`);
+  const identity = page.getByRole("region", { name: "Login identity", exact: true });
+  await expect(identity).toContainText("login identity of the demo connector");
+  await expect(identity).toContainText("Empty");
+  await expect(identity.getByRole("button", { name: /^Log in:/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Harness state for" }).getByRole("link", { name: "solo" })).toBeVisible();
+  // A plain Volume has no such panel.
+  await page.goto(`${server.url}#/volumes/dev/scratch`);
+  await expect(page.getByRole("region", { name: "Harness state for" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Login identity", exact: true })).toHaveCount(0);
+});
+
+test("New Cell picks a login identity for one cell, and a token method chooses persistent or ephemeral harness state", async ({ page }) => {
+  const world = await mockConnectors(page);
+  const previews = () => world.posts("/api/cells/from-config/preview");
+  const panel = newCellSection(page, "Connectors");
+  const demo = panel.getByRole("listitem", { name: "Demo connector" });
+  const review = previewPanel(page).getByRole("table", { name: "Connectors", exact: true });
+  const previewButton = page.getByRole("button", { name: /^(Preview Cell|Refresh preview)$/ });
+  await page.goto(`${server.url}${newCellFor("teams")}`);
+  await openNewCellSection(page, "Connectors");
+
+  // The Config's login identity is preselected; picking another sends it as this cell's override.
+  const loginPicker = demo.getByRole("combobox", { name: "Demo login identity" });
+  await loginPicker.selectOption({ label: "demo-personal — dev — Empty" });
+  await expect(demo).toContainText("Picked for this cell");
+  // A login always keeps persistent state: there is no choice to make.
+  await expect(panel.getByRole("combobox", { name: "Harness state" })).toHaveCount(0);
+  await expect(panel).toContainText("Harness state is persistent");
+  await previewButton.click();
+  await expect.poll(() => previews().length).toBe(1);
+  expect(previews()[0].body.connectors).toEqual({ demo: { name: "demo-personal", realm: "dev" } });
+  expect(previews()[0].body.state).toBeUndefined();
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login identity demo-personal");
+
+  // On a token method the harness state is a choice, sent only when it differs from the Config's.
+  await demo.getByRole("combobox", { name: "Demo method" }).selectOption("key");
+  await demo.getByRole("combobox", { name: /^Demo identity/ }).selectOption({ label: "demo-key-1 — dev (opaque)" });
+  const state = panel.getByRole("combobox", { name: "Harness state" });
+  await expect(state).toHaveValue("persistent");
+  await previewButton.click();
+  await expect.poll(() => previews().length).toBe(2);
+  expect(previews()[1].body.state).toBeUndefined();
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("State: kukeon-dev-demo-state");
+  await state.selectOption("ephemeral");
+  await expect(panel).toContainText("this cell mounts no state volume");
+  await previewButton.click();
+  await expect.poll(() => previews().length).toBe(3);
+  expect(previews()[2].body).toMatchObject({ methods: { demo: "key" }, connectors: { demo: { name: "demo-key-1", realm: "dev" } }, state: "ephemeral" });
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("State: ephemeral");
 });
 
 test("New Cell pre-selects each connector's effective identity, sends only changed picks and keeps Create disabled while one is unresolved", async ({ page }) => {
@@ -4141,12 +4303,16 @@ test("New Cell pre-selects each connector's effective identity, sends only chang
   await expect(picker.locator("option:checked")).toHaveText("example-team — dev (opaque)");
   await expect(picker.getByRole("option")).toHaveText(["Use the Config's identity", "example-default — dev (opaque)", "example-team — dev (opaque)", "example-other — dev / shared / services (opaque)", "Name a secret…"]);
   await expect(item).toContainText("set by team kukeon");
-  await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login kept in state volume kukeon-dev-demo-state");
-  // A login has no identity to pick; its only control is the method picker (#1551).
+  await expect(panel.getByRole("listitem", { name: "Demo connector" })).toContainText("Login identity kukeon-dev-demo-state");
+  // A login takes no Secret: its identity is a login identity, picked from the connector's own, with
+  // the Config's preselected (#1685).
   await expect(panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
+  const loginPicker = panel.getByRole("listitem", { name: "Demo connector" }).getByRole("combobox", { name: "Demo login identity" });
+  await expect(loginPicker.locator("option:checked")).toHaveText("kukeon-dev-demo-state — dev / shared / services — Empty, used by teams");
+  await expect(loginPicker.getByRole("option")).toHaveText(["Use the Config's login identity", "demo-personal — dev — Empty", "kukeon-dev-demo-state — dev / shared / services — Empty, used by teams"]);
   await previewButton.click();
   await expect(review.getByRole("row", { name: /^Example/ })).toContainText("example-team");
-  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login identity kukeon-dev-demo-state");
   expect(previews()).toHaveLength(1);
   expect(previews()[0].body).toEqual({ config: { name: "teams", realm: "dev", space: "shared", stack: "services" }, name: "", env: [], ignoreDiskPressure: false, targetSpace: "shared", targetStack: "services" });
 
@@ -4266,7 +4432,7 @@ test("New Cell picks another method of a connector for this cell only and sends 
   await method.selectOption("login");
   await expect(demo.getByRole("combobox", { name: /^Demo identity/ })).toHaveCount(0);
   await previewButton.click();
-  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login kept in state volume");
+  await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("Login identity kukeon-dev-demo-state");
   expect(previews().at(-1).body).not.toHaveProperty("methods");
   expect(previews().at(-1).body).not.toHaveProperty("connectors");
 });
@@ -4293,11 +4459,13 @@ test("New Config offers one method per group and an identity picker per connecto
   await expect(demoPicker.getByRole("option")).toHaveText(["No default — required", "demo-key-1 — dev (opaque)", "Name a secret…"]);
   await expect(page.getByRole("note")).toContainText("Demo identity");
   await expect(page.getByRole("link", { name: "set a default" })).toHaveAttribute("href", `#/connectors/demo?scope=${encodeURIComponent(JSON.stringify(["dev", "shared", "services"]))}`);
-  // A login method takes no identity.
+  // A login method takes no Secret: it offers the connector's login identities instead (#1685).
   await method.selectOption("demo-login");
   await expect(demoPicker).toHaveCount(0);
   await openSection(page, "demo-login");
-  await expect(page.getByText("Uses the login kept in the harness state volume")).toBeVisible();
+  const loginPicker = page.getByRole("combobox", { name: "Demo login identity" });
+  await expect(loginPicker.getByRole("option")).toHaveText(["The state volume named in this form", "demo-personal — dev — Empty", "kukeon-dev-demo-state — dev / shared / services — Empty, used by teams"]);
+  await expect(page.getByText("The login is kept in a login identity")).toBeVisible();
   await expect(page.getByRole("note")).toHaveCount(0);
 
   // An ungrouped connector is a toggle; its picker shows the default the Config's scope inherits.
@@ -5344,12 +5512,12 @@ test("Volumes show reclaim policy and mount counts, and a Volume page lists moun
   await expect(mounted.getByRole("row")).toHaveCount(2);
   await expect(mounted.getByRole("row").nth(1).getByRole("cell")).toHaveText(["apidev / shared / services · by name", "Ready", "web", "/data", "Read-write", "No"]);
   await expect(mounted.getByRole("link", { name: "api" })).toHaveAttribute("href", "#/resource/dev/shared/services/api");
-  await expect(page.getByRole("region", { name: "Login state for" }).getByRole("link", { name: "agent" })).toHaveAttribute("href", "#/configs/dev/agent");
+  await expect(page.getByRole("region", { name: "Harness state for" }).getByRole("link", { name: "agent" })).toHaveAttribute("href", "#/configs/dev/agent");
 
   // The realm Volume is mounted by explicit reference, by a stopped cell.
   await page.goto(`${server.url}#/volumes/dev/data`);
   await expect(page.getByRole("region", { name: "Mounted by" }).getByRole("row").nth(1).getByRole("cell")).toHaveText(["workerdev / shared / services", "Stopped", "job", "/in", "Read-only", "Yes (ensure)"]);
-  await expect(page.getByRole("region", { name: "Login state for" })).toContainText("No Config keeps a login in this Volume.");
+  await expect(page.getByRole("region", { name: "Harness state for" })).toContainText("No Config keeps harness state in this Volume.");
 
   await page.goto(`${server.url}#/volumes`);
   await row("dev / shared").getByRole("button", { name: /Delete volume/ }).click();

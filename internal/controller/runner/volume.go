@@ -148,6 +148,7 @@ func (r *Exec) WriteVolume(volume intmodel.Volume) (bool, error) {
 		"space", md.Space,
 		"stack", md.Stack,
 		"reclaimPolicy", string(volume.Spec.ReclaimPolicy),
+		"connector", volume.Spec.Connector,
 	)
 	return created, nil
 }
@@ -301,14 +302,15 @@ func (r *Exec) GetVolume(volume intmodel.Volume) (intmodel.Volume, error) {
 		return intmodel.Volume{}, errdefs.ErrVolumeNotFound
 	}
 
-	policy, err := r.readVolumeReclaimPolicy(md)
+	spec, err := r.readVolumeSpec(md)
 	if err != nil {
 		return intmodel.Volume{}, fmt.Errorf("%w: %w", errdefs.ErrGetVolume, err)
 	}
 
 	return intmodel.Volume{
 		Metadata: md,
-		Spec:     intmodel.VolumeSpec{ReclaimPolicy: policy},
+		Spec:     spec,
+		Status:   intmodel.VolumeStatus{Login: r.volumeLoginStatus(md, spec)},
 	}, nil
 }
 
@@ -399,13 +401,14 @@ func (r *Exec) collectVolumesInScope(out *[]intmodel.Volume, realm, space, stack
 			Space: space,
 			Stack: stack,
 		}
-		policy, err := r.readVolumeReclaimPolicy(vmd)
-		if err != nil {
-			return err
+		spec, specErr := r.readVolumeSpec(vmd)
+		if specErr != nil {
+			return specErr
 		}
 		*out = append(*out, intmodel.Volume{
 			Metadata: vmd,
-			Spec:     intmodel.VolumeSpec{ReclaimPolicy: policy},
+			Spec:     spec,
+			Status:   intmodel.VolumeStatus{Login: r.volumeLoginStatus(vmd, spec)},
 		})
 	}
 	return nil

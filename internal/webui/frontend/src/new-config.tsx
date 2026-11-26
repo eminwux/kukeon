@@ -5,11 +5,11 @@ import { Disclosure } from "./disclosure";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
 import { catalogAPI } from "./catalog-url.mjs";
-import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, previewMode, requiredCapabilities, secretChoices } from "./config-form.mjs";
+import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, offersState, previewMode, requiredCapabilities, secretChoices, stateChoice } from "./config-form.mjs";
 import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, FormSection, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
 
-import { ConnectorIdentities, IdentitySelect, connectorsLink } from "./connector-ui";
-import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, identitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
+import { ConnectorIdentities, IdentitySelect, LoginIdentitySelect, connectorsLink } from "./connector-ui";
+import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, loginIdentitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorStatus } from "./connectors.mjs";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
@@ -180,6 +180,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     setRealm(first.scope[0]); setSpace(hasSpace ? "default" : ""); setStack(hasStack ? "default" : "");
   }, [inventory.data, realm, realms]);
   const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
+  const logins = useResource<unknown[]>("/api/connectors/logins", revision);
   const images = useResource<ImageList>(realm ? `/api/realms/${encodeURIComponent(realm)}/image-inventory` : null, revision);
   // Connector components (#1548): one method per group, and an identity picker per connector that
   // shows the default the Config's scope would inherit. Nothing is fetched for a blueprint without them.
@@ -278,7 +279,14 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
           return <IdentitySelect key={`connector:${component}`} id={fieldId("identity", component)} invalid={flagged(fieldId("identity", component))} label={`${title} identity`} identities={identitiesFor(secrets.data, connector.name)} value={answers.connectors[component]} emptyLabel={emptyLabel} disabled={pending} required={!connector.optional} realm={realm} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
             help={<>{envName && <>Delivered as {envName}. </>}Choosing the default saves no fill: the Config keeps inheriting it from {scopeParts(target).join(" / ")}.{none && !picked && !connector.optional && <span className="field-error"> Nothing resolves yet — pick an identity or <a href={connectorsLink(connector.name, target)}>set a default</a>.</span>}</>} />;
         })()}
-        {section.connector?.delivery === deliveryStateVolume && <p className="description connector-login">Uses the login kept in the harness state volume: no stored identity. Log in once from an interactive cell of this Config.</p>}
+        {section.connector?.delivery === deliveryStateVolume && section.component && (() => {
+          const { connector, component } = section;
+          const title = connector.title || connector.name;
+          const picked = identityRef(answers.connectors[component]);
+          return <LoginIdentitySelect key={`login:${component}`} label={`${title} login identity`} identities={loginIdentitiesFor(logins.data, connector.name)} value={answers.connectors[component]} emptyLabel="The state volume named in this form" disabled={pending} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
+            help={<>The login is kept in a login identity — a Volume mounted as the harness state directory. {picked ? <>Cells of this Config keep their state in <code>{refLabel(picked)}</code>; the state volume values below are set from it.</> : <>Pick one to reuse a login, or leave it and name a state volume of the Config's own below.</>} One login identity serves one role. <a href={connectorsLink(connector.name, target)}>Create or log in to a {title} login identity</a>.</>} />;
+        })()}
+        {section.connector && section.connector.harness && section.connector.delivery !== deliveryStateVolume && offersState(form, effective) && <label className="schema-field"><span>Harness state</span><select aria-label={`${section.connector.title || section.connector.name} harness state`} value={stateChoice(form, effective) || harnessPersistent} disabled={pending} onChange={event => change({ state: event.target.value === harnessEphemeral ? harnessEphemeral : "" })}>{harnessStates.map(item => <option key={item} value={item}>{item}{item === harnessPersistent ? " (default)" : ""}</option>)}</select><small>{stateChoice(form, effective) === harnessEphemeral ? "Ephemeral: cells mount no state volume; the harness state directory lives and dies with each cell, which authenticates from its Secret." : "Persistent: cells mount the state volume named in this form, so sessions and settings survive a cell."}</small></label>}
         {!(section.connector && takesIdentity(section.connector.delivery)) && section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} invalid={flagged(fieldId("secret", `${slot.name} secret`))} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
       </div></>,
     });

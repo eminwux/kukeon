@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/connector/loginidentity"
 	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/connector"
@@ -32,8 +33,11 @@ func newListCmd(catalog *connector.Catalog) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List connectors, their identities and the identity each Realm default names",
-		Long: "List every connector kuke knows, the Secrets tagged as its identities (name, scope,\n" +
-			"type) and, for each Realm, the identity its default names. Secret material is never read.",
+		Long: "List every connector kuke knows, its identities and, for each Realm, the identity its\n" +
+			"default names. An identity is a Secret tagged with the connector (TYPE opaque, basic-auth\n" +
+			"or ssh-key) or a login identity: a Volume holding a harness login (TYPE login), with\n" +
+			"whether it holds a login (STATUS) and the Configs using it (USED BY). Secret material and\n" +
+			"login files are never read.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -51,7 +55,15 @@ func newListCmd(catalog *connector.Catalog) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printIdentities(cmd, catalog, secrets)
+			volumes, err := client.ListVolumes(cmd.Context(), "", "", "")
+			if err != nil {
+				return err
+			}
+			configs, err := client.ListConfigs(cmd.Context(), "", "", "")
+			if err != nil {
+				return err
+			}
+			printIdentities(cmd, catalog, secrets, loginidentity.Collect(volumes, configs))
 			cmd.Println()
 			printRealmDefaults(cmd, catalog, realms)
 			return nil
@@ -60,19 +72,31 @@ func newListCmd(catalog *connector.Catalog) *cobra.Command {
 }
 
 // printIdentities prints one row per identity, grouped by connector in
-// catalog order; a connector with none gets a row of dashes. Secrets tagged
-// with a connector the catalog lacks follow, so none is hidden.
-func printIdentities(cmd *cobra.Command, catalog *connector.Catalog, secrets []v1beta1.SecretDoc) {
+// catalog order: its Secrets, then its login identities (Volumes). A connector
+// with none gets a row of dashes. Identities tagged with a connector the
+// catalog lacks follow, so none is hidden.
+func printIdentities(
+	cmd *cobra.Command, catalog *connector.Catalog, secrets []v1beta1.SecretDoc, logins []loginidentity.Identity,
+) {
 	byConnector := map[string][]v1beta1.SecretDoc{}
 	for _, secret := range secrets {
 		if tag := strings.TrimSpace(secret.Spec.Connector); tag != "" {
 			byConnector[tag] = append(byConnector[tag], secret)
 		}
 	}
+	loginsOf := map[string][]loginidentity.Identity{}
+	for _, login := range logins {
+		loginsOf[login.Connector] = append(loginsOf[login.Connector], login)
+	}
 	names := catalog.Names()
 	var unknown []string
 	for tag := range byConnector {
 		if !slices.Contains(names, tag) {
+			unknown = append(unknown, tag)
+		}
+	}
+	for tag := range loginsOf {
+		if !slices.Contains(names, tag) && !slices.Contains(unknown, tag) {
 			unknown = append(unknown, tag)
 		}
 	}
@@ -85,8 +109,8 @@ func printIdentities(cmd *cobra.Command, catalog *connector.Catalog, secrets []v
 			return scopeName(a.Name, a.Realm, a.Space, a.Stack, a.Cell) <
 				scopeName(b.Name, b.Realm, b.Space, b.Stack, b.Cell)
 		})
-		if len(identities) == 0 {
-			rows = append(rows, []string{name, "-", "-", "-"})
+		if len(identities) == 0 && len(loginsOf[name]) == 0 {
+			rows = append(rows, []string{name, "-", "-", "-", "-", "-"})
 			continue
 		}
 		for _, secret := range identities {
@@ -96,11 +120,17 @@ func printIdentities(cmd *cobra.Command, catalog *connector.Catalog, secrets []v
 			if secretType == "" {
 				secretType = v1beta1.SecretTypeOpaque
 			}
-			rows = append(rows, []string{name, md.Name, scope, secretType})
+			rows = append(rows, []string{name, md.Name, scope, secretType, "-", "-"})
+		}
+		for _, login := range loginsOf[name] {
+			rows = append(rows, []string{
+				name, login.Volume.Name, loginidentity.ScopePath(login.Volume), loginidentity.TypeLogin,
+				login.Status(), loginidentity.UsedBy(login.UsedBy),
+			})
 		}
 	}
 	cmd.Println("IDENTITIES")
-	shared.PrintTable(cmd, []string{"CONNECTOR", "IDENTITY", "SCOPE", "TYPE"}, rows)
+	shared.PrintTable(cmd, []string{"CONNECTOR", "IDENTITY", "SCOPE", "TYPE", "STATUS", "USED BY"}, rows)
 }
 
 // printRealmDefaults prints the identity each Realm's default names for each

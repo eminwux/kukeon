@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/connector"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -46,12 +47,41 @@ func (b *Exec) CreateVolume(volume intmodel.Volume) (CreateVolumeResult, error) 
 		return res, err
 	}
 
+	if err := connector.ValidateVolumeTag(
+		volume.Spec.Connector, volume.Spec.Method, volume.Spec.LoginMarker,
+	); err != nil {
+		return res, err
+	}
+	// `kuke create volume` on a Volume that exists must not drop what it
+	// already is: a request that states no spec keeps the stored one, and a
+	// login identity is never re-tagged for another connector (#1685).
+	existing, getErr := b.runner.GetVolume(volume)
+	switch {
+	case getErr == nil:
+		have, want := existing.Spec, volume.Spec
+		if have.Connector != "" && want.Connector != "" && have.Connector != want.Connector {
+			return res, fmt.Errorf(
+				"%w: volume %q is already a login identity of connector %q, not %q",
+				errdefs.ErrVolumeIdentity, volume.Metadata.Name, have.Connector, want.Connector)
+		}
+		if want.ReclaimPolicy == "" {
+			volume.Spec.ReclaimPolicy = have.ReclaimPolicy
+		}
+		if want.Connector == "" {
+			volume.Spec.Connector, volume.Spec.Method = have.Connector, have.Method
+			volume.Spec.LoginMarker = have.LoginMarker
+		}
+	case !errors.Is(getErr, errdefs.ErrVolumeNotFound):
+		return res, getErr
+	}
+
 	reconcile, err := applypkg.ReconcileVolume(b.runner, volume)
 	if err != nil {
 		return res, err
 	}
 	res.Created = reconcile.Action == "created"
 	res.Volume = volume
+	res.Volume.Status.Login = b.runner.VolumeLoginStatus(volume)
 	return res, nil
 }
 

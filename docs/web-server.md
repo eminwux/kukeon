@@ -566,8 +566,12 @@ whether the mount is `ensure: true` (created with the cell). A `volumeRef` names
 its Volume exactly; a bare `source` name is resolved the way kukeond resolves it:
 the Volume of that name at the cell's Stack, else its Space, else its Realm.
 Templated names (`${…}`) are resolved only when a cell is materialized and are
-not counted. **Login state for** lists the Configs whose connector status names
-the Volume as a harness login's state volume (`status.connectors[].volumeRef`).
+not counted. **Harness state for** lists the Configs whose connector status
+names the Volume as their state volume (`status.connectors[].volumeRef`): the
+login identity of a login method, or the harness state of a token method. A
+Volume tagged with a connector also has a **Login identity** panel: the
+connector and method, whether it holds a login, and **Log in** / **Log in
+again**.
 Volume metadata carries no labels, so the Volume page has no Labels row; size,
 host path and creation time are not recorded by the daemon and not shown.
 
@@ -826,8 +830,33 @@ A connector's page (`#/connectors/<name>`) has:
 - **Needs a default** — the Configs that require the connector and resolve to
   no identity, each with a link that opens the defaults on that Config's scope.
 
-A method that keeps its login in the harness state volume has no identity and
-no default; the page says so and shows no picker for it.
+A method that keeps its login in the harness state volume has no default, and
+its identities are [login identities](site/concepts/connectors.md#login-identities)
+— Volumes tagged with the connector. A connector with such a method has a
+**Login identities** panel:
+
+- one row per login identity — the tagged Volumes and the state volumes
+  Configs log in through, a team's own included — with its scope, its status
+  (**Logged in**, **Empty**, or **Unknown** when the connector declares no
+  marker) and the Configs using it;
+- **New login identity** — a name and a scope (Realm, Space or Stack) — with
+  **Create and log in** and **Create without logging in**;
+- **Log in** on a row (**Log in again** once it holds a login): the server
+  creates the Volume if needed, starts an identity cell that mounts only that
+  Volume and runs the harness login, and the browser opens that cell's
+  terminal. The cell deletes itself when the login ends; while a session runs
+  the row says **Login running**, its button reads **Open login session** and a
+  second click opens the same session instead of starting another. The row's
+  status is re-read every few seconds while a session runs.
+
+Only whether a login is present is shown. No route returns the content of a
+login.
+
+| Method | Path                                 | Purpose                                                                                                                                                                    |
+| ------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/connectors/logins`             | Every login identity: connector, method, Volume, `exists`, `tagged`, `login`, `usedBy`, running `session`                                                                  |
+| `POST` | `/api/connectors/{connector}/logins` | Create a login identity. Body `{"name","scope":{"realm","space","stack"},"method"}`                                                                                        |
+| `POST` | `/api/connectors/{connector}/login`  | Same body. Creates the identity if needed, starts the identity cell and returns its coordinates in `identity.session`; `attached: true` when a session was already running |
 
 Elsewhere in the UI:
 
@@ -838,7 +867,12 @@ Elsewhere in the UI:
   **Set default** (stores a default for the Config's scope, creating the
   identity inline when none exists) and **Pick for this Config** (saved in the
   Config itself; it wins over the defaults for this Config only). **Use the
-  default instead** removes a Config's own pick. A Config owned by a team shows
+  default instead** removes a Config's own pick. A login method shows its login
+  identity by name with its status, **Log in** (the identity cell, not a role
+  cell) and — on a Config no team owns — **Pick a login identity**, which
+  writes the Config's `values.STATE_VOLUME*`. A token method of a harness
+  connector also shows its harness state: the state volume, or `ephemeral`. A
+  Config owned by a team shows
   its identities read-only and links its team: they are set by the team's
   declaration, edited on the [Teams](#teams) page, and applying the team
   re-renders the Config. The Config's detail page names the team too.
@@ -846,12 +880,17 @@ Elsewhere in the UI:
   methods of a group are alternatives and a Config enables exactly one — and an
   identity picker per connector that takes one. Leaving the picker on
   **Default** keeps the Config inheriting the scope's default; the form will
-  not submit when a required connector has neither.
+  not submit when a required connector has neither. A login method offers a
+  **login identity** picker (the connector's login identities; leaving it
+  empty keeps the state volume named in the form), and a token method of a
+  harness connector a **Harness state** choice, `persistent` or `ephemeral`,
+  saved as `spec.state`.
 - **New Cell** starts each connector on the method and identity the Config
   resolves to. A connector with several methods offers a **Method** picker, and
-  picking another method shows that method's identity picker (or, for a login,
-  its state-volume note). Picking another method or identity uses it for this
-  cell only; the Config and the defaults are not changed. The preview names the
+  picking another method shows that method's identity picker — for a login, the
+  **login identity** picker, with the Config's own preselected. A token method
+  of a harness connector offers **Harness state**. Picking another method,
+  identity or state uses it for this cell only; the Config and the defaults are not changed. The preview names the
   method and identity each connector resolved to and where it came from, and
   never any material.
 

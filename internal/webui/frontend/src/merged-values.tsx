@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { groupGitValues, groupValuesBySource, type RenderedValue } from "./config-form.mjs";
 import { StatusIdentity } from "./connector-ui";
-import { connectorTitle, originLabel, refScope } from "./connectors.mjs";
+import { connectorTitle, originLabel, refScope, stateText } from "./connectors.mjs";
 import type { ConnectorStatus } from "./connectors.mjs";
 
 export type { RenderedValue };
@@ -62,7 +62,7 @@ export function SourceGroups({ values, connectors, sources = {}, team = "" }: { 
     // A group, not a region: the form's Connectors section is the page's one "Connectors" region.
     return <div role="group" key={group.source} aria-label={heading}><h4>{heading}{named[group.source] && <> <span className="description">{named[group.source]}</span></>}</h4>
       {group.source === "connectors" ? <table aria-label={heading}><thead><tr><th scope="col">Connector</th><th scope="col">Method</th><th scope="col">Identity</th><th scope="col">Decided by</th></tr></thead><tbody>
-        {(group.rows as ConnectorStatus[]).map(status => <tr key={`${status.connector}:${status.component}`}><td>{connectorTitle(status)}</td><td>{status.method || <span className="description">—</span>}</td><td>{status.identity ? <><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span></> : <StatusIdentity status={status} team={team} />}</td><td>{status.origin ? <span className="badge">{originLabel(status.origin, team)}</span> : <span className="description">—</span>}</td></tr>)}
+        {(group.rows as ConnectorStatus[]).map(status => <tr key={`${status.connector}:${status.component}`}><td>{connectorTitle(status)}</td><td>{status.method || <span className="description">—</span>}</td><td>{status.identity ? <><code>{status.identity.name}</code> <span className="description">{refScope(status.identity).join(" / ")}</span>{stateText(status) && <span className="connector-harness-state"> · State: {stateText(status)}</span>}</> : <StatusIdentity status={status} team={team} />}</td><td>{status.origin ? <span className="badge">{originLabel(status.origin, team)}</span> : <span className="description">—</span>}</td></tr>)}
       </tbody></table> : <table aria-label={heading}><thead><tr><th scope="col">Kind</th><th scope="col">Key</th><th scope="col">Value</th></tr></thead><tbody>
         {(group.rows as RenderedValue[]).map(value => <tr key={`${value.kind}:${value.key}`}><td>{value.kind}</td><td><code>{value.key}</code></td><td>{value.value ? <code>{value.value}</code> : <span className="description">hidden</span>}</td></tr>)}
       </tbody></table>}

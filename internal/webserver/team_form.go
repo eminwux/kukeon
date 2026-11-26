@@ -169,6 +169,9 @@ type formConnectors struct {
 type formConnector struct {
 	Method   string `json:"method,omitempty"`
 	Identity string `json:"identity,omitempty"`
+	// State is the harness state choice of a connector that authenticates a
+	// harness: persistent or ephemeral (issue #1685).
+	State string `json:"state,omitempty"`
 }
 
 // Ref kinds of a formSource.
@@ -226,7 +229,9 @@ func formOf(team *config.Team, catalog *connector.Catalog) teamForm {
 		out.Harnesses.Items = append(out.Harnesses.Items, formHarness{Name: h.Name, Source: h.Source, Path: h.Path})
 	}
 	for name, choice := range s.Connectors {
-		out.Connectors.Items[name] = formConnector{Method: choice.Method, Identity: choice.Identity}
+		out.Connectors.Items[name] = formConnector{
+			Method: choice.Method, Identity: choice.Identity, State: choice.State,
+		}
 	}
 	return out
 }
@@ -346,6 +351,7 @@ func (f teamForm) apply(base *config.Team, catalog *connector.Catalog) (*config.
 		for name, choice := range f.Connectors.Items {
 			out.Spec.Connectors[name] = config.ConnectorChoice{
 				Method: strings.TrimSpace(choice.Method), Identity: strings.TrimSpace(choice.Identity),
+				State: strings.TrimSpace(choice.State),
 			}
 		}
 	}

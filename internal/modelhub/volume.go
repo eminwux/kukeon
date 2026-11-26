@@ -26,6 +26,18 @@ package modelhub
 type Volume struct {
 	Metadata VolumeMetadata
 	Spec     VolumeSpec
+	Status   VolumeStatus
+}
+
+// VolumeStatus mirrors v1beta1.VolumeStatus.
+type VolumeStatus struct {
+	Login *LoginStatus
+}
+
+// LoginStatus mirrors v1beta1.LoginStatus.
+type LoginStatus struct {
+	State string
+	Since string
 }
 
 // VolumeSpec carries the volume's declarative configuration. Its only field is
@@ -33,6 +45,11 @@ type Volume struct {
 // delete-with-scope behavior. See external v1beta1.VolumeSpec for the contract.
 type VolumeSpec struct {
 	ReclaimPolicy ReclaimPolicy
+	// Connector, Method and LoginMarker tag the volume as a login identity
+	// (issue #1685). See external v1beta1.VolumeSpec.
+	Connector   string
+	Method      string
+	LoginMarker string
 }
 
 // ReclaimPolicy mirrors v1beta1.ReclaimPolicy: the per-Volume policy a cascade

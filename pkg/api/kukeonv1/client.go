@@ -367,7 +367,9 @@ type CellFromConfigRequest struct {
 	// connector the Config requires — `--connector <connector>=<secret>` —
 	// keyed by connector name (issue #1548). A reference without a realm is
 	// looked up in the cell's own realm. A connector the Config does not
-	// require, or a Secret tagged for another connector, is refused. The
+	// require, or a Secret tagged for another connector, is refused. For a
+	// method that keeps a login in the state volume the reference names a
+	// Volume instead — a login identity (issue #1685). The
 	// overrides are recorded in the cell's provenance, so a restart and a
 	// recreate keep them.
 	ConnectorOverrides map[string]v1beta1.ContainerSecretRef
@@ -380,6 +382,11 @@ type CellFromConfigRequest struct {
 	// refused. Recorded in the cell's provenance, so a restart and a
 	// recreate keep it.
 	ConnectorMethods map[string]string
+	// State picks, for this cell only, where the harness keeps its state —
+	// `--state persistent|ephemeral` (issue #1685). Empty keeps the Config's
+	// choice. `ephemeral` mounts no state volume and is refused with a
+	// method that keeps a login there. Recorded in the cell's provenance.
+	State string
 	// TargetSpace and TargetStack place the cell in a space and stack below
 	// the Config's own scope (issue #1603). A coordinate the Config sets is
 	// pinned: a different target is refused. Empty keeps the Config's scope

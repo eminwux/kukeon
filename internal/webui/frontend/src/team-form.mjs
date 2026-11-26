@@ -389,13 +389,14 @@ export function stepErrors(key, state) {
 }
 
 // withConnector sets one connector choice; an empty method and identity
-// drop it. The first change declares the list.
+// drop it. The first change declares the list. A harness state choice the
+// definition carries (`state`, #1685) is kept: this form does not edit it.
 export function withConnector(form, name, patch, inherited = {}) {
   const current = form?.connectors ?? { inherit: true, items: {} };
   const items = { ...(current.inherit ? inherited : current.items ?? {}) };
   const next = { ...(items[name] ?? {}), ...patch };
-  if (!trimmed(next.method) && !trimmed(next.identity)) delete items[name];
-  else items[name] = { method: trimmed(next.method), identity: trimmed(next.identity) };
+  if (!trimmed(next.method) && !trimmed(next.identity) && !trimmed(next.state)) delete items[name];
+  else items[name] = { method: trimmed(next.method), identity: trimmed(next.identity), ...(trimmed(next.state) ? { state: trimmed(next.state) } : {}) };
   return { ...form, connectors: { inherit: false, items } };
 }
 

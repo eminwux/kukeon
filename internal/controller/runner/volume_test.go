@@ -542,3 +542,156 @@ func TestVolumePostCreateChown_Skips(t *testing.T) {
 		}
 	})
 }
+
+// TestVolume_LoginIdentityTag pins the storage of a login identity (#1685):
+// the connector tag survives a write and comes back on get and list, with or
+// without a Retain policy; an untagged, unretained Volume keeps no manifest;
+// and cascade purge still reclaims a tagged Volume that is not retained.
+func TestVolume_LoginIdentityTag(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	md := intmodel.VolumeMetadata{Name: "dev-state", Realm: "default"}
+	spec := intmodel.VolumeSpec{Connector: "claude", Method: "login", LoginMarker: ".credentials.json"}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md, Spec: spec}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	got, err := r.GetVolume(intmodel.Volume{Metadata: md})
+	if err != nil {
+		t.Fatalf("GetVolume() error = %v", err)
+	}
+	if got.Spec != spec {
+		t.Errorf("GetVolume() spec = %+v, want %+v", got.Spec, spec)
+	}
+	listed, err := r.ListVolumes("default", "", "")
+	if err != nil || len(listed) != 1 || listed[0].Spec != spec {
+		t.Fatalf("ListVolumes() = %+v, %v; want the tagged volume", listed, err)
+	}
+
+	retained := spec
+	retained.ReclaimPolicy = intmodel.ReclaimRetain
+	if _, err = r.WriteVolume(intmodel.Volume{Metadata: md, Spec: retained}); err != nil {
+		t.Fatalf("WriteVolume(retained) error = %v", err)
+	}
+	if got, err = r.GetVolume(intmodel.Volume{Metadata: md}); err != nil || got.Spec != retained {
+		t.Fatalf("GetVolume() = %+v, %v; want %+v", got.Spec, err, retained)
+	}
+
+	// Dropping both the tag and the policy removes the manifest.
+	if _, err = r.WriteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("WriteVolume(plain) error = %v", err)
+	}
+	if _, statErr := os.Stat(fs.VolumeMetaPath(runPath, "default", "", "", "dev-state")); !os.IsNotExist(statErr) {
+		t.Errorf("manifest stat = %v, want not-exist for an untagged, unretained volume", statErr)
+	}
+}
+
+// TestVolume_LoginStatus pins the marker check of a login identity (#1685):
+// `empty` until the marker file exists, then `logged in` with the marker's
+// modification time. The marker is only stat'ed — it is unreadable here — and
+// a marker path that leaves the volume is never followed.
+func TestVolume_LoginStatus(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	md := intmodel.VolumeMetadata{Name: "dev-state", Realm: "default"}
+	spec := intmodel.VolumeSpec{Connector: "claude", Method: "login", LoginMarker: ".credentials.json"}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md, Spec: spec}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	got, err := r.GetVolume(intmodel.Volume{Metadata: md})
+	if err != nil {
+		t.Fatalf("GetVolume() error = %v", err)
+	}
+	if got.Status.Login == nil || got.Status.Login.State != "empty" || got.Status.Login.Since != "" {
+		t.Fatalf("login before the marker exists = %+v, want empty", got.Status.Login)
+	}
+
+	marker := fs.VolumePath(runPath, "default", "", "", "dev-state") + "/.credentials.json"
+	if err = os.WriteFile(marker, []byte("credential material"), 0o000); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if got, err = r.GetVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("GetVolume() error = %v", err)
+	}
+	if got.Status.Login == nil || got.Status.Login.State != "logged in" {
+		t.Fatalf("login with the marker = %+v, want logged in", got.Status.Login)
+	}
+	if _, parseErr := time.Parse(time.RFC3339, got.Status.Login.Since); parseErr != nil {
+		t.Errorf("since = %q, want an RFC 3339 time: %v", got.Status.Login.Since, parseErr)
+	}
+
+	// An untagged volume has no login status; neither has a probe whose
+	// marker would leave the volume.
+	plain := intmodel.VolumeMetadata{Name: "plain", Realm: "default"}
+	if _, err = r.WriteVolume(intmodel.Volume{Metadata: plain}); err != nil {
+		t.Fatalf("WriteVolume(plain) error = %v", err)
+	}
+	if got, err = r.GetVolume(intmodel.Volume{Metadata: plain}); err != nil || got.Status.Login != nil {
+		t.Errorf("untagged volume login = %+v, %v; want none", got.Status.Login, err)
+	}
+	escape := intmodel.Volume{
+		Metadata: md,
+		Spec:     intmodel.VolumeSpec{Connector: "claude", LoginMarker: "../dev-state/.credentials.json"},
+	}
+	if status := r.VolumeLoginStatus(escape); status != nil {
+		t.Errorf("status for a marker outside the volume = %+v, want none", status)
+	}
+	// The probe a caller makes for a Volume that predates tagging.
+	probe := intmodel.Volume{
+		Metadata: plain,
+		Spec:     intmodel.VolumeSpec{Connector: "claude", LoginMarker: ".credentials.json"},
+	}
+	if status := r.VolumeLoginStatus(probe); status == nil || status.State != "empty" {
+		t.Errorf("probe of an untagged volume = %+v, want empty", status)
+	}
+
+	// A volume coordinate that would leave the volumes tree is not probed.
+	outside := intmodel.Volume{
+		Metadata: intmodel.VolumeMetadata{Name: "../../../../root", Realm: "default"},
+		Spec:     intmodel.VolumeSpec{Connector: "claude", LoginMarker: ".credentials.json"},
+	}
+	if status := r.VolumeLoginStatus(outside); status != nil {
+		t.Errorf("status for a volume name outside the volumes tree = %+v, want none", status)
+	}
+}
+
+// TestVolume_LoginStatusSymlink: the content of a login identity is written
+// from inside a container, so a symlink in it must not point the marker check
+// at the host. A link on a directory of a multi-component marker, or on the
+// marker itself, never reports the host file as a login.
+func TestVolume_LoginStatusSymlink(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+	host := t.TempDir()
+	if err := os.MkdirAll(host+"/.ssh", 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(host+"/.ssh/id_ed25519", []byte("key"), 0o600); err != nil {
+		t.Fatalf("write host file: %v", err)
+	}
+
+	md := intmodel.VolumeMetadata{Name: "planted", Realm: "default"}
+	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md}); err != nil {
+		t.Fatalf("WriteVolume() error = %v", err)
+	}
+	dir := fs.VolumePath(runPath, "default", "", "", "planted")
+	if err := os.Symlink(host, dir+"/.claude"); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := os.Symlink(host+"/.ssh/id_ed25519", dir+"/marker"); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	through := intmodel.Volume{
+		Metadata: md, Spec: intmodel.VolumeSpec{Connector: "claude", LoginMarker: ".claude/.ssh/id_ed25519"},
+	}
+	if status := r.VolumeLoginStatus(through); status == nil || status.State != "empty" {
+		t.Errorf("marker through a directory link = %+v, want empty", status)
+	}
+	// The marker itself as a link: Lstat sees the link, as before.
+	link := intmodel.Volume{Metadata: md, Spec: intmodel.VolumeSpec{Connector: "claude", LoginMarker: "marker"}}
+	if status := r.VolumeLoginStatus(link); status == nil || status.State != "logged in" {
+		t.Errorf("marker that is a link = %+v, want logged in (the link exists in the volume)", status)
+	}
+}

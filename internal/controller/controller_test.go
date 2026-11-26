@@ -89,6 +89,7 @@ type fakeRunner struct {
 	// Volume methods
 	WriteVolumeFn             func(volume intmodel.Volume) (bool, error)
 	GetVolumeFn               func(volume intmodel.Volume) (intmodel.Volume, error)
+	VolumeLoginStatusFn       func(volume intmodel.Volume) *intmodel.LoginStatus
 	ListVolumesFn             func(realmName, spaceName, stackName string) ([]intmodel.Volume, error)
 	DeleteVolumeFn            func(volume intmodel.Volume) error
 	VolumeMountedByLiveCellFn func(volume intmodel.Volume) (string, bool, error)
@@ -400,6 +401,13 @@ func (f *fakeRunner) GetVolume(volume intmodel.Volume) (intmodel.Volume, error) 
 		return f.GetVolumeFn(volume)
 	}
 	return intmodel.Volume{}, errors.New("unexpected call to GetVolume")
+}
+
+func (f *fakeRunner) VolumeLoginStatus(volume intmodel.Volume) *intmodel.LoginStatus {
+	if f.VolumeLoginStatusFn != nil {
+		return f.VolumeLoginStatusFn(volume)
+	}
+	return nil
 }
 
 func (f *fakeRunner) ListVolumes(realmName, spaceName, stackName string) ([]intmodel.Volume, error) {

@@ -7,8 +7,8 @@ import { SourceGroups, SourceIdentities, type RenderedValue } from "./merged-val
 import { groupGitValues } from "./config-form.mjs";
 import { Disclosure } from "./disclosure";
 import { catalogAPI, referenceScope } from "./catalog-url.mjs";
-import { ConnectorFixes, ConnectorStateBadge, IdentitySelect, StatusIdentity } from "./connector-ui";
-import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, identitiesFor, methodChoices, methodStatuses, stateResolved, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
+import { ConnectorFixes, ConnectorStateBadge, IdentitySelect, LoginIdentitySelect, StatusIdentity } from "./connector-ui";
+import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, keepsLogin, loginIdentitiesFor, methodChoices, methodStatuses, stateResolved, statusIdentity, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
 import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
 import { repositoryFromSource, sourcesAPI } from "./teams.mjs";
 import type { StoredSource } from "./teams.mjs";
@@ -181,7 +181,15 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const methods = changedMethods(configStatuses, methodPicks);
   const statuses = methodStatuses(configStatuses, connectors.data, methodPicks);
   const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/api/catalog/secrets" : null, revision + saved);
+  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/api/connectors/logins" : null, revision + saved);
   const [picks, setPicks] = useState<Record<string, Partial<SecretRef> | undefined>>({});
+  // Harness state for this cell only (#1685): persistent or ephemeral, empty for the Config's. A cell
+  // whose method keeps a login always has persistent state, so the choice is offered for token methods.
+  const [stateChoice, setStateChoice] = useState("");
+  const configState = configStatuses.find(status => !!status.harnessState)?.harnessState ?? "";
+  const keepsLoginNow = statuses.some(keepsLogin);
+  const offersState = !!configState && !keepsLoginNow;
+  const state = offersState && stateChoice !== configState ? stateChoice : "";
   const overrides = changedPicks(statuses, picks);
   const unresolved = unresolvedConnectors(statuses, picks);
   const team = teamOf(detail.data);
@@ -227,7 +235,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
     try {
       // Only the picks that differ from the Config's own identity are sent, as per-cell overrides. A create
       // after a preview sends its token and name, so what was reviewed is what gets created.
-      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, targetSpace, targetStack, ...(Object.keys(overrides).length ? { connectors: overrides } : {}), ...(Object.keys(methods).length ? { methods } : {}) };
+      const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, targetSpace, targetStack, ...(Object.keys(overrides).length ? { connectors: overrides } : {}), ...(Object.keys(methods).length ? { methods } : {}), ...(state ? { state } : {}) };
       const response = await fetch(`/api/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
@@ -247,7 +255,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const previewBlocked = (preview?.connectors ?? []).some(blocksCells);
   const ready = !!detail.data && !!blueprint.data && !stackMissing && unresolved.length === 0;
   const canCreate = !pending && ready && !previewBlocked;
-  const pickedCount = Object.keys(overrides).length + Object.keys(methods).length;
+  const pickedCount = Object.keys(overrides).length + Object.keys(methods).length + (state ? 1 : 0);
   const envCount = env.split("\n").filter(line => line.trim()).length;
   const blueprintStatus = !blueprintRef ? <p className="error" role="alert">This config does not contain a Blueprint reference.</p> : !blueprintValid ? <p className="error" role="alert">The Blueprint reference is incomplete: {scopeLabel(blueprintScope)}</p> : blueprint.loading ? <p role="status">Checking referenced Blueprint…</p> : blueprint.error ? <div className="error" role="alert"><strong>{blueprint.error.code === "not_found" ? "Blueprint reference is missing" : "Blueprint could not be loaded"}</strong><p>{blueprint.error.message}</p><p>Reference: {scopeLabel(blueprintScope)}</p></div> : null;
   const connectorPanel = config && detail.data && statuses.length > 0 && <Disclosure className="cell-connectors" label="Connectors" title="Connectors" open={connectorsOpen} onToggle={setConnectorsOpen}
@@ -266,11 +274,13 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
       return <li key={`${status.connector}:${status.component}`} aria-label={`${title} connector`}><div className="connector-status">
         <div><strong>{title}</strong> <span className="badge">{status.connector}</span>{status.method && <> <span className="badge">{status.method}</span></>} {picked || methodPicked ? <span className="badge">Picked for this cell</span> : <ConnectorStateBadge status={status} />}</div>
         {choices.length > 0 && <label className="schema-field">Method<select aria-label={`${title} method`} value={methodPicked ?? configStatus.method} disabled={pending} onChange={event => { const next = event.target.value; setMethodPicks(old => ({ ...old, [status.connector]: next === configStatus.method ? undefined : next })); setPicks(old => ({ ...old, [status.connector]: undefined })); changed(); }}>{choices.map(method => <option key={method.name} value={method.name}>{method.name}{method.name === configStatus.method ? " (the Config's)" : ""}</option>)}</select><small>{methodPicked ? `${choices.find(method => method.name === methodPicked)?.description ?? ""} Used for this cell only; the Config uses ${configStatus.method}.` : choices.find(method => method.name === configStatus.method)?.description}</small></label>}
-        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
+        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : keepsLogin(status) ? <LoginIdentitySelect label={`${title} login identity`} identities={loginIdentitiesFor(logins.data, status.connector)} value={picks[status.connector] ?? statusIdentity(status)} extra={[statusIdentity(status)]} emptyLabel="Use the Config's login identity" disabled={pending} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={<>The Config resolves to: <StatusIdentity status={status} team={team} />. A login identity picked here becomes this cell's state volume; one login identity serves one role.</>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
         {flagged && <p className="field-error" role="alert">{title} has no usable identity{status.message ? `: ${status.message}` : ""}. Pick one for this cell above, set a default, or pick one for the Config.</p>}
-        {!methodPicked && status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); changed(); }} />}
+        {!methodPicked && status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} logins={loginIdentitiesFor(logins.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); changed(); }} />}
       </div></li>;
     })}</ul>
+    {offersState && <label className="schema-field">Harness state<select aria-label="Harness state" value={stateChoice || configState} disabled={pending} onChange={event => { setStateChoice(event.target.value); changed(); }}>{harnessStates.map(item => <option key={item} value={item}>{item}{item === configState ? " (the Config's)" : ""}</option>)}</select><small>{(stateChoice || configState) === harnessEphemeral ? "Ephemeral: this cell mounts no state volume; the harness state directory lives and dies with the cell, and the cell authenticates from its Secret." : "Persistent: this cell mounts the Config's state volume, so sessions and settings survive the cell."}{state ? ` Used for this cell only; the Config uses ${configState || harnessPersistent}.` : ""}</small></label>}
+    {!!configState && keepsLoginNow && <p className="description">Harness state is persistent: a method that keeps its login in the state volume cannot use ephemeral state.</p>}
   </div></Disclosure>;
   const git = groupGitValues(preview?.values);
   return <div className="creation-layout">
@@ -278,7 +288,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
       {showChooser ? <>
         {configs.loading && <p role="status">Loading CellConfigs…</p>}{configs.error && <div className="error" role="alert"><strong>CellConfigs unavailable</strong><p>{configs.error.message}</p></div>}{configs.error && configs.data && <p className="stale">Showing stale CellConfigs.</p>}
         <label>Search CellConfigs<input type="search" value={query} placeholder="Name or full scope" onChange={event => setQuery(event.target.value)} /></label>
-        <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPicks({}); setMethodPicks({}); setPickedSpace(undefined); setPickedStack(undefined); setPreview(undefined); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
+        <label>CellConfig<select value={selected} onChange={event => { setSelected(event.target.value); setPicks({}); setMethodPicks({}); setStateChoice(""); setPickedSpace(undefined); setPickedStack(undefined); setPreview(undefined); setError(""); }}><option value="">Select a CellConfig…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {scopeLabel(row.scope.slice(0, -1))}</option>)}</select></label>
         {!configs.loading && !configs.error && !configRows.length && <p className="description">No CellConfigs are available.</p>}
       </> : !config ? <p role="status">Loading CellConfigs…</p> : null}
       {config && <>

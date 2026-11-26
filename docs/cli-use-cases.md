@@ -472,6 +472,45 @@ sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-
 - `kuke create registry-credential` stores the credential as a `basic-auth` Secret of the realm and binds the server to it with `secretRef`; re-running it for a server whose entry is still inline moves the password into the Secret. `kuke get realm -o yaml|json` never prints a registry password, inline entries included.
 - The git connector accepts `ssh-key`, `basic-auth` and `opaque`. An `opaque` git identity is author-only: `author` is required, and `hosts`, `sign` and `allowedSignersRef` exit non-zero. `kuke create secret --connector git` without `--type` and without `--from-file` creates one; with `--from-file` it exits non-zero asking for `--type`. An author-only identity given `--from-literal` or `--from-file` exits non-zero with `an author-only git identity stores no value; use --type ssh-key for a key`. A cell whose git identity is author-only gets author and committer, no credential and no signing.
 
+### Login identities (`kuke connector login`)
+
+**Intent.** Keep a harness login in a named, listed Volume; create one and log in to it without a role cell; point a Config or one cell at it; and run token-authenticated cells with or without a state volume. Concept: [`docs/site/concepts/connectors.md`](site/concepts/connectors.md#login-identities).
+
+```bash
+# 1. create a login identity and log in: an identity cell, attached, deleted on exit
+kuke connector login claude personal-max
+
+# 2. see it, with its status and the Configs using it
+kuke connector list
+kuke get volumes -o wide
+
+# 3. create one without logging in, or tag an existing state volume
+sudo kuke create volume personal-max --connector claude
+
+# 4. start one cell on it
+sudo kuke create cell --from-config team-dev-claude --connector claude=personal-max
+
+# 5. a token-method cell with no state volume
+sudo kuke run -c team-pm-claude --state ephemeral
+```
+
+**Invariants.**
+
+- A Volume has a readable `spec.connector`, `spec.method` and `spec.loginMarker`; `kuke get volume <v> -o yaml` and `kuke get volumes -o wide` (`CONNECTOR`, `METHOD`, `LOGIN`) show them. A method or marker without a connector, and a marker that is not a path inside the volume, exit non-zero on `kuke apply` and `kuke create volume`.
+- Starting a cell from a Config that uses a `login` method tags its state Volume with the connector, method and marker — when the start creates the Volume and when it already existed untagged. An ensure mount never resets an existing Volume's reclaim policy or tag.
+- A Volume tagged for one connector is refused as the state volume of another: the cell is not created, and the error names both connectors.
+- `kuke connector list` lists every login identity with `TYPE login`, its scope, `STATUS` (`logged in` / `empty`, `-` when unknown) and `USED BY`. A state volume a Config logs in through is listed before any cell start has tagged it.
+- The status is the existence of the marker the connector declares (`login.marker` in `connector.yaml`). kukeond stats it and never opens it; no command output, error or web UI response carries the content of a login.
+- `kuke connector login CONNECTOR [NAME]` creates the Volume when missing (tagged, `reclaimPolicy: Retain`), starts an identity cell that mounts only that Volume and runs `login.command`, attaches, and deletes the cell when the session ends; it then prints the identity's status. It works on a realm with no team, and on a team's own `<team>-<role>-<harness>-state`. The identity cell has no role, repos, secrets or other connector.
+- `kuke connector login` exits non-zero when the identity is still `empty` after the session, for a connector with no login method, for a Volume tagged for another connector, and for an existing untagged Volume no Config logs in through.
+- A second `kuke connector login` on an identity whose session is still running attaches to it and starts no second cell. Detaching (`^]^]`) leaves the cell running.
+- `--connector <connector>=<volume>[@realm[/space[/stack]]]` on `kuke create cell --from-config` / `kuke run -c` is accepted when the cell's method keeps a login: that Volume becomes the cell's state volume (a name without a scope is realm-scoped). It is recorded in `spec.provenance.connectorVolumes` and used again by `kuke restart`, a reconcile-driven recreate and `--clone`. A missing Volume or one tagged for another connector exits non-zero before anything is created.
+- Binding a login identity that Configs of another `kukeon.io/role` already use exits non-zero with an error naming both roles: `kuke apply` of a Config that names it as its state volume through a login method (nothing is stored, and the role already using it keeps creating cells), and `--connector <connector>=<volume>` on a cell. Configs of the same role, and Configs without a role label, may share one.
+- `spec.state` on a Config, `connectors.<name>.state` in a team declaration and `--state` on a cell choose `persistent` (default) or `ephemeral` harness state. An `ephemeral` cell mounts no state Volume and starts authenticated from its Secret. `--state` is valid with `--from-config` only and is recorded in `spec.provenance.state`. Existing Configs render unchanged.
+- `ephemeral` with a method that keeps its login in the state volume exits non-zero, on `kuke apply` of the Config, at composition of the team and at cell creation, with an error saying the login would not survive the cell.
+- `kuke get configs -o wide` shows, per harness connector, the identity and the state: `claude=login [<volume>, logged in]`, `claude=<secret> (realm) [state <volume>]`, `[state ephemeral]`.
+- Team state volume names (`<team>-<role>-<harness>-state`) do not change, and a declaration that sets neither `identity` (for a login) nor `state` renders the same Config values as before.
+
 ### Importing a git identity (`kuke connector`)
 
 **Intent.** Store the operator's own SSH key and gitconfig author as one git identity, and make it the default every team cell uses. Reference: [`docs/site/cli/kuke-connector.md`](site/cli/kuke-connector.md).

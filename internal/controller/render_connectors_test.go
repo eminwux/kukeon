@@ -118,6 +118,16 @@ func connectorBlueprint() ext.CellBlueprintDoc {
 type connectorFixture struct {
 	scope   renderScope
 	secrets map[string]intmodel.SecretSpec
+	// volumes are the Volumes that exist, by "realm/space/stack/name"; the
+	// other Configs of the realm are in configs.
+	volumes map[string]intmodel.Volume
+	configs []ext.CellConfigDoc
+	// cells are the cells of the realm.
+	cells []intmodel.Cell
+}
+
+func volumeKey(md intmodel.VolumeMetadata) string {
+	return md.Realm + "/" + md.Space + "/" + md.Stack + "/" + md.Name
 }
 
 func connectorConfig(components ...string) ext.CellConfigDoc {
@@ -140,6 +150,31 @@ func newConnectorRunner(t *testing.T, fx *connectorFixture, cfg ext.CellConfigDo
 		}
 		secret.Spec = spec
 		return secret, nil
+	}
+	mock.GetVolumeFn = func(volume intmodel.Volume) (intmodel.Volume, error) {
+		got, ok := fx.volumes[volumeKey(volume.Metadata)]
+		if !ok {
+			return intmodel.Volume{}, errdefs.ErrVolumeNotFound
+		}
+		got.Metadata = volume.Metadata
+		return got, nil
+	}
+	mock.ListConfigsFn = func(string, string, string) ([]intmodel.CellConfig, error) {
+		out := make([]intmodel.CellConfig, 0, len(fx.configs))
+		for _, doc := range fx.configs {
+			out = append(out, intmodel.CellConfig{Metadata: configCarrier(t, doc).Metadata})
+		}
+		return out, nil
+	}
+	mock.ListCellsFn = func(string, string, string) ([]intmodel.Cell, error) { return fx.cells, nil }
+	getConfig := mock.GetConfigFn
+	mock.GetConfigFn = func(in intmodel.CellConfig) (intmodel.CellConfig, error) {
+		for _, doc := range fx.configs {
+			if doc.Metadata.Name == in.Metadata.Name {
+				return configCarrier(t, doc), nil
+			}
+		}
+		return getConfig(in)
 	}
 	return mock
 }
@@ -356,8 +391,8 @@ func TestPreviewCellFromConfig_ConnectorOverrideRejected(t *testing.T) {
 		"missing secret": {
 			map[string]ext.ContainerSecretRef{"forge": {Name: "nope"}}, errdefs.ErrConnectorIdentity, "does not exist",
 		},
-		"login takes no identity": {
-			map[string]ext.ContainerSecretRef{"agent": {Name: "agent-tok"}}, errdefs.ErrConnectorIdentity, "login",
+		"login names a volume that does not exist": {
+			map[string]ext.ContainerSecretRef{"agent": {Name: "agent-tok"}}, errdefs.ErrVolumeIdentity, "does not exist",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

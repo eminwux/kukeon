@@ -18,6 +18,7 @@ package apischeme
 
 import (
 	"fmt"
+	"strings"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -39,6 +40,9 @@ func ConvertVolumeDocToInternal(in ext.VolumeDoc) (intmodel.Volume, error) {
 			},
 			Spec: intmodel.VolumeSpec{
 				ReclaimPolicy: intmodel.ReclaimPolicy(in.Spec.ReclaimPolicy),
+				Connector:     strings.TrimSpace(in.Spec.Connector),
+				Method:        strings.TrimSpace(in.Spec.Method),
+				LoginMarker:   strings.TrimSpace(in.Spec.LoginMarker),
 			},
 		}, nil
 	default:
@@ -64,7 +68,12 @@ func NormalizeVolume(req ext.VolumeDoc) (intmodel.Volume, ext.Version, error) {
 // (step 3, #1237) so `kuke get volume -o yaml` surfaces a retained volume's
 // policy.
 func ConvertVolumeToExternal(in intmodel.Volume) ext.VolumeDoc {
+	var status ext.VolumeStatus
+	if in.Status.Login != nil {
+		status.Login = &ext.LoginStatus{State: in.Status.Login.State, Since: in.Status.Login.Since}
+	}
 	return ext.VolumeDoc{
+		Status:     status,
 		APIVersion: ext.APIVersionV1Beta1,
 		Kind:       ext.KindVolume,
 		Metadata: ext.VolumeMetadata{
@@ -75,6 +84,9 @@ func ConvertVolumeToExternal(in intmodel.Volume) ext.VolumeDoc {
 		},
 		Spec: ext.VolumeSpec{
 			ReclaimPolicy: ext.ReclaimPolicy(in.Spec.ReclaimPolicy),
+			Connector:     in.Spec.Connector,
+			Method:        in.Spec.Method,
+			LoginMarker:   in.Spec.LoginMarker,
 		},
 	}
 }

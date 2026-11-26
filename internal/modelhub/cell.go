@@ -100,6 +100,10 @@ type CellProvenance struct {
 	ConnectorOverrides map[string]ContainerSecretRef
 	// ConnectorMethods records the per-cell connector methods (#1551).
 	ConnectorMethods map[string]string
+	// ConnectorVolumes records the per-cell login identities and State the
+	// per-cell harness state choice (#1685).
+	ConnectorVolumes map[string]VolumeRef
+	State            string
 }
 
 // CellBindingRef mirrors v1beta1.CellBindingRef. Issue #1021.
@@ -131,6 +135,14 @@ func CloneCellProvenance(in *CellProvenance) *CellProvenance {
 		out.EnvOverrides = append([]string(nil), in.EnvOverrides...)
 	}
 	out.Mode = in.Mode
+	out.State = in.State
+	if in.ConnectorVolumes != nil {
+		volumes := make(map[string]VolumeRef, len(in.ConnectorVolumes))
+		for k, v := range in.ConnectorVolumes {
+			volumes[k] = v
+		}
+		out.ConnectorVolumes = volumes
+	}
 	if in.ParamOverrides != nil {
 		overrides := make(map[string]string, len(in.ParamOverrides))
 		for k, v := range in.ParamOverrides {

@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	"github.com/eminwux/kukeon/internal/connector"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
@@ -857,6 +858,11 @@ func validateVolume(doc *Document) *ValidationError {
 	}
 	if policyErr := validateReclaimPolicy(vol.Spec.ReclaimPolicy); policyErr != nil {
 		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: vol.Metadata.Name, Err: policyErr}
+	}
+	if tagErr := connector.ValidateVolumeTag(
+		vol.Spec.Connector, vol.Spec.Method, vol.Spec.LoginMarker,
+	); tagErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: vol.Metadata.Name, Err: tagErr}
 	}
 	return nil
 }
