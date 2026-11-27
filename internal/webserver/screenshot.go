@@ -81,7 +81,9 @@ func registerScreenshotRouteWith(mux *http.ServeMux, dial Dial, shoot screenshoo
 			if err = shared.GuardCellTaskLiveness(result, cell, realm, space, stack); err != nil {
 				return nil, fmt.Errorf("%w: %w", errScreenUnavailable, err)
 			}
-			container, err := screenContainer(ctx, c, r, result.Cell.Spec.Tty)
+			container, err := screenContainer(
+				ctx, c, realm, space, stack, cell, r.URL.Query().Get("container"), result.Cell.Spec.Tty,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -113,21 +115,24 @@ func registerScreenshotRouteWith(mux *http.ServeMux, dial Dial, shoot screenshoo
 	)
 }
 
-// screenContainer picks the container whose screen is read: ?container= when
-// given, else the cell's spec.tty.default when that container is attachable
-// and not root, else the first non-root attachable container in list order.
-// Unlike `kuke screenshot`, more than one attachable container is not an
-// error: the browser's terminal makes the same first-attachable choice.
-func screenContainer(ctx context.Context, c kukeonv1.Client, r *http.Request, tty *v1beta1.CellTty) (string, error) {
-	if name := r.URL.Query().Get("container"); name != "" {
-		if !safePathSegment(name) {
-			return "", fmt.Errorf("%w: invalid container name %q", errdefs.ErrConfig, name)
+// screenContainer picks the container whose screen is read: explicit (the
+// screenshot route's ?container=) when given, else the cell's
+// spec.tty.default when that container is attachable and not root, else the
+// first non-root attachable container in list order. Unlike `kuke
+// screenshot`, more than one attachable container is not an error: the
+// browser's terminal makes the same first-attachable choice. The
+// terminal-activity route shares the choice, so a cell's unread mark and its
+// thumbnail describe the same terminal.
+func screenContainer(
+	ctx context.Context, c kukeonv1.Client, realm, space, stack, cell, explicit string, tty *v1beta1.CellTty,
+) (string, error) {
+	if explicit != "" {
+		if !safePathSegment(explicit) {
+			return "", fmt.Errorf("%w: invalid container name %q", errdefs.ErrConfig, explicit)
 		}
-		return name, nil
+		return explicit, nil
 	}
-	specs, err := c.ListContainers(
-		ctx, r.PathValue("realm"), r.PathValue("space"), r.PathValue("stack"), r.PathValue("cell"),
-	)
+	specs, err := c.ListContainers(ctx, realm, space, stack, cell)
 	if err != nil {
 		return "", err
 	}
@@ -138,7 +143,7 @@ func screenContainer(ctx context.Context, c kukeonv1.Client, r *http.Request, tt
 		}
 	}
 	if len(attachable) == 0 {
-		return "", fmt.Errorf("%w: cell %q has no attachable container", errScreenUnavailable, r.PathValue("cell"))
+		return "", fmt.Errorf("%w: cell %q has no attachable container", errScreenUnavailable, cell)
 	}
 	if tty != nil {
 		for _, id := range attachable {

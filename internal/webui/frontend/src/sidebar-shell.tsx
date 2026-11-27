@@ -7,6 +7,9 @@ import type { View } from "./views.mjs";
 import { activeCells, agentGroups, instanceLabels, rollupState } from "./cells.mjs";
 import type { Row } from "./inventory";
 import type { CellListStyle } from "./settings";
+import { unreadLabel } from "./unread.mjs";
+import type { Unread } from "./use-unread";
+import { unreadOf } from "./cell-sidebar";
 
 const collapsedKey = "kukeon-sidebar-collapsed";
 const widthKey = "kukeon-sidebar-width";
@@ -113,9 +116,13 @@ export function VersionRows({ info }: { info: ReturnType<typeof versionInfo> }) 
 // then the connection dot. In Manage and Settings the rail carries no per-kind icons (#1635): collapsing
 // there is only a way to get the width back. In agent style (#1686) each agent is its glyph, toned by the
 // roll-up state, followed by one dot per instance; a single-instance agent is only its glyph, which links
-// to that cell. Dividers separate the agents, and the dots of the other cells come last.
-export function SidebarRail({ view, inventory, selectedScope, connection, onExpand, majordomo, listStyle = "default" }: {
+// to that cell. Dividers separate the agents, and the dots of the other cells come last. A cell with unread
+// terminal output (#1696) gets a ring on its dot, and an agent glyph when any instance has one; the rail
+// shows no amount, only its tooltips and accessible names carry it with Show unread bytes on.
+export function SidebarRail({ view, inventory, selectedScope, connection, onExpand, majordomo, listStyle = "default", unread = {}, showUnreadBytes = false }: {
   view: View;
+  unread?: Record<string, Unread>;
+  showUnreadBytes?: boolean;
   listStyle?: CellListStyle;
   majordomo?: ReactNode;
   inventory: InventoryResource;
@@ -134,8 +141,9 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
   const dot = (row: Row) => {
     const state = row.doc.status?.state;
     const instance = labels.get(JSON.stringify(row.scope));
-    const label = `Open ${instance ? `${instance} (${row.scope.join(" / ")})` : row.scope.join(" / ")} (${state || "state not reported"})`;
-    return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
+    const unreadBytes = unread[JSON.stringify(row.scope)]?.unreadBytes ?? 0;
+    const label = `Open ${instance ? `${instance} (${row.scope.join(" / ")})` : row.scope.join(" / ")} (${state || "state not reported"})${unreadLabel(unreadBytes, showUnreadBytes)}`;
+    return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}${unreadBytes ? " has-unread" : ""}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
   };
   return <div className="sidebar-rail">
     <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
@@ -145,14 +153,16 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
       {listStyle === "agent" ? <ul>
         {agents.map(agent => {
           const count = `${agent.rows.length} ${agent.rows.length === 1 ? "instance" : "instances"}`;
+          const agentUnread = unreadOf(agent.rows, unread);
+          const suffix = unreadLabel(agentUnread, showUnreadBytes);
           const named = `Agent ${agent.displayName}${agent.context ? ` (${agent.context})` : ""}, ${count}`;
-          const tone = `rail-agent-glyph tone-${stateTone(rollupState(agent.rows))}`;
+          const tone = `rail-agent-glyph tone-${stateTone(rollupState(agent.rows))}${agentUnread ? " has-unread" : ""}`;
           if (agent.rows.length === 1) {
             const row = agent.rows[0];
-            const label = `${named}: open ${row.scope.join(" / ")} (${row.doc.status?.state || "state not reported"})`;
+            const label = `${named}: open ${row.scope.join(" / ")} (${row.doc.status?.state || "state not reported"})${suffix}`;
             return <li className="rail-agent" key={agent.id}><a className={tone} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><Icon name="agent" /></a></li>;
           }
-          return <li className="rail-agent" key={agent.id}><span className={tone} role="img" aria-label={named} title={named}><Icon name="agent" /></span><ul>{agent.rows.map(dot)}</ul></li>;
+          return <li className="rail-agent" key={agent.id}><span className={tone} role="img" aria-label={named + suffix} title={named + suffix}><Icon name="agent" /></span><ul>{agent.rows.map(dot)}</ul></li>;
         })}
         {others.length > 0 && <li className="rail-others"><ul aria-label="Other cells">{others.map(dot)}</ul></li>}
       </ul> : <ul>{cells.map(dot)}</ul>}

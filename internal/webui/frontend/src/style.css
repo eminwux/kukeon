@@ -969,3 +969,12 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .majordomo-login .majordomo-login-ask, .majordomo-login .error { flex-basis: 100%; }
 .majordomo-login.is-asking { background: var(--status-warning-bg); }
 .new-agent-login { margin: 0; }
+/* Unread terminal output (#1696): an accent dot after the name and a bolder name; on the rail a ring around
+   the cell dot or the agent glyph; on a tile an Unread badge. Each is a shape as well as a colour. */
+.unread-dot { display: inline-block; flex: none; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
+.cell-link.has-unread .cell-link-name, .agent-row.has-unread .agent-name { font-weight: 800; }
+.cell-unread-count { margin-left: 5px; color: var(--muted); font-size: var(--font-sm); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail-cell.has-unread .state-dot { box-shadow: 0 0 0 2px var(--sidebar), 0 0 0 4px var(--accent); }
+.rail-agent-glyph.has-unread { box-shadow: inset 0 0 0 2px var(--accent); }
+.badge.cell-tile-unread { display: inline-flex; align-items: center; gap: 5px; color: var(--text); border-color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.badge.cell-tile-unread .unread-dot { margin-left: 0; }

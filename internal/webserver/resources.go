@@ -84,6 +84,7 @@ func registerResourceRoutes(mux *http.ServeMux, dial Dial) {
 	registerContainerRoutes(mux, dial)
 	registerContainerLogRoute(mux, dial)
 	registerScreenshotRoute(mux, dial)
+	registerTerminalActivityRoute(mux, dial)
 	registerCgroupRoutes(mux, dial)
 	registerNetworkRoutes(mux, dial)
 	registerImageInventoryRoutes(mux, dial)
