@@ -164,11 +164,14 @@ func TestReadSupervisorDoc(t *testing.T) {
 func TestRemoveSupervisorDoc(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, consts.KukeonContainerSupervisorFile)
-	if err := removeSupervisorDoc(path); err != nil {
+	if err := removeSupervisorDoc(filepath.Join(dir, "absent")); err != nil {
+		t.Fatalf("missing directory: %v", err)
+	}
+	if err := removeSupervisorDoc(dir); err != nil {
 		t.Fatalf("missing document: %v", err)
 	}
 	writeSupervisorFile(t, dir, mustJSON(t, repoFailedDoc()))
-	if err := removeSupervisorDoc(path); err != nil {
+	if err := removeSupervisorDoc(dir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -320,7 +323,7 @@ func TestPopulateCellContainerStatuses_RestartWithoutDocDropsPriorRun(t *testing
 			// Restart: the start path removes the document (see
 			// TestAttachableBuildOpts_RemovesLeftoverSupervisorDoc) and the
 			// new task runs without ever writing one.
-			if err := removeSupervisorDoc(filepath.Join(ttyDir, consts.KukeonContainerSupervisorFile)); err != nil {
+			if err := removeSupervisorDoc(ttyDir); err != nil {
 				t.Fatal(err)
 			}
 			next = tc.next

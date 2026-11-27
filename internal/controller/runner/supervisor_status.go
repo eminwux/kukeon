@@ -192,12 +192,23 @@ func taskRecordGone(state intmodel.ContainerState) bool {
 	return false
 }
 
-// removeSupervisorDoc deletes a container's leftover supervisor document
-// before its task starts, so a record from the previous run is never credited
-// to the new one. A missing document is not an error.
-func removeSupervisorDoc(path string) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove leftover supervisor status %q: %w", path, err)
+// removeSupervisorDoc deletes the leftover supervisor document in a
+// container's tty directory before its task starts, so a record from the
+// previous run is never credited to the new one. Like readSupervisorDoc, the
+// removal never leaves ttyDir (os.Root). A missing directory or document is
+// not an error.
+func removeSupervisorDoc(ttyDir string) error {
+	root, err := os.OpenRoot(ttyDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("open tty directory %q: %w", ttyDir, err)
+	}
+	defer root.Close()
+	name := consts.KukeonContainerSupervisorFile
+	if err = root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove leftover supervisor status %q in %q: %w", name, ttyDir, err)
 	}
 	return nil
 }
