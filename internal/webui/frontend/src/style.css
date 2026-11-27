@@ -435,6 +435,8 @@ button:disabled { cursor: default; opacity: .4; }
 .schema-field b { color: var(--accent); }
 .schema-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .schema-fields > .schema-object, .schema-fields > .schema-array { grid-column: 1 / -1; }
+/* The team wizard's Resolves to keeps the previous rows, dimmed, while a dry run runs (#1745). */
+table.is-resolving .resolves-to { opacity: 0.55; }
 /* A person (#1745): Name and Email side by side, stacked on a narrow screen. */
 .schema-fields > .person-fields { grid-column: 1 / -1; }
 .person-fields-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }

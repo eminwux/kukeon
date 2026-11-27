@@ -57,7 +57,9 @@ export type Plan = {
   missingSecrets: string[] | null; createSecrets: string[] | null; notes: string[] | null;
 };
 export type TeamResult = { team: string; resources: number; pruned: string[]; missingSecrets: string[]; notes: string[] };
-export type TeamOutcome = { plan: Plan; result?: TeamResult };
+// connectors, on a preview, is what each composed Config would resolve (#1745); connectorNotes names the ones
+// that did not render.
+export type TeamOutcome = { plan: Plan; result?: TeamResult; connectors?: RoleConnectorView[]; connectorNotes?: string[] };
 export type Source = { name: string; url: string; branch?: string; tag?: string; commit?: string; identity?: string };
 export type Selection = { name: string; source: string; path: string };
 export type SourceUse = { team?: string; as: string; name: string };

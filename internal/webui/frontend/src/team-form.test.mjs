@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, initialPathValid, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
   roleConnectorRows, roleHarnesses, suspendOf, switchOf, taskRows, tasksErrors, togglable, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole,
-  withRoleConnector, withRolePatch, withSource, withTask,
+  seededRole, withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 
 // form is a team's form as GET /api/teams/{name} returns it.
@@ -225,6 +225,26 @@ test("a per-role switch and identity change only that role's item", () => {
   assert.equal(withRoleConnector(start, 5, "github", { enabled: true }), start, "an unknown role changes nothing");
   // The edit body is the form: the server applies the items that differ from the stored team.
   assert.deepEqual(editBody("web", next).form.roles.items[0].connectors, next.roles.items[0].connectors);
+});
+
+test("a role added to a new team starts with every per-role connector on; an edit's roles keep their switches", () => {
+  const catalog = [{ name: "github" }, { name: "git", delivery: "git" }, { name: "claude", harness: "claude" }, { name: "registry", delivery: "registry" }];
+  const start = { ...form(), roles: { inherit: false, items: [] } };
+  // New team: the seed is the connector catalog; harness and registry connectors are not togglable.
+  const added = withRole(start, { name: "pm", source: "agents", path: "pm" }, true, [], catalog);
+  assert.deepEqual(added.roles.items[0].connectors, [{ name: "github", enabled: true, identity: "" }, { name: "git", enabled: true, identity: "" }]);
+  assert.deepEqual(roleConnectorRows(added.roles.items[0], catalog).map(row => [row.name, row.enabled]), [["github", true], ["git", true]]);
+  // The request body carries the switches.
+  assert.deepEqual(editBody("web", added).form.roles.items[0].connectors.map(item => item.enabled), [true, true]);
+  // Declaring the default roles seeds them too.
+  const declared = withInherit({ ...form(), roles: { inherit: true, items: [] } }, "roles", false, [{ name: "majordomo", source: "kukeon", path: "team/roles/majordomo" }], catalog);
+  assert.deepEqual(declared.roles.items[0].connectors.map(item => [item.name, item.enabled]), [["github", true], ["git", true]]);
+  // A switch the role has already is kept, off included.
+  assert.deepEqual(seededRole({ name: "x", connectors: [{ name: "github", enabled: false, identity: "" }] }, catalog).connectors, [{ name: "github", enabled: false, identity: "" }, { name: "git", enabled: true, identity: "" }]);
+  // No seed (an edit, or the catalog not read yet): unchanged.
+  assert.deepEqual(withRole(start, { name: "pm", source: "agents", path: "pm" }, true).roles.items[0].connectors, []);
+  const role = { name: "x" };
+  assert.equal(seededRole(role, undefined), role);
 });
 
 test("a role selected again keeps its connector switches", () => {
