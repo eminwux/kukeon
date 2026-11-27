@@ -7,6 +7,8 @@ Build, test, and smoke-test conventions for anyone — human or agent — workin
 - **License header:** Apache 2.0 + SPDX copyright header on every new Go file.
 - **Shared error sentinels:** defined in `internal/errdefs/`. Don't declare new `errors.New` in package code when the concept is reusable — add it to `errdefs` instead.
 - **Tests colocated with source:** `foo.go` + `foo_test.go`.
+- **Vocabulary — kukeon has no pods.** Co-located containers form a **cell**; networks belong to **spaces** (one /24 per space, carved from the subnet parent CIDR); spaces live in **realms** and cells group into **stacks**. Don't write "pod" in new prose, log or error messages, identifiers, test names, issues or PR bodies. That includes config keys, env vars, flags and commands: the subnet setting is `spaceSubnetCIDR` / `KUKEON_SPACE_SUBNET_CIDR` / `--space-subnet-cidr` (renamed in #1760). The old pod spellings may appear only in the startup check that rejects them.
+- **Finishing an issue:** if your agent harness provides a `/reflect` skill, run it before ending the task to file any bug or lesson the work surfaced.
 
 ## The two default realms
 
@@ -68,18 +70,9 @@ After the daemon-parity tail, `scripts/dev-init.sh` also runs a PTY-driven `kuke
 
 ### Post-init: `kuke status`
 
-`kuke status` is the canonical equivalent of the manual diff ritual above —
-one command covering daemon liveness, host pre-flight, state consistency,
-and the daemon-parity walk across every resource kind. See
-[`docs/site/cli/kuke-status.md`](docs/site/cli/kuke-status.md) for the full
-reference (sections, flag table, exit codes, JSON shape).
+`kuke status` is the canonical equivalent of the manual diff ritual above — one command covering daemon liveness, host pre-flight, state consistency, and the daemon-parity walk across every resource kind. See [`docs/site/cli/kuke-status.md`](docs/site/cli/kuke-status.md) for the full reference (sections, flag table, exit codes, JSON shape).
 
-The two-line `kuke get realms` diff above stays the minimal pinned
-regression guard the `make dev-init` tail prints; `kuke status` is the
-broader smoke an operator runs after `kuke init` to surface anything the
-two-realm tail won't catch (cgroup delegation gone, CNI binaries gone,
-divergent secrets/blueprints/configs, residual containerd namespaces from
-a half-cleaned `kuke uninstall`).
+The two-line `kuke get realms` diff above stays the minimal pinned regression guard the `make dev-init` tail prints; `kuke status` is the broader smoke an operator runs after `kuke init` to surface anything the two-realm tail won't catch (cgroup delegation gone, CNI binaries gone, divergent secrets/blueprints/configs, residual containerd namespaces from a half-cleaned `kuke uninstall`).
 
 ### Post-reboot cgroup recovery
 
