@@ -229,8 +229,9 @@ KUKEON_E2E_IMAGE_TAR := $(KUKEON_E2E_STATE_DIR)/kukeond.tar
 e2e: test-e2e
 .PHONY: test-e2e
 # Prerequisites: root, Go, standalone containerd at
-# /run/containerd/containerd.sock, iproute2 (`ip`) and `ctr` on PATH. No docker
-# daemon or binary is needed. scripts/e2e-preflight.sh checks all of these (plus
+# /run/containerd/containerd.sock and `ctr` on PATH. No docker daemon or binary
+# and no iproute2 (`ip`) is needed: the harness reads the host network over
+# netlink. scripts/e2e-preflight.sh checks all of these (plus
 # the freshly built kukebuild and a free /run/kukeon-e2e-network.lock) and exits
 # non-zero naming each missing piece before the image build or `go test` start.
 #

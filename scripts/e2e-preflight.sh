@@ -7,8 +7,10 @@
 #
 # Each missing piece otherwise surfaces deep inside the suite (a kukebuild
 # dial timeout several minutes in, or every daemon-bringing test failing at
-# "E2E network preflight" because `ip -j` is absent). Checking up front turns
-# those into one actionable line each and a non-zero exit before any build.
+# "E2E network preflight" because another suite holds the network lock).
+# Checking up front turns those into one actionable line each and a non-zero
+# exit before any build. The harness reads addresses, routes and bridges over
+# netlink (internal/hostnet), so iproute2 (`ip`) is not a prerequisite.
 # Every failure is reported in one pass so a fresh host or dev cell can be
 # fixed in a single round.
 #
@@ -27,12 +29,6 @@ fail() {
     printf 'e2e preflight: %s\n' "$1" >&2
     failures=$((failures + 1))
 }
-
-# e2e/harness_network_test.go shells out to `ip -j ...` for address/route/
-# bridge inspection.
-if ! command -v ip > /dev/null 2>&1; then
-    fail "'ip' not found on PATH — install iproute2 (e.g. apt-get install iproute2)"
-fi
 
 # The harness uses ctr to verify the kukebuild-built image and the realms'
 # containerd namespaces.

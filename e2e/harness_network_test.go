@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/hostnet"
 	"github.com/eminwux/kukeon/internal/netpolicy"
 )
 
@@ -71,21 +72,19 @@ func TestMain(m *testing.M) {
 
 // Snapshot names too: a bridge left without an address is still a leak.
 func bridgeNames() (map[string]bool, error) {
-	data, err := networkJSON("-j", "link", "show", "type", "bridge")
+	st, err := readHostNetwork()
 	if err != nil {
 		return nil, err
 	}
-	var links []struct {
-		Name string `json:"ifname"`
-	}
-	if err = json.Unmarshal(data, &links); err != nil {
-		return nil, err
-	}
-	names := make(map[string]bool)
-	for _, link := range links {
-		names[link.Name] = true
-	}
-	return names, nil
+	return st.Bridges(), nil
+}
+
+// readHostNetwork reads links, addresses and routes over netlink, so the
+// harness needs no iproute2 (`ip`) on the host.
+func readHostNetwork() (hostnet.State, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return hostnet.Read(ctx)
 }
 
 func verifyE2ENetworkCleanup() error {
@@ -227,99 +226,26 @@ func parseEgressArtifacts(table string, save []byte) map[string]bool {
 	return artifacts
 }
 
-func networkJSON(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ip", args...).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("ip %v: %w: %s", args, err, out)
-	}
-	return out, nil
-}
-
 // validateNetworkPool ignores the default destination but never its gateway.
 // All route tables and interface addresses participate, including DOWN links.
-func validateNetworkPool(pool netip.Prefix, routes, addresses []byte) error {
-	var rows []struct {
-		Dst      string `json:"dst"`
-		Gateway  string `json:"gateway"`
-		Nexthops []struct {
-			Gateway string `json:"gateway"`
-		} `json:"nexthops"`
+func validateNetworkPool(pool netip.Prefix, st hostnet.State) error {
+	conflicts := hostnet.Conflicts(pool, st, nil)
+	if len(conflicts) == 0 {
+		return nil
 	}
-	if err := json.Unmarshal(routes, &rows); err != nil {
-		return err
+	parts := make([]string, len(conflicts))
+	for i, c := range conflicts {
+		parts[i] = c.String()
 	}
-	for _, row := range rows {
-		gateways := []string{row.Gateway}
-		for _, hop := range row.Nexthops {
-			gateways = append(gateways, hop.Gateway)
-		}
-		for _, gateway := range gateways {
-			if gateway == "" {
-				continue
-			}
-			gw, err := netip.ParseAddr(gateway)
-			if err != nil {
-				return err
-			}
-			if pool.Contains(gw) {
-				return fmt.Errorf("pod pool %s overlaps gateway %s", pool, gw)
-			}
-		}
-		if row.Dst == "" || row.Dst == "default" {
-			continue
-		}
-		dst, err := netip.ParsePrefix(row.Dst)
-		if err != nil {
-			addr, addrErr := netip.ParseAddr(row.Dst)
-			if addrErr != nil {
-				return err
-			}
-			dst = netip.PrefixFrom(addr, addr.BitLen())
-		}
-		if dst.Bits() != 0 && pool.Overlaps(dst) {
-			return fmt.Errorf("pod pool %s overlaps route %s", pool, dst)
-		}
-	}
-	var links []struct {
-		Ifname    string `json:"ifname"`
-		Addresses []struct {
-			Local     string `json:"local"`
-			PrefixLen int    `json:"prefixlen"`
-		} `json:"addr_info"`
-	}
-	if err := json.Unmarshal(addresses, &links); err != nil {
-		return err
-	}
-	for _, link := range links {
-		for _, address := range link.Addresses {
-			addr, err := netip.ParseAddr(address.Local)
-			if err != nil {
-				return err
-			}
-			prefix := netip.PrefixFrom(addr, address.PrefixLen)
-			if !prefix.IsValid() {
-				return fmt.Errorf("invalid address on %s", link.Ifname)
-			}
-			if pool.Overlaps(prefix) {
-				return fmt.Errorf("pod pool %s overlaps interface %s (%s)", pool, link.Ifname, prefix)
-			}
-		}
-	}
-	return nil
+	return fmt.Errorf("pod pool %s overlaps %s", pool, strings.Join(parts, "; "))
 }
 
 func checkNetworkPool(pool netip.Prefix) error {
-	routes, err := networkJSON("-j", "-4", "route", "show", "table", "all")
+	st, err := readHostNetwork()
 	if err != nil {
 		return err
 	}
-	addresses, err := networkJSON("-j", "-4", "address", "show")
-	if err != nil {
-		return err
-	}
-	return validateNetworkPool(pool, routes, addresses)
+	return validateNetworkPool(pool, st)
 }
 
 func initE2ENetwork() {
@@ -464,37 +390,25 @@ func TestE2ERunEnvUsesRunPathClientConfiguration(t *testing.T) {
 	}
 }
 
+// The overlap rules themselves are covered in internal/hostnet; this pins
+// the harness's use of them on the suite's pool.
 func TestE2ENetworkPreflight(t *testing.T) {
-	cases := []struct {
-		name, pool, routes, addresses string
-		reject                        bool
-	}{
-		{"parent gateway", "10.88.0.0/16", `[{"dst":"default","gateway":"10.88.0.1"}]`, `[]`, true},
-		{"multipath gateway", "10.88.0.0/16", `[{"dst":"default","nexthops":[{"gateway":"10.88.0.1"}]}]`, `[]`, true},
-		{"unrelated route", "10.192.0.0/12", `[{"dst":"10.192.1.0/24"}]`, `[]`, true},
-		{"local host route", "10.192.0.0/12", `[{"dst":"10.192.0.1"}]`, `[]`, true},
-		{
-			"down bridge",
-			"10.192.0.0/12",
-			`[]`,
-			`[{"ifname":"k-leaked","addr_info":[{"local":"10.192.0.1","prefixlen":24}]}]`,
-			true,
-		},
-		{
-			"safe pool",
-			"10.192.0.0/12",
-			`[{"dst":"default","gateway":"10.88.0.1"},{"dst":"10.88.0.0/24"}]`,
-			`[{"ifname":"eth0","addr_info":[{"local":"10.88.0.15","prefixlen":24}]}]`,
-			false,
+	parent := hostnet.State{
+		Addresses: []hostnet.Address{{Link: "eth0", Prefix: netip.MustParsePrefix("10.88.0.15/24")}},
+		Routes: []hostnet.Route{
+			{
+				Table: hostnet.MainTable, Link: "eth0", Dst: netip.MustParsePrefix("0.0.0.0/0"),
+				Gateways: []netip.Addr{netip.MustParseAddr("10.88.0.1")},
+			},
+			{Table: hostnet.MainTable, Link: "eth0", Dst: netip.MustParsePrefix("10.88.0.0/24")},
 		},
 	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateNetworkPool(netip.MustParsePrefix(tt.pool), []byte(tt.routes), []byte(tt.addresses))
-			if (err != nil) != tt.reject {
-				t.Fatalf("preflight = %v, reject=%v", err, tt.reject)
-			}
-		})
+	if err := validateNetworkPool(netip.MustParsePrefix("10.192.0.0/12"), parent); err != nil {
+		t.Fatalf("safe pool rejected: %v", err)
+	}
+	err := validateNetworkPool(netip.MustParsePrefix("10.88.0.0/16"), parent)
+	if err == nil || !strings.Contains(err.Error(), "gateway 10.88.0.1 dev eth0") {
+		t.Fatalf("parent gateway not rejected: %v", err)
 	}
 }
 
