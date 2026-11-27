@@ -85,6 +85,19 @@ step() {
     printf '\n==> %s\n' "$*"
 }
 
+# migrate_space_subnet_key renames the spec key #1760 retired to
+# spaceSubnetCIDR in an existing dev-profile config file. Only key lines
+# change; comments and every other setting are left as they are. The retired
+# spelling is spelled out here and nowhere else in the script.
+migrate_space_subnet_key() {
+    local file="$1"
+    local retired_key="podSubnetCIDR"
+    [ -e "${file}" ] || return 0
+    grep -Eq "^[[:space:]]+${retired_key}:" "${file}" || return 0
+    step "Migrate ${retired_key} to spaceSubnetCIDR in ${file} (#1760)"
+    sed -i --follow-symlinks -E "s/^([[:space:]]+)${retired_key}:/\1spaceSubnetCIDR:/" "${file}"
+}
+
 # Nested-kukeon detection (issue #547). The canonical probe is the
 # `/.kukeon/bin/kuketty` bind the daemon stages into every attachable cell
 # (`internal/ctr.AttachableBinaryPath`). When present, this script is
@@ -247,7 +260,14 @@ exit_checks() {
 trap 'exit_checks || exit 1' EXIT
 
 if [ "${KUKEON_PROFILE}" = "dev" ]; then
-    step "KUKEON_PROFILE=dev: enabling dev-profile (suffix dev.kukeon.io, cgroup /kukeon-dev, pod CIDR 10.89.0.0/16)"
+    step "KUKEON_PROFILE=dev: enabling dev-profile (suffix dev.kukeon.io, cgroup /kukeon-dev, space subnet 10.89.0.0/16)"
+
+    # The writes below skip a file that already exists, so a config written
+    # before #1760 keeps the retired subnet key, which kuke and kukeond now
+    # reject. Rename the key in place first: the nested run stays on
+    # 10.89.0.0/16 and any other edits to the file survive.
+    migrate_space_subnet_key "${DEV_PROFILE_SERVER_CONFIG}"
+    migrate_space_subnet_key "${DEV_PROFILE_CLIENT_CONFIG}"
 
     # Write the dev-profile config files idempotently before any kuke
     # invocation. `-e` instead of `-f` so a broken symlink to a missing
@@ -261,14 +281,14 @@ if [ "${KUKEON_PROFILE}" = "dev" ]; then
         step "Write dev-profile server config to ${DEV_PROFILE_SERVER_CONFIG}"
         cat > "${DEV_PROFILE_SERVER_CONFIG}" <<'EOF'
 # kukeond ServerConfiguration — dev profile (#285 phase 3).
-# Switches containerdNamespaceSuffix, cgroupRoot, and podSubnetCIDR off the
+# Switches containerdNamespaceSuffix, cgroupRoot, and spaceSubnetCIDR off the
 # defaults so a parallel or nested kukeon instance can coexist with the
 # canonical kukeon.io / /kukeon / 10.88.0.0/16 tree. socket / runPath are left
 # at defaults — dev-init runs the only kukeon instance on the host, so disjoint
 # storage is unnecessary; the multi-instance two-host-smoke is exercised by the
 # issue's manual test plan, not this script.
 #
-# podSubnetCIDR is the nested-mode egress fix (#1079): running `make dev-init`
+# spaceSubnetCIDR is the nested-mode egress fix (#1079): running `make dev-init`
 # inside a kukeon-dev-root cell, the nested allocator must not reuse the parent
 # host's 10.88.0.0/16 + .1 gateway — that .1 is the cell's own default gateway,
 # and claiming it inside the cell shadows the gateway and blackholes egress.
@@ -279,7 +299,7 @@ metadata:
 spec:
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
-  podSubnetCIDR: 10.89.0.0/16
+  spaceSubnetCIDR: 10.89.0.0/16
 EOF
     fi
 
@@ -290,9 +310,9 @@ EOF
 # Read by every `kuke` invocation below via KUKE_CONFIGURATION. The
 # --no-daemon parity check below depends on this file to address the dev
 # instance's containerd namespaces (dev.kukeon.io), cgroup tree (/kukeon-dev),
-# and pod subnet (10.89.0.0/16) without a per-command
-# --containerd-namespace-suffix / --cgroup-root / --pod-subnet-cidr flag.
-# podSubnetCIDR mirrors the server-side nested-mode egress fix (#1079) so
+# and space subnet range (10.89.0.0/16) without a per-command
+# --containerd-namespace-suffix / --cgroup-root / --space-subnet-cidr flag.
+# spaceSubnetCIDR mirrors the server-side nested-mode egress fix (#1079) so
 # in-process `--no-daemon` space creation never lands on the parent's subnet.
 apiVersion: v1beta1
 kind: ClientConfiguration
@@ -301,7 +321,7 @@ metadata:
 spec:
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
-  podSubnetCIDR: 10.89.0.0/16
+  spaceSubnetCIDR: 10.89.0.0/16
 EOF
     fi
 

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -54,7 +55,7 @@ spec:
   logLevel: debug
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
-  podSubnetCIDR: 10.89.0.0/16
+  spaceSubnetCIDR: 10.89.0.0/16
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -85,8 +86,8 @@ spec:
 	if doc.Spec.CgroupRoot != "/kukeon-dev" {
 		t.Errorf("CgroupRoot: got %q", doc.Spec.CgroupRoot)
 	}
-	if doc.Spec.PodSubnetCIDR != "10.89.0.0/16" {
-		t.Errorf("PodSubnetCIDR: got %q", doc.Spec.PodSubnetCIDR)
+	if doc.Spec.SpaceSubnetCIDR != "10.89.0.0/16" {
+		t.Errorf("SpaceSubnetCIDR: got %q", doc.Spec.SpaceSubnetCIDR)
 	}
 }
 
@@ -139,6 +140,27 @@ spec:
 	}
 	if _, err = Load(path); err != nil {
 		t.Fatalf("Load() without apiVersion: %v", err)
+	}
+}
+
+// A file that still sets the retired subnet key fails to load instead of
+// silently falling back to the default subnet (#1760).
+func TestLoadRetiredSpaceSubnetKeyRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuke.yaml")
+	content := "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  " +
+		configrename.RetiredSpaceSubnetKey + ": 10.89.0.0/16\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Load(path)
+	if !errors.Is(err, errdefs.ErrClientConfigurationInvalid) || !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("Load() error = %v, want wrapping ErrClientConfigurationInvalid and ErrSettingRenamed", err)
+	}
+	want := configrename.RetiredSpaceSubnetKey + " was renamed to " + configrename.SpaceSubnetKey + "; update " + path
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("Load() error = %q, want it to contain %q", err, want)
 	}
 }
 
@@ -228,8 +250,8 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.CgroupRoot != "/kukeon" {
 		t.Errorf("Spec.CgroupRoot: got %q", doc.Spec.CgroupRoot)
 	}
-	if doc.Spec.PodSubnetCIDR != "10.88.0.0/16" {
-		t.Errorf("Spec.PodSubnetCIDR: got %q", doc.Spec.PodSubnetCIDR)
+	if doc.Spec.SpaceSubnetCIDR != "10.88.0.0/16" {
+		t.Errorf("Spec.SpaceSubnetCIDR: got %q", doc.Spec.SpaceSubnetCIDR)
 	}
 
 	// AC: "Header comment explains each field's purpose and default."

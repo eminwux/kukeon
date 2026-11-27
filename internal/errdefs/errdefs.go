@@ -523,6 +523,12 @@ var (
 	// YAML fails to parse or violates the schema (wrong kind, etc.).
 	ErrClientConfigurationInvalid = errors.New("client configuration is invalid")
 
+	// ErrSettingRenamed is returned when a configuration file or the
+	// environment still uses a setting's retired name. Old names are
+	// rejected rather than ignored, so a stale setting can't silently fall
+	// back to its default (#1760).
+	ErrSettingRenamed = errors.New("setting was renamed")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired         = errors.New("secret name is required")

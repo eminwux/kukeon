@@ -249,13 +249,13 @@ func checkNetworkPool(pool netip.Prefix) error {
 }
 
 func initE2ENetwork() {
-	raw := os.Getenv("E2E_POD_CIDR_POOL")
+	raw := os.Getenv("E2E_SPACE_CIDR_POOL")
 	if raw == "" {
 		raw = "10.192.0.0/12"
 	}
 	pool, err := netip.ParsePrefix(raw)
 	if err != nil || !pool.Addr().Is4() || pool.Bits() > 20 || pool != pool.Masked() {
-		e2eNetwork.err = fmt.Errorf("E2E_POD_CIDR_POOL must be an aligned IPv4 CIDR of /20 or wider: %q", raw)
+		e2eNetwork.err = fmt.Errorf("E2E_SPACE_CIDR_POOL must be an aligned IPv4 CIDR of /20 or wider: %q", raw)
 		return
 	}
 	// Host-wide rather than per-pool: differently configured overlapping pools
@@ -308,7 +308,7 @@ func reserveE2ESubnet(t *testing.T, runPath string) {
 	e2eNetwork.subnets[runPath] = subnet.String()
 	// init's containerized daemon reads this same explicit configuration.
 	body := fmt.Sprintf(
-		"apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  podSubnetCIDR: %s\n",
+		"apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  spaceSubnetCIDR: %s\n",
 		subnet,
 	)
 	if err = os.WriteFile(filepath.Join(runPath, "kukeond.yaml"), []byte(body), 0o600); err != nil {
@@ -323,7 +323,7 @@ func reserveE2ESubnet(t *testing.T, runPath string) {
 func e2eSubnet(pool netip.Prefix, index uint32) (netip.Prefix, error) {
 	count := uint32(1) << uint(20-pool.Bits())
 	if index >= count {
-		return netip.Prefix{}, fmt.Errorf("E2E pod pool %s exhausted", pool)
+		return netip.Prefix{}, fmt.Errorf("E2E space subnet pool %s exhausted", pool)
 	}
 	base := pool.Addr().As4()
 	binary.BigEndian.PutUint32(base[:], binary.BigEndian.Uint32(base[:])+index*(1<<12))
@@ -352,7 +352,7 @@ func e2eRunEnv(env []string, args []string) []string {
 	} // CLI argument/error tests may use dummy paths.
 	result := make([]string, 0, len(env)+2)
 	for _, value := range env {
-		if !strings.HasPrefix(value, "KUKEON_POD_SUBNET_CIDR=") &&
+		if !strings.HasPrefix(value, "KUKEON_SPACE_SUBNET_CIDR=") &&
 			!strings.HasPrefix(value, "KUKEOND_CONFIGURATION=") &&
 			!strings.HasPrefix(value, "KUKE_CONFIGURATION=") {
 			result = append(result, value)
@@ -360,7 +360,7 @@ func e2eRunEnv(env []string, args []string) []string {
 	}
 	return append(
 		result,
-		"KUKEON_POD_SUBNET_CIDR="+subnet,
+		"KUKEON_SPACE_SUBNET_CIDR="+subnet,
 		"KUKEOND_CONFIGURATION="+filepath.Join(runPath, "kukeond.yaml"),
 		"KUKE_CONFIGURATION="+filepath.Join(runPath, "kuke.yaml"),
 	)

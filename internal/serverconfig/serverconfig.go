@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/api/version"
@@ -57,6 +58,9 @@ func Load(path string) (*v1beta1.ServerConfigurationDoc, error) {
 			"parse server configuration %q: %w: %w",
 			path, errdefs.ErrServerConfigurationInvalid, unmarshalErr,
 		)
+	}
+	if renameErr := configrename.CheckSpec(raw, path); renameErr != nil {
+		return nil, fmt.Errorf("%w: %w", renameErr, errdefs.ErrServerConfigurationInvalid)
 	}
 	if doc.Kind != "" && doc.Kind != v1beta1.KindServerConfiguration {
 		return nil, fmt.Errorf(
@@ -156,7 +160,7 @@ spec:
   # subnet — a nested ` + "`make dev-init`" + ` must avoid the parent host's
   # 10.88.0.0/16 + .1 gateway, which is the dev-root cell's own default gateway.
   # Default: 10.88.0.0/16
-  podSubnetCIDR: {{printf "%q" .PodSubnetCIDR}}
+  spaceSubnetCIDR: {{printf "%q" .SpaceSubnetCIDR}}
 
   # Daemon-wide fallback memory limit (in bytes) applied to every admitted
   # container whose Resources.MemoryLimitBytes is unset or zero. An explicit

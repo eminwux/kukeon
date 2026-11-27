@@ -121,7 +121,7 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_CGROUP_ROOT = DefineKV("KUKEON_CGROUP_ROOT", "kukeon/cgroupRoot", "/kukeon")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKEON_ROOT_POD_SUBNET_CIDR = DefineKV("KUKEON_POD_SUBNET_CIDR", "kukeon/podSubnetCIDR", "10.88.0.0/16")
+	KUKEON_ROOT_SPACE_SUBNET_CIDR = DefineKV("KUKEON_SPACE_SUBNET_CIDR", "kukeon/spaceSubnetCIDR", "10.88.0.0/16")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_HOST = DefineKV("KUKEON_HOST", "kukeon/host", "unix:///run/kukeon/kukeond.sock")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

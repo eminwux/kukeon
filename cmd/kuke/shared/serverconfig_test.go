@@ -157,7 +157,7 @@ func TestLoadServerConfigurationFromFlag_NonDefaultSuffixIsAppliedRuntime(t *tes
 			"spec:\n" +
 			"  containerdNamespaceSuffix: dev.kukeon.io\n" +
 			"  cgroupRoot: /kukeon-dev\n" +
-			"  podSubnetCIDR: 10.89.0.0/16\n",
+			"  spaceSubnetCIDR: 10.89.0.0/16\n",
 	)
 	if err := os.WriteFile(yamlPath, yaml, 0o600); err != nil {
 		t.Fatalf("write yaml: %v", err)

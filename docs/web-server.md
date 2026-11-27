@@ -859,7 +859,7 @@ Every parameter renders, even when it is unset:
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | **Allow (default, not set)**                    | `spec.network.egress` (or its `default`) is absent, so egress is admit-all                            |
 | **Any port**                                    | An allow rule lists no ports, so it admits every port on that destination                             |
-| **Not allocated (allocated from 10.88.0.0/16)** | The space has no subnet yet; the daemon carves a `/24` from the `podSubnetCIDR` parent block          |
+| **Not allocated (allocated from 10.88.0.0/16)** | The space has no subnet yet; the daemon carves a `/24` from the `spaceSubnetCIDR` parent block        |
 | **(legacy conflist)**                           | A space created before the subnet allocator; the subnet is read from the conflist, not `network.json` |
 | **(default)**                                   | The CNI config path is the daemon's default location rather than a `spec.cniConfigPath` override      |
 | **Inherited from space**                        | The container has no `cniConfigPath` of its own and uses the space's conflist                         |

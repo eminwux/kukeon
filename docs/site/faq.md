@@ -10,9 +10,9 @@ Put differently: Docker gives you one container at a time; Kukeon gives you a pl
 
 Kubernetes is a distributed control plane with schedulers, controllers, etcd, API servers, and a CNI story that assumes multiple nodes. Kukeon is a single-host daemon that drives containerd, CNI, and cgroups directly. There's no scheduler, no etcd, no API server on port 6443.
 
-The pod → Kubernetes mapping is:
+Coming from Kubernetes, the closest mapping is:
 
-- Kubernetes pod ≈ Kukeon cell (a group of containers sharing a network namespace)
+- Containers that Kubernetes co-locates in one shared network namespace ≈ one Kukeon cell
 - Kubernetes namespace ≈ Kukeon realm (a tenancy boundary)
 
 Scale, resiliency, and multi-node concerns are deliberately out of scope.

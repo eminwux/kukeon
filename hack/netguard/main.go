@@ -154,9 +154,9 @@ netguard: refusing to continue. A nested kukeond bridge on an overlapping subnet
           To fix it, give the nested instance a block that is disjoint from every
           entry above:
             - KUKEON_PROFILE=dev make dev-init   (writes kukeond-dev.yaml with
-              podSubnetCIDR 10.89.0.0/16 unless the file already exists), or
-            - set podSubnetCIDR in %s (and in KUKE_CONFIGURATION's file, if set)
-              and unset a conflicting KUKEON_POD_SUBNET_CIDR.
+              spaceSubnetCIDR 10.89.0.0/16 unless the file already exists), or
+            - set spaceSubnetCIDR in %s (and in KUKE_CONFIGURATION's file, if set)
+              and unset a conflicting KUKEON_SPACE_SUBNET_CIDR.
           A persisted space keeps its subnet until it is purged:
             sudo ./kuke purge space <space> --realm <realm> --cascade
           (for the kuke-system realm: sudo ./kuke daemon reset --purge-system).
