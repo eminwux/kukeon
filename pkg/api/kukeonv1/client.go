@@ -57,6 +57,12 @@ type Client interface {
 	// req.ExpectedDigest refuses the create unless the fresh render matches
 	// it (errdefs.ErrRenderDigestMismatch).
 	CreateCellFromConfig(ctx context.Context, req CellFromConfigRequest) (CreateCellFromConfigResult, error)
+	// DiffCellFromConfig renders a Config-lineage cell from its lineage
+	// Config, as the drift check does, and returns the stored cell beside the
+	// render overlaid on it, without writing anything (#1768). The documents
+	// are unmasked. A cell without a lineage Config returns
+	// errdefs.ErrCellNotFromConfig.
+	DiffCellFromConfig(ctx context.Context, doc v1beta1.CellDoc) (DiffCellFromConfigResult, error)
 	// CreateConfig atomically persists a new CellConfig document under
 	// create-only semantics (issue #839): the daemon-side write fails with
 	// errdefs.ErrConfigExists if a Config of the same name already lives in
@@ -464,6 +470,37 @@ type CreateCellFromConfigReply struct {
 	Err    *APIError
 }
 
+// DiffCellFromConfigArgs is the wire request for DiffCellFromConfig. Doc
+// names the cell: metadata.name and spec.realmId/spaceId/stackId.
+type DiffCellFromConfigArgs struct {
+	Doc v1beta1.CellDoc
+}
+
+// DiffCellFromConfigResult is the stored cell beside the cell its lineage
+// Config renders to now (#1768). Desired is the stored cell with only the
+// fields the drift check reports replaced by the render's values. Both
+// documents carry no status, runtime env or provenance.
+type DiffCellFromConfigResult struct {
+	Live v1beta1.CellDoc
+	// Desired is nil when the lineage Config was deleted.
+	Desired     *v1beta1.CellDoc
+	ConfigFound bool
+	// Reasons are the drift check's reasons, in its order.
+	Reasons []string
+	// Paths are the spec field paths that differ.
+	Paths []string
+	// ChangeType is how the next start applies the render: "none"
+	// (provenance only), "additive" or "compatible" (in place), or
+	// "breaking" (the cell is recreated). Empty when the Config was deleted.
+	ChangeType string
+}
+
+// DiffCellFromConfigReply is the wire response for DiffCellFromConfig.
+type DiffCellFromConfigReply struct {
+	Result DiffCellFromConfigResult
+	Err    *APIError
+}
+
 // CreateCellResult mirrors internal/controller.CreateCellResult using
 // external v1beta1 types, so it is safe to serialize and return to
 // non-privileged callers.
@@ -507,6 +544,7 @@ const (
 
 	MethodPreviewCellFromConfig = ServiceName + ".PreviewCellFromConfig"
 	MethodCreateCellFromConfig  = ServiceName + ".CreateCellFromConfig"
+	MethodDiffCellFromConfig    = ServiceName + ".DiffCellFromConfig"
 	MethodCreateConfig          = ServiceName + ".CreateConfig"
 	MethodCreateSecret          = ServiceName + ".CreateSecret"
 	MethodCreateVolume          = ServiceName + ".CreateVolume"

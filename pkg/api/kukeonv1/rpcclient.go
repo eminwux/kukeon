@@ -231,6 +231,19 @@ func (c *UnixClient) PreviewCellFromConfig(
 	return reply.Result, nil
 }
 
+// DiffCellFromConfig implements Client.
+func (c *UnixClient) DiffCellFromConfig(ctx context.Context, doc v1beta1.CellDoc) (DiffCellFromConfigResult, error) {
+	args := &DiffCellFromConfigArgs{Doc: doc}
+	reply := &DiffCellFromConfigReply{}
+	if err := c.call(ctx, MethodDiffCellFromConfig, args, reply); err != nil {
+		return DiffCellFromConfigResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // CreateCellFromConfig implements Client.
 func (c *UnixClient) CreateCellFromConfig(
 	ctx context.Context, req CellFromConfigRequest,

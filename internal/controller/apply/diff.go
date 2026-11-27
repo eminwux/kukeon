@@ -1204,16 +1204,22 @@ func userLabelsEqual(desired, actual map[string]string) bool {
 	return mapsEqual(filterManagedLabels(desired), filterManagedLabels(actual))
 }
 
+// IsManagedLabel reports whether a cell label key is controller-managed: its
+// full name ends with `.kukeon.io`, the suffix every controller-injected label
+// uses. DiffCell leaves these keys out of the metadata.labels comparison.
+func IsManagedLabel(key string) bool {
+	return strings.HasSuffix(key, ".kukeon.io")
+}
+
 // filterManagedLabels returns a copy of m with controller-managed keys
-// removed. A key is considered managed when its full name ends with
-// `.kukeon.io` — the suffix every controller-injected label uses.
+// (IsManagedLabel) removed.
 func filterManagedLabels(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return m
 	}
 	out := make(map[string]string, len(m))
 	for k, v := range m {
-		if strings.HasSuffix(k, ".kukeon.io") {
+		if IsManagedLabel(k) {
 			continue
 		}
 		out[k] = v

@@ -1007,3 +1007,39 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .rail-agent-glyph.has-unread { box-shadow: inset 0 0 0 2px var(--accent); }
 .badge.cell-tile-unread { display: inline-flex; align-items: center; gap: 5px; color: var(--text); border-color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge.cell-tile-unread .unread-dot { margin-left: 0; }
+/* Drift diff of a Config-made cell (#1768): the stored cell beside its fresh render, in the out-of-sync box. Rows sit
+   in one grid so both sides stay aligned when a long line wraps; below the phone breakpoint the left column stacks
+   above the right one. Changed lines carry a -/+ marker, the tint only repeats it. */
+.drift-diff { margin-top: 10px; color: var(--text); }
+.drift-diff > details > summary { justify-content: flex-start; padding: 8px 12px; }
+.drift-diff h3 { margin: 0; font-size: var(--font-md); }
+.drift-body { padding: 10px 12px 12px; display: grid; gap: 8px; min-width: 0; }
+.drift-note { margin: 0; color: var(--muted); font-size: var(--font-sm); }
+.drift-note[role="alert"] { color: var(--error); }
+.drift-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.drift-outcome { margin: 0; font-size: var(--font-sm); font-weight: 600; }
+.drift-toolbar [role="switch"] { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: var(--font-sm); }
+.drift-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font-family: var(--mono); font-size: var(--font-sm); line-height: 1.5; background: var(--code); }
+.drift-head { padding: 6px 10px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-weight: 600; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line); }
+.drift-cell { display: grid; grid-template-columns: 3.2em 1.4em minmax(0, 1fr); min-width: 0; }
+.drift-cell.drift-left, .drift-head.drift-left { border-right: 1px solid var(--line); }
+.drift-cell code { font-size: inherit; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; padding-right: 8px; }
+.drift-no { padding-right: 6px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; user-select: none; }
+.drift-mark { text-align: center; font-weight: 700; user-select: none; }
+.drift-removed { background: var(--status-error-bg); }
+.drift-removed .drift-mark { color: var(--status-error); }
+.drift-added { background: var(--status-ok-bg); }
+.drift-added .drift-mark { color: var(--status-ok); }
+.drift-fold { grid-column: 1 / -1; margin: 0; padding: 3px 10px; border: 0; border-block: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--muted); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: var(--font-sm); text-align: left; min-height: var(--target-min); }
+.drift-fold:hover { color: var(--text); background: var(--hover); }
+.drift-fold-echo { display: none; }
+@media (max-width: 760px) {
+  .drift-grid { display: flex; flex-direction: column; }
+  .drift-head.drift-left { order: 0; }
+  .drift-left { order: 1; }
+  .drift-head.drift-right { order: 2; border-top: 1px solid var(--line); }
+  .drift-right { order: 3; }
+  .drift-cell.drift-left, .drift-head.drift-left { border-right: 0; }
+  .drift-fold-echo { display: block; }
+  .drift-empty { display: none; }
+}

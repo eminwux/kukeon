@@ -117,6 +117,7 @@ func TestAccessPolicyMatrix(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/"},
 		{http.MethodGet, "/api/realms"},
+		{http.MethodGet, "/api/realms/r/spaces/s/stacks/t/cells/c/drift"},
 		{http.MethodPost, "/api/cells/manual/preview"},
 		{http.MethodPost, "/api/configs/from-blueprint/preview"},
 		{http.MethodPost, "/api/realms/dev/registry-credentials"},

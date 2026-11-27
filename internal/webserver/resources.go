@@ -183,6 +183,12 @@ func registerCellRoutes(mux *http.ServeMux, dial Dial) {
 			return redactCell(result.Cell), nil
 		}),
 	)
+	// The drift diff of a Config-lineage cell (issue #1768), computed only
+	// when the browser opens it.
+	mux.HandleFunc(
+		"GET /api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{name}/drift",
+		resourceRoute(dial, cellDrift),
+	)
 }
 
 func registerContainerRoutes(mux *http.ServeMux, dial Dial) {

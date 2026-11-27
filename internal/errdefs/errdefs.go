@@ -900,6 +900,10 @@ var (
 	// daemon's fresh render differs (the Config, its Blueprint, a defaults
 	// level or a realm image changed in between). Issue #1418.
 	ErrRenderDigestMismatch = errors.New("rendered cell changed since preview; preview again")
+	// ErrCellNotFromConfig is returned by DiffCellFromConfig for a cell that
+	// carries no `kukeon.io/config` lineage label: there is no Config to
+	// render it from, so there is nothing to compare it with. Issue #1768.
+	ErrCellNotFromConfig = errors.New("cell was not created from a config")
 	// ErrCreateConfig wraps a failure on the controller-level atomic
 	// create-only CellConfig endpoint. Scope/blueprint/slot validation
 	// failures propagate their own sentinels (ErrConfigScopeNotFound,

@@ -130,6 +130,18 @@ func (s *KukeonV1Service) PreviewCellFromConfig(
 	return nil
 }
 
+// DiffCellFromConfig is the net/rpc method for KukeonV1.DiffCellFromConfig
+// (#1768).
+func (s *KukeonV1Service) DiffCellFromConfig(
+	args *kukeonv1.DiffCellFromConfigArgs,
+	reply *kukeonv1.DiffCellFromConfigReply,
+) error {
+	result, err := s.core.DiffCellFromConfig(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // CreateCellFromConfig is the net/rpc method for
 // KukeonV1.CreateCellFromConfig (#1418).
 func (s *KukeonV1Service) CreateCellFromConfig(

@@ -73,6 +73,7 @@ func sameWord() []sameWordEntry {
 		{"pkg/api/model/v1beta1/connector.go", "registry", "delivery handler kind"},
 		{"pkg/api/model/v1beta1/defaults.go", "git", "rendered-value kind"},
 		{"internal/controller/apply/diff.go", "git", "name of the spec field in a diff"},
+		{"internal/controller/drift_overlay.go", "git", "name of the spec field in a diff"},
 		// The git program and the image capability that provides it.
 		{"pkg/team/compose/render.go", "git", "image capability"},
 		{"cmd/kuketty/", "git", "the git program"},

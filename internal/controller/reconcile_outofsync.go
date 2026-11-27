@@ -111,41 +111,85 @@ func (o cellOutOfSync) hasBackfill() bool {
 	return o.ImageDigests != "" || o.BlueprintRevision != "" || o.ConfigRevision != ""
 }
 
+// lineageDiff is one render of a Config-lineage cell from its lineage Config,
+// compared with the cell as stored. The drift check (desiredCellOutOfSync) and
+// the on-demand diff (DiffCellFromConfig) both build on renderLineageDiff, so
+// the two can never disagree about what drifted (issue #1768).
+type lineageDiff struct {
+	// ConfigFound is false when the lineage Config was deleted; nothing else
+	// is set then.
+	ConfigFound bool
+	// Desired is the cell re-rendered from the Config and its blueprint.
+	Desired intmodel.Cell
+	// Diff is apply.DiffCell(Desired, live).
+	Diff apply.CellDiffResult
+	// Drift is the render provenance drift (renderProvenanceDriftKeys).
+	Drift []provenanceDrift
+}
+
+// reasons returns the drift reasons in renderProvenanceDrift's order, then the
+// "spec differs" summary when the spec diff has changes: the text the drift
+// check stores as OutOfSyncReason, split into its parts.
+func (d lineageDiff) reasons() []string {
+	reasons := driftReasons(d.Drift)
+	if d.Diff.HasChanges {
+		reasons = append(reasons, outOfSyncSpecDifferReason(d.Diff))
+	}
+	return reasons
+}
+
+// renderLineageDiff looks up the cell's lineage Config, renders the cell from
+// it (materializeCellFromConfig) and compares the result with the live cell.
+// A deleted Config is not an error: it returns ConfigFound=false. A lookup or
+// render failure returns the error whose text the drift check stores as
+// OutOfSyncError. Nothing is written.
+func renderLineageDiff(r runner.Runner, cell intmodel.Cell, configName string) (lineageDiff, error) {
+	cfg, found, getErr := lookupLineageConfig(r, cell, configName)
+	if getErr != nil {
+		return lineageDiff{}, fmt.Errorf("read lineage config %q: %w", configName, getErr)
+	}
+	if !found {
+		return lineageDiff{}, nil
+	}
+
+	desired, materializeErr := materializeCellFromConfig(r, cfg, bindingFromCell(cell))
+	if materializeErr != nil {
+		return lineageDiff{}, materializeErr
+	}
+
+	return lineageDiff{
+		ConfigFound: true,
+		Desired:     desired,
+		Diff:        apply.DiffCell(desired, cell),
+		Drift:       renderProvenanceDriftKeys(desired, cell, legacyConfigRevision(cfg)),
+	}, nil
+}
+
 // desiredCellOutOfSync computes the OutOfSync verdict the live cell
 // should carry after this pass. The function is pure with respect to the
 // runner reads it makes — no metadata writes — so it can be inspected in
 // isolation by tests that pin the runner's responses.
 func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string) cellOutOfSync {
-	cfg, found, getErr := lookupLineageConfig(r, cell, configName)
-	if getErr != nil {
-		return cellOutOfSync{Err: fmt.Sprintf("read lineage config %q: %v", configName, getErr)}
+	render, err := renderLineageDiff(r, cell, configName)
+	if err != nil {
+		return cellOutOfSync{Err: err.Error()}
 	}
-	if !found {
+	if !render.ConfigFound {
 		return cellOutOfSync{OutOfSync: true, Reason: outOfSyncReasonConfigDeleted}
 	}
 
-	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, bindingFromCell(cell))
-	if materializeErr != nil {
-		return cellOutOfSync{Err: materializeErr.Error()}
-	}
-
+	desiredCell := render.Desired
 	backfill := backfillImageDigests(desiredCell, cell)
-	drift := renderProvenanceDrift(desiredCell, cell, legacyConfigRevision(cfg))
-	diff := apply.DiffCell(desiredCell, cell)
-	if !diff.HasChanges && len(drift) == 0 {
+	if !render.Diff.HasChanges && len(render.Drift) == 0 {
 		return cellOutOfSync{
 			ImageDigests:      backfill,
 			BlueprintRevision: backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderBlueprintRevision),
 			ConfigRevision:    backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderConfigRevision),
 		}
 	}
-	reasons := drift
-	if diff.HasChanges {
-		reasons = append(reasons, outOfSyncSpecDifferReason(diff))
-	}
 	return cellOutOfSync{
 		OutOfSync:    true,
-		Reason:       strings.Join(reasons, "; "),
+		Reason:       strings.Join(render.reasons(), "; "),
 		ImageDigests: backfill,
 	}
 }
@@ -234,8 +278,38 @@ func backfillStamp(desired, live intmodel.Cell, key string) string {
 //
 // legacyConfigRev is the current Config document's pre-#1569 revision
 // (legacyConfigRevision); a live config stamp equal to it is unchanged.
+//
+// It maps renderProvenanceDriftKeys to its reasons, so callers that need only
+// the text keep their shape.
 func renderProvenanceDrift(desired, live intmodel.Cell, legacyConfigRev string) []string {
-	var reasons []string
+	return driftReasons(renderProvenanceDriftKeys(desired, live, legacyConfigRev))
+}
+
+// provenanceDrift is one drifted render input: the reason
+// renderProvenanceDrift reports for it, and the `kukeon.io/render-*`
+// annotation that drifted (issue #1768). Several image reasons share the
+// image-digests key.
+type provenanceDrift struct {
+	Key    string
+	Reason string
+}
+
+// driftReasons returns the reasons of drift, in order.
+func driftReasons(drift []provenanceDrift) []string {
+	if len(drift) == 0 {
+		return nil
+	}
+	reasons := make([]string, 0, len(drift))
+	for _, d := range drift {
+		reasons = append(reasons, d.Reason)
+	}
+	return reasons
+}
+
+// renderProvenanceDriftKeys is renderProvenanceDrift with the annotation key
+// each reason comes from, under the same rules and in the same order.
+func renderProvenanceDriftKeys(desired, live intmodel.Cell, legacyConfigRev string) []provenanceDrift {
+	var drift []provenanceDrift
 	if liveRev := live.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]; liveRev != "" {
 		desiredRev := desired.Metadata.Annotations[cellconfig.AnnotationRenderBlueprintRevision]
 		if desiredRev != liveRev {
@@ -243,17 +317,19 @@ func renderProvenanceDrift(desired, live intmodel.Cell, legacyConfigRev string) 
 			if name == "" {
 				name = blueprintRevisionName(liveRev)
 			}
-			reasons = append(reasons, "blueprint "+name+" changed")
+			drift = append(drift, provenanceDrift{
+				Key: cellconfig.AnnotationRenderBlueprintRevision, Reason: "blueprint " + name + " changed",
+			})
 		}
 	}
 	if liveRev := live.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision]; liveRev != "" &&
 		liveRev != desired.Metadata.Annotations[cellconfig.AnnotationRenderConfigRevision] &&
 		liveRev != legacyConfigRev {
-		reasons = append(reasons, "config changed")
+		drift = append(drift, provenanceDrift{Key: cellconfig.AnnotationRenderConfigRevision, Reason: "config changed"})
 	}
 	if liveHash := live.Metadata.Annotations[cellconfig.AnnotationRenderValuesHash]; liveHash != "" &&
 		liveHash != desired.Metadata.Annotations[cellconfig.AnnotationRenderValuesHash] {
-		reasons = append(reasons, "values changed")
+		drift = append(drift, provenanceDrift{Key: cellconfig.AnnotationRenderValuesHash, Reason: "values changed"})
 	}
 	levels := []struct{ level, key string }{
 		{v1beta1.RenderOriginRealm, cellconfig.AnnotationRenderRealmDefaults},
@@ -266,11 +342,13 @@ func renderProvenanceDrift(desired, live intmodel.Cell, legacyConfigRev string) 
 			continue
 		}
 		if stampHash(liveStamp) != stampHash(desired.Metadata.Annotations[l.key]) {
-			reasons = append(reasons, l.level+" defaults changed")
+			drift = append(drift, provenanceDrift{Key: l.key, Reason: l.level + " defaults changed"})
 		}
 	}
-	reasons = append(reasons, imageDigestDrift(desired, live)...)
-	return reasons
+	for _, reason := range imageDigestDrift(desired, live) {
+		drift = append(drift, provenanceDrift{Key: cellconfig.AnnotationRenderImageDigests, Reason: reason})
+	}
+	return drift
 }
 
 // imageDigestDrift returns one "image <name> digest changed" reason per realm

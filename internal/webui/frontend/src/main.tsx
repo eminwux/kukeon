@@ -46,6 +46,7 @@ import { HealthPage, storedHealthSeen, type Summary } from "./health";
 import { connectorsLink } from "./connector-ui";
 import { newTeamLink, sourcesLink, teamsLink } from "./teams.mjs";
 import { NewSecretPage } from "./secret-form";
+import { DriftDiff } from "./drift-diff";
 
 const failureStates = ["Failed", "Error", "Degraded"];
 
@@ -60,7 +61,9 @@ const SourcesPage = lazy(async () => ({ default: (await import("./sources-page")
 function validTime(value?: string): value is string {
   return !!value && !value.startsWith("0001-") && Number.isFinite(Date.parse(value));
 }
-function StatusSummary({ status, kind, scope }: { status?: RuntimeStatus; kind: string; scope?: string[] }) {
+// The drift check's reason for a cell whose Config was deleted: there is nothing to render, so no diff (#1768).
+const configDeletedReason = "lineage Config deleted";
+function StatusSummary({ status, kind, scope, revision = 0 }: { status?: RuntimeStatus; kind: string; scope?: string[]; revision?: number }) {
   const container = kind === "container";
   const observations = status?.containers ?? [];
   const finished = validTime(status?.finishTime) && ["Stopped", "Failed", "Exited", "Error"].includes(status?.state ?? "");
@@ -78,7 +81,7 @@ function StatusSummary({ status, kind, scope }: { status?: RuntimeStatus; kind: 
       </div>
       {(status?.reason || status?.message) && <div className="status-message"><strong>{status.reason || "Status message"}</strong>{status.message && <p>{status.message}</p>}</div>}
       {scope?.length === 4 && failureStates.includes(status?.state ?? "") && <div className="status-ask"><span>This cell is {status?.state}.</span><AskMajordomo prominent question={cellQuestion(scope, status)} subject={`cell ${scope.join(" / ")}`} /></div>}
-      {(status?.outOfSync || status?.outOfSyncError) && <div className="error"><strong>{status.outOfSyncError ? "Configuration comparison failed" : "Configuration out of sync"}</strong><p>{status.outOfSyncError || status.outOfSyncReason || "The daemon reports a configuration mismatch."}</p></div>}
+      {(status?.outOfSync || status?.outOfSyncError) && <div className="error"><strong>{status.outOfSyncError ? "Configuration comparison failed" : "Configuration out of sync"}</strong><p>{status.outOfSyncError || status.outOfSyncReason || "The daemon reports a configuration mismatch."}</p>{scope?.length === 4 && status.outOfSync && !status.outOfSyncError && status.outOfSyncReason !== configDeletedReason && <DriftDiff scope={scope} revision={revision} />}</div>}
       {times.some(([, value]) => validTime(value)) && <dl className="status-times">{times.filter(([, value]) => validTime(value)).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><time dateTime={value}>{new Date(value!).toLocaleString()}</time></dd></div>)}</dl>}
       {container && ([ ["Repository setup", status?.repos], ["Create stages", status?.stages] ] as const).map(([label, items]) => !!items?.length && <div className="setup-status" key={label}><h3>{label}</h3><ul className="state-list">{items.map((item, i) => <li key={i}><div><strong>{item.name ?? `Stage ${item.index ?? i}`}</strong>{item.error && <p className="setup-error">{item.error}</p>}</div><StateBadge state={item.state} /></li>)}</ul></div>)}
       {!status && <p className="description">The daemon has not reported status for this resource.</p>}
@@ -288,7 +291,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   const cellState = detail.data?.status?.state ?? inventoryState;
   const operation = operations[scopeKey];
   const terminalView = view === "terminal";
-  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" scope={scope ?? undefined} />;
+  const status = detail.data && <StatusSummary status={detail.data.status} kind="cell" scope={scope ?? undefined} revision={revision} />;
   // Detail loading and failures live in a fixed-size badge in the title row, so nothing renders between
   // the row and the terminal and the row's height never changes.
   const detailState = !scope ? null
