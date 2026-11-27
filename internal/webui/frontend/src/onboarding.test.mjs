@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  cardAuto, cardHidden, cardShown, cardVisible, checklist, configLogin, connectorSetUp, gitConnectors, gitIdentityConnector, harnessConnector, harnessConnectors, harnessLoggedIn, hasAgentCell,
+  checklist, configLogin, connectorSetUp, gitConnectors, gitIdentityConnector, harnessConnector, harnessConnectors, harnessLoggedIn, hasAgentCell,
   kindOptional, kindRecommended, kindRequired, notSetUpText, progress, recommendedFor, requiredOpen, stepAgent, stepGit, stepInitialize, stepLogin, stepMajordomo, stepState, teamsInitialized, templateLogins,
 } from "./onboarding.mjs";
 
@@ -113,16 +113,6 @@ test("recommended and optional steps never keep the checklist open", () => {
   const open = checklist({ ...input, cells: [] });
   assert.deepEqual(requiredOpen(open).map(item => item.id), [stepAgent]);
   assert.deepEqual(progress(open), { done: 2, total: 3 });
-});
-
-test("the card shows while a required step is open, until dismissed, and again when reopened", () => {
-  const open = checklist({ teams: [] });
-  const done = [{ id: "a", kind: kindRequired, done: true }, { id: "b", kind: kindRecommended, done: false }, { id: "c", kind: kindOptional, done: false }];
-  assert.equal(cardVisible(cardAuto, open), true);
-  assert.equal(cardVisible(cardAuto, done), false);
-  assert.equal(cardVisible(cardHidden, open), false);
-  assert.equal(cardVisible(cardShown, done), true);
-  assert.equal(cardVisible(cardShown, open), true);
 });
 
 test("a connector without identities is not set up, worded from its description", () => {

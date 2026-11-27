@@ -7,13 +7,14 @@ import { InitializePrompt } from "./initialize";
 import { newAgentLink } from "./routes";
 import { useSettings } from "./settings";
 import type { TeamSummary } from "./teams.mjs";
-import { cardAuto, cardHidden, cardVisible, checklist, gitIdentityConnector, progress, requiredOpen, stepAgent, stepGit, stepInitialize, stepLogin, stepMajordomo, stepState, templateLogins, type AgentTemplateRef, type Step } from "./onboarding.mjs";
+import { checklist, gitIdentityConnector, progress, requiredOpen, stepAgent, stepGit, stepInitialize, stepLogin, stepMajordomo, stepState, templateLogins, type AgentTemplateRef, type Step } from "./onboarding.mjs";
 
 // The Get started card of the Workbench (#1694): the first-run checklist. Its
 // five steps are derived from data the UI already reads (onboarding.mjs) and
-// nothing is stored in kukeond; only whether the card is dismissed is kept, in
-// this browser. It shows while a required step is open, hides for good once
-// they are all done or it is dismissed, and reopens from the user menu.
+// nothing is stored in kukeond; only whether the card shows is kept, in this
+// browser (showGetStarted, #1745). It shows until it is dismissed, also once
+// every required step is done; the Profile switch and the user menu turn it
+// back on.
 
 function StepRow({ step, children }: { step: Step; children?: ReactNode }) {
   const tone = step.done ? "ok" : step.kind === "required" ? "pending" : "stopped";
@@ -34,8 +35,7 @@ export function GetStarted({ revision, inventory, configs, majordomoCells, onOpe
   onChanged: () => void;
 }) {
   const [settings, set] = useSettings();
-  const mode = settings.getStarted;
-  const active = mode !== cardHidden;
+  const active = settings.showGetStarted;
   const teams = useResource<{ teams: TeamSummary[] }>(active ? "/api/teams" : null, revision);
   const catalog = useResource<Connector[]>(active ? "/api/connectors" : null, revision);
   const secrets = useResource<unknown[]>(active ? "/api/catalog/secrets" : null, revision);
@@ -56,19 +56,16 @@ export function GetStarted({ revision, inventory, configs, majordomoCells, onOpe
   // Every input answered, with data or an error: only then is "all required done" a fact.
   const settled = [catalog, secrets, templates, logins].every(resource => !!resource.data || !!resource.error) && !!inventory.data && !!configs;
   const complete = !!teams.data && settled && !requiredOpen(items).length;
-  // Completing the required steps hides the card for good; the user menu reopens it.
-  useEffect(() => { if (mode === cardAuto && complete) set("getStarted", cardHidden); }, [mode, complete, set]);
   if (!active || !teams.data) return null;
   const initialized = items.find(item => item.id === stepInitialize)?.done ?? false;
   // An initialized host waits for the rest of its data, so the card does not flash steps it is about to tick.
-  if (mode === cardAuto && initialized && !settled) return null;
-  if (!cardVisible(mode, items)) return null;
+  if (initialized && !settled) return null;
   const step = (id: string) => items.find(item => item.id === id) as Step;
   const count = progress(items);
   const harnesses = templateLogins(catalog.data, logins.data, templates.data?.templates);
   const git = gitIdentityConnector(catalog.data);
   return <section className="panel get-started" aria-label="Get started">
-    <div className="panel-heading"><h2>Get started</h2><span className="badge">{count.done} of {count.total} done</span><button type="button" className="subtle-button" onClick={() => set("getStarted", cardHidden)}>Dismiss</button></div>
+    <div className="panel-heading"><h2>Get started</h2><span className="badge">{count.done} of {count.total} done</span><button type="button" className="subtle-button" onClick={() => set("showGetStarted", false)}>Dismiss</button></div>
     <div className="panel-body">
       {complete && <p className="get-started-complete" role="status">You are set up. Recommended steps stay listed until you set them up or dismiss this card.</p>}
       <ol className="get-started-list">

@@ -1,13 +1,10 @@
-import { settingsLink, type Route } from "./routes";
+import { settingsLink } from "./routes";
 
 // The Settings sidebar (#1686): one link per section of the Settings page, in the Manage navigation's markup.
-export function SettingsNav({ route }: { route: Route }) {
-  const profile = route.scope[0] === "profile";
-  const links = [
-    { title: "General", href: settingsLink(), active: !profile },
-    { title: "Profile", href: settingsLink("profile"), active: profile },
-  ];
+// Profile is the only section since General's one setting, Appearance, moved into it (#1745).
+// The link is always the current page, so following it changes no route: onNavigate closes the drawer.
+export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
   return <nav className="manage-nav" aria-label="Settings navigation">
-    <ul>{links.map(link => <li key={link.title}><a className="manage-link" href={link.href} aria-current={link.active ? "page" : undefined}>{link.title}</a></li>)}</ul>
+    <ul><li><a className="manage-link" href={settingsLink()} aria-current="page" onClick={onNavigate}>Profile</a></li></ul>
   </nav>;
 }
