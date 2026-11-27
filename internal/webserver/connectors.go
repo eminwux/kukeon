@@ -431,6 +431,10 @@ type identityResult struct {
 	Git *identityResult `json:"git,omitempty"`
 	// Defaults lists the defaults makeDefault set.
 	Defaults []githubtoken.DefaultSet `json:"defaults,omitempty"`
+	// StaleGit, on a github identity stored without git, is the git identity
+	// linked to it: it was not rotated and keeps the token it was stored with
+	// (issue #1707).
+	StaleGit *v1beta1.ContainerSecretRef `json:"staleGit,omitempty"`
 }
 
 func storedResult(s githubtoken.Stored) identityResult {
@@ -485,6 +489,7 @@ func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *
 		Action: secretWriteAction(created.Created),
 	}
 	result := storedResult(stored)
+	result.StaleGit = staleGit(ctx, c, conn, doc, stored.Scope)
 	if !input.MakeDefault {
 		return result, nil
 	}
@@ -504,6 +509,23 @@ func (a connectorAPI) createIdentity(ctx context.Context, c kukeonv1.Client, r *
 		Identity: set.Identity, Previous: set.Previous, Action: set.Action,
 	}}
 	return result, nil
+}
+
+// staleGit names the git identity linked to a github identity stored without
+// git (issue #1707): storing the github identity did not rotate it. The
+// lookup only adds a warning to the result, so a failed one is dropped: the
+// identity is stored either way.
+func staleGit(
+	ctx context.Context, c kukeonv1.Client, conn *connector.Connector, doc v1beta1.SecretDoc, scope scopeRef,
+) *v1beta1.ContainerSecretRef {
+	if conn.Metadata.Name != intconnector.GitHubIdentityTag {
+		return nil
+	}
+	existing, err := githubtoken.Existing(ctx, c, scope)
+	if err != nil {
+		return nil
+	}
+	return githubtoken.LinkedGit(existing, doc)
 }
 
 // scopeText renders a scope as realm[/space[/stack]].

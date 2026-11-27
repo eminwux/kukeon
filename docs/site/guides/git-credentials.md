@@ -31,7 +31,7 @@ The token is read once, from `--token-stdin` or `--token-file`, and stored as tw
 
 The git identity is limited to its hosts: `git credential fill` for `https://github.com` returns the token, and for `https://gitlab.com` it returns nothing. An SSH remote on github.com follows the credential onto HTTPS (see [Which credential a remote uses](#5-which-credential-a-remote-uses)).
 
-The git identity records where its token came from, in the identity key `kukeon.io/token-from: github-token@default`. Rerunning the command with `--git` therefore **rotates both**: the github identity and the git identity linked to it, which keeps its name, hosts and author. A Secret of the git identity's name that is not linked to this token is never overwritten: the command fails and asks for `--git-name`. Without `--git`, only the github identity is stored and git is unchanged.
+The git identity records where its token came from, in the identity key `kukeon.io/token-from: github-token@default`. Rerunning the command with `--git` therefore **rotates both**: the github identity and the git identity linked to it, which keeps its name, hosts and author. A Secret of the git identity's name that is not linked to this token is never overwritten: the command fails and asks for `--git-name`. Without `--git`, only the github identity is stored and git is unchanged: a git identity already linked to it keeps the previous token, and the command warns about it. Rerun with `--git` before you revoke the old token.
 
 A token cannot sign. To sign commits, import an SSH key as well ([section 2](#2-import-your-git-identity)) and make it the git default instead.
 

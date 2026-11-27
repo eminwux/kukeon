@@ -87,6 +87,45 @@ func TestBuildRotatesTheLinkedIdentity(t *testing.T) {
 	}
 }
 
+// TestBuildWithoutGitNamesTheStaleLink: without git, the git identity linked
+// to the github identity is not rotated, and the plan names it so the caller
+// can warn (issue #1707). Git identities linked to another github identity, or
+// to none, are not named; with git there is nothing stale.
+func TestBuildWithoutGitNamesTheStaleLink(t *testing.T) {
+	existing := []v1beta1.SecretDoc{
+		gitSecret("unrelated", map[string]string{"hosts": "github.com"}),
+		gitSecret("other-git", map[string]string{"hosts": "github.com", "kukeon.io/token-from": "other@default"}),
+		gitSecret("work-git", map[string]string{"hosts": "github.com", "kukeon.io/token-from": "github-token@default"}),
+	}
+	catalog := connectortest.Catalog(t)
+	plan, err := githubtoken.Build(catalog, githubtoken.Options{Scope: realm(), Token: "tok"}, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &v1beta1.ContainerSecretRef{Name: "work-git", Realm: "default"}
+	if plan.Git != nil || plan.Linked || !reflect.DeepEqual(plan.StaleGit, want) {
+		t.Errorf("plan git = %+v, linked %v, stale %+v; want stale %+v", plan.Git, plan.Linked, plan.StaleGit, want)
+	}
+	for name, tc := range map[string]struct {
+		opts     githubtoken.Options
+		existing []v1beta1.SecretDoc
+	}{
+		"other github identity": {githubtoken.Options{Scope: realm(), Name: "solo", Token: "tok"}, existing},
+		"nothing stored":        {githubtoken.Options{Scope: realm(), Token: "tok"}, nil},
+		"with git":              {githubtoken.Options{Scope: realm(), Token: "tok", Git: &githubtoken.Git{}}, existing},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, buildErr := githubtoken.Build(catalog, tc.opts, tc.existing)
+			if buildErr != nil {
+				t.Fatal(buildErr)
+			}
+			if got.StaleGit != nil {
+				t.Errorf("stale git = %+v, want none", got.StaleGit)
+			}
+		})
+	}
+}
+
 // TestBuildRejections: nothing that cannot be stored safely is planned.
 func TestBuildRejections(t *testing.T) {
 	taken := []v1beta1.SecretDoc{gitSecret("github-git", map[string]string{"hosts": "github.com"})}

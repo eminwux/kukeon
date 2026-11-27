@@ -27,7 +27,10 @@
 // The second identity is explicit and host-limited, never a fallback: git
 // still uses only a git identity bound to its host (#1472). Storing the github
 // identity again with git on rotates the linked git identity, found by its
-// kukeon.io/token-from key.
+// kukeon.io/token-from key. Storing it with git off leaves the linked git
+// identity on the token it was stored with, and the plan and result name it
+// (issue #1707) so the caller can warn: git fails in cells once that token is
+// revoked.
 //
 // `kuke connector import github` and the web UI's GitHub identity form both use
 // it, so they check, store and default the same way.
@@ -102,7 +105,11 @@ type Plan struct {
 	// Linked reports that Git is a git identity already linked to the github
 	// identity: storing the plan rotates it.
 	Linked bool
-	token  string
+	// StaleGit, when git was not asked for, is the git identity linked to the
+	// github identity: storing the plan does not rotate it, so it keeps the
+	// token it was stored with (issue #1707).
+	StaleGit *v1beta1.ContainerSecretRef
+	token    string
 }
 
 // Material lists the token, for masking errors that might quote it.
@@ -162,8 +169,9 @@ func find(catalog *connector.Catalog, name string, scope scopedefaults.Scope) (v
 }
 
 // Build checks a request and builds the Secrets it stores. existing is what
-// Existing returned for the scope; it is only read when git is asked for.
-// Both Secrets are checked before either is stored.
+// Existing returned for the scope: with git, the linked git identity it holds
+// is rotated; without, it is named in Plan.StaleGit. Both Secrets are checked
+// before either is stored.
 func Build(catalog *connector.Catalog, opts Options, existing []v1beta1.SecretDoc) (Plan, error) {
 	scope, err := scopedefaults.CheckScope(opts.Scope)
 	if err != nil {
@@ -194,6 +202,7 @@ func Build(catalog *connector.Catalog, opts Options, existing []v1beta1.SecretDo
 		return Plan{}, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 	}
 	if opts.Git == nil {
+		plan.StaleGit = LinkedGit(existing, plan.Token)
 		return plan, nil
 	}
 	gitDoc, linked, err := buildGit(catalog, plan, *opts.Git, existing)
@@ -289,6 +298,18 @@ func buildGit(
 	return doc, linked != nil, nil
 }
 
+// LinkedGit names the git identity in existing (what Existing returned for
+// the github identity's scope) that is linked to the github identity by its
+// kukeon.io/token-from key, or nil when none is.
+func LinkedGit(existing []v1beta1.SecretDoc, token v1beta1.SecretDoc) *v1beta1.ContainerSecretRef {
+	linked := linkedIdentity(existing, intconnector.FormatSecretRef(Ref(token)))
+	if linked == nil {
+		return nil
+	}
+	ref := Ref(*linked)
+	return &ref
+}
+
 // linkedIdentity finds the git identity whose kukeon.io/token-from key names
 // the github identity: the first by name when, by hand, there are several.
 func linkedIdentity(existing []v1beta1.SecretDoc, link string) *v1beta1.SecretDoc {
@@ -356,6 +377,9 @@ type DefaultSet struct {
 type Result struct {
 	Secrets  []Stored     `json:"secrets"`
 	Defaults []DefaultSet `json:"defaults,omitempty"`
+	// StaleGit is Plan.StaleGit once the github identity is stored: the
+	// linked git identity the request left on its old token.
+	StaleGit *v1beta1.ContainerSecretRef `json:"staleGit,omitempty"`
 }
 
 // PartialError is a failure after something was stored: it names what was
@@ -437,6 +461,7 @@ func Store(
 			Identity: doc.Spec.Identity, Action: action,
 		})
 	}
+	result.StaleGit = plan.StaleGit
 	for len(defaults) > 0 {
 		doc := defaults[0]
 		conn, _ := catalog.Find(doc.Spec.Connector) // Build found both

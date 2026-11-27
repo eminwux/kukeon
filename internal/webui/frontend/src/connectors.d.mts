@@ -126,6 +126,7 @@ export const identityTokenFrom: string;
 export function tokenForGit(connector: { tokenForGit?: unknown } | undefined): TokenForGit | undefined;
 export function tokenConnectors(connectors: Connector[] | undefined): Connector[];
 export function linkedGitIdentity(secrets: unknown[] | undefined, connector: Connector | undefined, identity: Partial<SecretRef> | undefined): Identity | undefined;
+export function staleGitNotice(result: { staleGit?: Partial<SecretRef> } | undefined): string | undefined;
 export function emptyGitForm(on: boolean): GitForm;
 export function tokenGitPayload(form: Partial<GitForm> | undefined): Record<string, string>;
 export function tokenGitErrors(form: Partial<GitForm> | undefined): string[];

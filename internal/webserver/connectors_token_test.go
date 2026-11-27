@@ -130,6 +130,38 @@ func TestConnectorTokenWithoutGit(t *testing.T) {
 		c.realm.Spec.Defaults.Secrets["github-token"].SecretRef == nil {
 		t.Errorf("realm defaults = %+v, want the github default and no git default", c.realm.Spec.Defaults)
 	}
+	if result.StaleGit != nil {
+		t.Errorf("no git identity is linked, yet the result names %+v", result.StaleGit)
+	}
+}
+
+// TestConnectorTokenWithoutGitNamesTheLinkedIdentity: rotating the github
+// identity with git unchecked leaves its linked git identity on the old token,
+// and the result names it so the form can warn (issue #1707). A git identity
+// linked to another github identity is not named.
+func TestConnectorTokenWithoutGitNamesTheLinkedIdentity(t *testing.T) {
+	c := devScopes()
+	c.secrets["dev///other-git"] = v1beta1.SecretSpec{
+		Type: v1beta1.SecretTypeBasicAuth, Connector: "git",
+		Identity: map[string]string{"hosts": "github.com", "kukeon.io/token-from": "other@dev"},
+	}
+	if w, _ := postToken(t, c, tokenBody(tokenCanary+"-1", `,"name":"work","git":{"name":"work-git"}`)); w.Code != http.StatusOK {
+		t.Fatalf("create: status=%d body=%s", w.Code, w.Body)
+	}
+	w, result := postToken(t, c, tokenBody(tokenCanary+"-2", `,"name":"work"`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("rotate: status=%d body=%s", w.Code, w.Body)
+	}
+	if len(c.created) != 3 || c.created[2].Metadata.Name != "work" || result.Action != "updated" || result.Git != nil {
+		t.Fatalf("created = %+v, result = %+v", c.created, result)
+	}
+	want := &v1beta1.ContainerSecretRef{Name: "work-git", Realm: "dev"}
+	if !reflect.DeepEqual(result.StaleGit, want) {
+		t.Errorf("stale git = %+v, want %+v", result.StaleGit, want)
+	}
+	if !strings.Contains(w.Body.String(), `"staleGit":{"name":"work-git","realm":"dev"}`) {
+		t.Errorf("response lacks staleGit: %s", w.Body)
+	}
 }
 
 // TestConnectorTokenRotationKeepsTheLink: storing the github identity again

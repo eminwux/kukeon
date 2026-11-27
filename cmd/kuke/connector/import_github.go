@@ -65,7 +65,9 @@ func newImportGitHubCmd(catalog *connector.Catalog) *cobra.Command {
 			"--hosts only (default " + intconnector.GitHubTokenHost + "). GitHub accepts any non-empty username with a token.\n" +
 			"The git identity records the github identity it came from, so rerunning with --git\n" +
 			"rotates both. Without --git, git is unchanged: the API token is never a git credential\n" +
-			"unless asked for. Signing needs an SSH key: use `kuke connector import git` for that.\n\n" +
+			"unless asked for, and a git identity already linked to the github identity keeps its\n" +
+			"previous token (the command warns). Signing needs an SSH key: use\n" +
+			"`kuke connector import git` for that.\n\n" +
 			"--default makes each stored identity its connector's default in --realm. --dry-run\n" +
 			"prints what would be stored and stores nothing. The token is never printed.",
 		Args:          cobra.NoArgs,
@@ -176,11 +178,15 @@ func runImportGitHub(cmd *cobra.Command, catalog *connector.Catalog) error {
 		return err
 	}
 	defer func() { _ = client.Close() }()
-	var existing []v1beta1.SecretDoc
-	if opts.Git != nil {
-		if existing, err = githubtoken.Existing(cmd.Context(), client, opts.Scope); err != nil {
+	// With --git the linked git identity is rotated; without, it is looked up
+	// only to warn that it keeps the old token (issue #1707), so a failed
+	// lookup is reported and the token is stored all the same.
+	existing, err := githubtoken.Existing(cmd.Context(), client, opts.Scope)
+	if err != nil {
+		if opts.Git != nil {
 			return err
 		}
+		cmd.PrintErrf("Warning: could not look for a git identity linked to the github identity: %v\n", err)
 	}
 	plan, err := githubtoken.Build(catalog, opts, existing)
 	if err != nil {
@@ -190,6 +196,11 @@ func runImportGitHub(cmd *cobra.Command, catalog *connector.Catalog) error {
 	// *githubtoken.PartialError, names what was not.
 	result, err := githubtoken.Store(cmd.Context(), client, catalog, plan, makeDefault)
 	printTokenResult(cmd, result, tokenEnv(catalog))
+	if stale := result.StaleGit; stale != nil {
+		cmd.PrintErrf("Warning: git identity %s still holds the previous token: it is linked to github "+
+			"identity %s and was not rotated. Rerun with --%s to rotate it too.\n",
+			scopeName(stale.Name, stale.Realm), scopeName(plan.Token.Metadata.Name, plan.Scope.Realm), flagGit)
+	}
 	if err != nil {
 		return redact(err, plan.Material())
 	}
