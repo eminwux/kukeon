@@ -34,7 +34,7 @@ Plus all [global flags](kuke.md).
 3. `/etc/kukeon/kukeond.yaml` (default file)
 4. Hardcoded defaults (absent file)
 
-The configured `containerdNamespaceSuffix` scopes the realm-enumeration loop — an uninstall configured for a non-default suffix (e.g. `dev.kukeon.io`) enumerates only `*.dev.kukeon.io` namespaces and never touches the default-instance ones. Running `sudo kuke uninstall --server-configuration ./kukeond-dev.yaml` tears down the dev instance only.
+The configured `containerdNamespaceSuffix` scopes the realm-enumeration loop — an uninstall configured for a non-default suffix (e.g. `dev.kukeon.io`) enumerates only `*.dev.kukeon.io` namespaces and never touches the default-instance ones. The reverse also holds: a default-suffix uninstall leaves `*.dev.kukeon.io` (and any `<x>.<y>.kukeon.io`) alone. A namespace found by name only counts as this instance's when the realm name left after stripping the suffix has no `.`; a dotted realm this instance created is still purged through its on-disk metadata. Running `sudo kuke uninstall --server-configuration ./kukeond-dev.yaml` tears down the dev instance only.
 
 ## Behavior
 

@@ -149,7 +149,11 @@ func TestCheckStorage_DaemonDownFallsBackToNamespaces(t *testing.T) {
 	rc := &runCtx{
 		daemonClient: nil,
 		ctrClient: &fakeCtrClient{
-			namespaces: []string{"default.kukeon.io", "kuke-system.kukeon.io", "some-other.namespace"},
+			// kuke-system.dev.kukeon.io belongs to a parallel dev instance
+			// and must not become a "kuke-system.dev" row (issue #1718).
+			namespaces: []string{
+				"default.kukeon.io", "kuke-system.kukeon.io", "some-other.namespace", "kuke-system.dev.kukeon.io",
+			},
 			storage: map[string]ctr.StorageStats{
 				"default.kukeon.io":     {Snapshots: 1, Leases: 2, Blobs: 3, BlobsBytes: 4},
 				"kuke-system.kukeon.io": {Snapshots: 5, Leases: 6, Blobs: 7, BlobsBytes: 8},

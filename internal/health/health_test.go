@@ -189,6 +189,39 @@ func TestChecksReportFailures(t *testing.T) {
 	}
 }
 
+// TestContainerdNamespacesSparesParallelInstance pins issue #1718 for the
+// health check: under the default suffix a parallel dev instance's
+// namespaces ("*.dev.kukeon.io" and their _history companions) end in
+// ".kukeon.io" but are not residue of this instance. An unclaimed namespace
+// with an undotted realm name still is, and a claimed dotted one is clean.
+func TestContainerdNamespacesSparesParallelInstance(t *testing.T) {
+	p := probe(t)
+	p.RealmNamespaces = func() ([]string, error) {
+		return []string{"default.kukeon.io", "kuke-system.kukeon.io", "team.a.kukeon.io"}, nil
+	}
+	p.Namespaces = func() ([]string, error) {
+		return []string{
+			"default.kukeon.io", "kuke-system.kukeon.io", "team.a.kukeon.io",
+			"default.dev.kukeon.io", "kuke-system.dev.kukeon.io", "default.dev.kukeon.io_history",
+		}, nil
+	}
+	if got := statuses(p.Checks())["containerd-ns"]; got != kukeonv1.HealthStatusOK {
+		t.Fatalf("containerd-ns = %s, want ok with only a parallel instance's namespaces unclaimed", got)
+	}
+
+	p.Namespaces = func() ([]string, error) {
+		return []string{"default.kukeon.io", "kuke-system.dev.kukeon.io", "gone.kukeon.io"}, nil
+	}
+	for _, check := range p.Checks() {
+		if check.Name != "containerd-ns" {
+			continue
+		}
+		if check.Status != kukeonv1.HealthStatusWarn || check.Detail != "residual namespaces: gone.kukeon.io" {
+			t.Fatalf("containerd-ns = %s (%q), want warn naming only gone.kukeon.io", check.Status, check.Detail)
+		}
+	}
+}
+
 func cell(name string, state v1beta1.CellState) v1beta1.CellDoc {
 	doc := v1beta1.CellDoc{}
 	doc.Metadata.Name = name

@@ -183,13 +183,18 @@ func (p Probe) containerdNamespaces(namespaces []string, nsErr error) kukeonv1.H
 	}
 	var ours, residual []string
 	for _, ns := range namespaces {
-		if !consts.IsKukeonNamespace(ns) && !consts.IsBuildKitHistoryNamespace(ns) {
+		if claimed[ns] {
+			ours = append(ours, ns)
+			continue
+		}
+		// An unclaimed namespace counts as residue only when its realm name
+		// has no ".": under the default suffix a dotted one may be a parallel
+		// `*.dev.kukeon.io` instance's, not ours (issue #1718).
+		if !consts.IsUnambiguousKukeonNamespace(ns) && !consts.IsUnambiguousBuildKitHistoryNamespace(ns) {
 			continue
 		}
 		ours = append(ours, ns)
-		if !claimed[ns] {
-			residual = append(residual, ns)
-		}
+		residual = append(residual, ns)
 	}
 	if len(residual) == 0 {
 		check.Status = kukeonv1.HealthStatusOK

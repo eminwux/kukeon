@@ -215,6 +215,40 @@ func TestCheckStateNamespaces_DevSuffixNotResidual(t *testing.T) {
 	}
 }
 
+// TestCheckStateNamespaces_ParallelDevInstanceNotResidual pins issue #1718:
+// under the default suffix, a parallel dev instance's namespaces end in
+// ".kukeon.io" too, but their dotted realm names ("kuke-system.dev") mark them
+// as another instance's, so they are neither residue nor counted. An
+// unclaimed undotted namespace is still residue, and this instance's own
+// dotted realm is clean through the daemon's realm list.
+func TestCheckStateNamespaces_ParallelDevInstanceNotResidual(t *testing.T) {
+	rc := &runCtx{
+		daemonClient: newFakeClient().withDefaultRealms().
+			withRealmNamespace("team.a", "team.a.kukeon.io"),
+		ctrClient: &fakeCtrClient{namespaces: []string{
+			"default.kukeon.io",
+			"kuke-system.kukeon.io",
+			"team.a.kukeon.io",
+			"default.dev.kukeon.io",
+			"kuke-system.dev.kukeon.io",
+			"kuke-system.dev.kukeon.io_history",
+			"gone.kukeon.io",
+		}},
+		logger: testLogger(),
+	}
+
+	r := checkStateNamespaces(context.Background(), rc)
+	if r.Status != StatusWARN || r.Detail != "residual namespaces: gone.kukeon.io" {
+		t.Fatalf("want WARN naming only gone.kukeon.io; got %s (%q)", r.Status, r.Detail)
+	}
+
+	rc.daemonClient = nil
+	r = checkStateNamespaces(context.Background(), rc)
+	if want := "3 kukeon namespaces (daemon down, no cross-check)"; r.Detail != want {
+		t.Errorf("daemon-down Detail = %q, want %q", r.Detail, want)
+	}
+}
+
 // TestCheckParity_NestedDescent confirms the walk recurses into the
 // realm-set intersection (spaces / stacks / cells / containers) — a
 // regression in the descent loop would silently stop reporting nested

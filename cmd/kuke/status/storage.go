@@ -118,7 +118,9 @@ func enumerateRealmsForStorage(ctx context.Context, rc *runCtx) []realmStorageTa
 	}
 	out := make([]realmStorageTarget, 0, len(nsList))
 	for _, ns := range nsList {
-		if realm := consts.RealmFromNamespace(ns); realm != "" {
+		// Name-only fallback: skip dotted realm names, which may belong to
+		// a parallel instance whose suffix ends with ours (issue #1718).
+		if realm := consts.UnambiguousRealmFromNamespace(ns); realm != "" {
 			out = append(out, realmStorageTarget{name: realm, namespace: ns})
 		}
 	}

@@ -500,10 +500,13 @@ func (b *Exec) collectRealmsForUninstall() ([]intmodel.Realm, error) {
 }
 
 // realmsFromContainerdNamespaces enumerates every containerd namespace and
-// returns realms for those whose name carries the `.kukeon.io` suffix. The
+// returns realms for those whose name carries the `.kukeon.io` suffix and
+// whose realm name has no "." (consts.UnambiguousRealmFromNamespace). The
 // runner's containerd client is the single source of truth — non-kukeon
 // namespaces like "default" or "moby" are filtered out so this path cannot
-// accidentally purge a co-tenant's namespace. Returns the list deterministic
+// accidentally purge a co-tenant's namespace, and dotted remainders are
+// filtered out so a default-suffix uninstall cannot purge a parallel
+// `*.dev.kukeon.io` instance (issue #1718). Returns the list deterministic
 // (sorted) so the report ordering does not flap between runs.
 func (b *Exec) realmsFromContainerdNamespaces() ([]intmodel.Realm, error) {
 	namespaces, err := b.runner.ListContainerdNamespaces()
@@ -513,10 +516,13 @@ func (b *Exec) realmsFromContainerdNamespaces() ([]intmodel.Realm, error) {
 	sort.Strings(namespaces)
 	out := make([]intmodel.Realm, 0, len(namespaces))
 	for _, ns := range namespaces {
-		if !consts.IsKukeonNamespace(ns) {
-			continue
-		}
-		realmName := consts.RealmFromNamespace(ns)
+		// A name-only match has no metadata to confirm it is ours, so a
+		// dotted remainder ("kuke-system.dev" from the dev instance's
+		// "kuke-system.dev.kukeon.io" under the default suffix) is left
+		// alone: it may belong to a parallel instance whose suffix ends with
+		// this one (issue #1718). This instance's own dotted realms still
+		// come through runner.ListRealms.
+		realmName := consts.UnambiguousRealmFromNamespace(ns)
 		if realmName == "" {
 			continue
 		}

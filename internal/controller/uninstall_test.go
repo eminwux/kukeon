@@ -841,6 +841,126 @@ func TestUninstall_SuffixIsolationAcrossInstances(t *testing.T) {
 	}
 }
 
+// TestUninstall_DefaultSuffixSparesNestedSuffixInstance pins issue #1718: the
+// default suffix "kukeon.io" is itself a suffix of the dev profile's
+// "dev.kukeon.io", so a name-only match would read the dev instance's
+// "kuke-system.dev.kukeon.io" as realm "kuke-system.dev" and purge it. Under
+// the default suffix the enumeration must skip every dotted remainder (and
+// with it the namespace's _history companion and build cache, which are
+// derived from the purged realms); a dotted realm this instance has metadata
+// for is still purged. Under the dev suffix the same namespace list purges
+// the dev realms as before.
+func TestUninstall_DefaultSuffixSparesNestedSuffixInstance(t *testing.T) {
+	mixed := []string{
+		"default.kukeon.io",
+		"kuke-system.kukeon.io",
+		"kuke-system.kukeon.io_history",
+		"default.dev.kukeon.io",
+		"default.dev.kukeon.io_history",
+		"kuke-system.dev.kukeon.io",
+		"kuke-system.dev.kukeon.io_history",
+		"probe.x.y.kukeon.io",
+		"team.a.kukeon.io",
+		"moby",
+	}
+	cases := []struct {
+		name, suffix, cgroupRoot string
+		listed                   []intmodel.Realm
+		wantPurged               map[string]string // realm -> namespace
+		spared                   []string          // namespaces whose build cache must survive
+	}{
+		{
+			name:       "default suffix",
+			suffix:     "kukeon.io",
+			cgroupRoot: "/kukeon",
+			// This instance's own dotted realm, known from metadata.
+			listed: []intmodel.Realm{{
+				Metadata: intmodel.RealmMetadata{Name: "team.a"},
+				Spec:     intmodel.RealmSpec{Namespace: "team.a.kukeon.io"},
+			}},
+			wantPurged: map[string]string{
+				"team.a":      "team.a.kukeon.io",
+				"default":     "default.kukeon.io",
+				"kuke-system": "kuke-system.kukeon.io",
+			},
+			spared: []string{"default.dev.kukeon.io", "kuke-system.dev.kukeon.io", "probe.x.y.kukeon.io"},
+		},
+		{
+			name:       "dev suffix",
+			suffix:     "dev.kukeon.io",
+			cgroupRoot: "/kukeon-dev",
+			wantPurged: map[string]string{
+				"default":     "default.dev.kukeon.io",
+				"kuke-system": "kuke-system.dev.kukeon.io",
+			},
+			spared: []string{"default.kukeon.io", "kuke-system.kukeon.io", "team.a.kukeon.io"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prevSuffix := consts.RealmNamespaceSuffix
+			prevRoot := consts.KukeonCgroupRoot
+			t.Cleanup(func() {
+				consts.RealmNamespaceSuffix = prevSuffix //nolint:reassign // restore runtime-overridable global
+				consts.KukeonCgroupRoot = prevRoot       //nolint:reassign // restore runtime-overridable global
+			})
+			if err := consts.ConfigureRuntime(tc.suffix, tc.cgroupRoot); err != nil {
+				t.Fatalf("ConfigureRuntime(%s, %s): %v", tc.suffix, tc.cgroupRoot, err)
+			}
+
+			f := uninstallNoopRunner(nil)
+			f.ListRealmsFn = func() ([]intmodel.Realm, error) { return tc.listed, nil }
+			f.ListContainerdNamespacesFn = func() ([]string, error) { return mixed, nil }
+			purged := map[string]string{}
+			f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
+				purged[r.Metadata.Name] = r.Spec.Namespace
+				return true, nil
+			}
+
+			cacheBase := t.TempDir()
+			for _, ns := range tc.spared {
+				if err := os.MkdirAll(filepath.Join(cacheBase, ns), 0o755); err != nil {
+					t.Fatalf("seed build cache %s: %v", ns, err)
+				}
+			}
+
+			ctrl := setupTestControllerWithRunPath(t, f, t.TempDir())
+			report, err := ctrl.Uninstall(controller.UninstallOptions{
+				SkipUserGroup:     true,
+				BuildCacheBaseDir: cacheBase,
+			})
+			if err != nil {
+				t.Fatalf("Uninstall returned error: %v", err)
+			}
+
+			if len(purged) != len(tc.wantPurged) {
+				t.Errorf("purged = %v, want %v", purged, tc.wantPurged)
+			}
+			for name, wantNs := range tc.wantPurged {
+				if got := purged[name]; got != wantNs {
+					t.Errorf("realm %q purged with namespace %q, want %q", name, got, wantNs)
+				}
+			}
+			for _, outcome := range report.Realms {
+				if _, ok := tc.wantPurged[outcome.Name]; !ok {
+					t.Errorf("report lists realm %q (namespace %q), want only %v",
+						outcome.Name, outcome.Namespace, tc.wantPurged)
+				}
+			}
+			for _, ns := range tc.spared {
+				for _, c := range report.BuildCaches {
+					if c.Namespace == ns {
+						t.Errorf("report has a build-cache row for spared namespace %q", ns)
+					}
+				}
+				if _, statErr := os.Stat(filepath.Join(cacheBase, ns)); statErr != nil {
+					t.Errorf("build cache for spared namespace %q removed: %v", ns, statErr)
+				}
+			}
+		})
+	}
+}
+
 // TestUninstall_ReleasesBindMountsBeforeRmdir pins the #434 fix: a kukeon-
 // owned bind mount under /run/kukeon (or /opt/kukeon) must be unmounted by
 // the controller before the rmdir step, so a post-attach uninstall on a
