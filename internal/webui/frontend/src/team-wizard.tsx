@@ -37,7 +37,7 @@ function ProjectStep({ project, sources, draft, pending, error, onChange, onRead
     <fieldset className="schema-field wizard-choice"><legend>The project</legend>
       <label className="schema-check"><input type="radio" name="project-mode" checked={project.mode === "address"} disabled={pending} onChange={() => onChange({ mode: "address" })} />A repository address</label>
       <label className="schema-check"><input type="radio" name="project-mode" checked={project.mode === "stored"} disabled={pending} onChange={() => onChange({ mode: "stored" })} />A stored Source</label>
-      <label className="schema-check"><input type="radio" name="project-mode" checked={project.mode === "file"} disabled={pending} onChange={() => onChange({ mode: "file" })} />A pasted <code>kuketeam.yaml</code></label>
+      <label className="schema-check"><input type="radio" name="project-mode" checked={project.mode === "file"} disabled={pending} onChange={() => onChange({ mode: "file" })} /><span>A pasted <code>kuketeam.yaml</code></span></label>
     </fieldset>
     <div className="schema-fields">
       {project.mode === "address" && <label className="schema-field"><span>Repository address<b aria-label="required"> *</b></span><input value={project.address} disabled={pending} placeholder="github.com/owner/repo" spellCheck={false} onChange={event => onChange({ address: event.target.value })} /></label>}
@@ -46,7 +46,7 @@ function ProjectStep({ project, sources, draft, pending, error, onChange, onRead
       {project.mode !== "file" && <RefFields kind={project.refKind} value={project.ref} disabled={pending} onChange={(refKind, ref) => onChange({ refKind, ref })} />}
       {project.mode === "address" && <GitIdentitySelect value={project.identity} disabled={pending} onChange={identity => onChange({ identity })} />}
       <label className="schema-field"><span>Team name</span><input value={project.name} disabled={pending} placeholder="the file's name, else the repository's" spellCheck={false} onChange={event => onChange({ name: event.target.value })} /></label>
-      {project.mode !== "file" && <label className="schema-check"><input type="checkbox" checked={project.useRepoFile} disabled={pending} onChange={event => onChange({ useRepoFile: event.target.checked })} />Use the repository's <code>kuketeam.yaml</code></label>}
+      {project.mode !== "file" && <label className="schema-check"><input type="checkbox" checked={project.useRepoFile} disabled={pending} onChange={event => onChange({ useRepoFile: event.target.checked })} /><span>Use the repository's <code>kuketeam.yaml</code></span></label>}
     </div>
     {(project.address || project.stored || project.file) && <Errors errors={errors} />}
     <div className="connector-actions"><button type="button" disabled={pending || !!errors.length} onClick={onRead}>{pending ? "Reading…" : "Read repository"}</button></div>
@@ -132,14 +132,14 @@ function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnes
         })}
         {!form.roles.items.length && <p className="description">No role is selected.</p>}
         <h4>Add roles</h4>
-        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked))} />{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
+        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked))} /><span>{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span></span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
       </>}
     </fieldset>
     <fieldset className="schema-object" aria-label="Harnesses"><legend>Harnesses</legend>
       <label className="schema-check"><input type="checkbox" checked={form.harnesses.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "harnesses", event.target.checked, inheritedHarnesses))} />Use the default harnesses</label>
       {form.harnesses.inherit ? <p className="description">{inheritedHarnesses.map(h => h.name).join(", ") || "The defaults have no harnesses."}</p> : <>
         <ul className="state-list">{form.harnesses.items.map(h => <li key={`${h.source}:${h.path}`}>{h.name} <span className="description"><code>{h.source}</code>:{h.path}</span> <button type="button" className="text-button" disabled={disabled} onClick={() => onForm(withHarness(form, h, false))}>Remove</button></li>)}</ul>
-        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.harnesses.length ? <div className="team-picker">{contents.harnesses.map(h => <label key={h.path} className="schema-check"><input type="checkbox" aria-label={`Harness ${h.name} from ${source.alias}`} checked={selectedIndex(form.harnesses.items, source.alias, h.path) >= 0} disabled={disabled} onChange={event => onForm(withHarness(form, { name: h.name, source: source.alias, path: h.path }, event.target.checked))} />{h.name} <span className="description">{h.path}</span></label>)}</div> : <p className="description">No harness.</p>}</SourceGroup>)}
+        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.harnesses.length ? <div className="team-picker">{contents.harnesses.map(h => <label key={h.path} className="schema-check"><input type="checkbox" aria-label={`Harness ${h.name} from ${source.alias}`} checked={selectedIndex(form.harnesses.items, source.alias, h.path) >= 0} disabled={disabled} onChange={event => onForm(withHarness(form, { name: h.name, source: source.alias, path: h.path }, event.target.checked))} /><span>{h.name} <span className="description">{h.path}</span></span></label>)}</div> : <p className="description">No harness.</p>}</SourceGroup>)}
       </>}
     </fieldset>
   </div>;

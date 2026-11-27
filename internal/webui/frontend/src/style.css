@@ -429,6 +429,8 @@ button:disabled { cursor: default; opacity: .4; }
 .schema-check { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 8px; font-size: var(--font-sm); }
 .schema-check input { width: auto; margin: 3px 0 0; }
 .schema-check small, .schema-check .field-error { grid-column: 2; }
+/* Inline descriptions inside a label's text span stay on its line. */
+.schema-check .description { margin: 0; }
 .schema-field > span { display: block; }
 .schema-field b { color: var(--accent); }
 .schema-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
