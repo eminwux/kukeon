@@ -474,7 +474,14 @@ A role that selects any other set of host mounts — only one of the two, or
 toggle.
 
 The daemon socket and the `kuke` binary are mounted through directories, so a
-daemon restart or a rebuild reaches running cells without recreating them:
+daemon restart or a rebuild reaches running cells without recreating them. The
+paths below are a standard host's. The blueprint names the daemon's paths with
+the reserved `${KUKEON_RUN_PATH}`, `${KUKEOND_SOCKET_DIR}` and
+`${KUKEOND_SOCKET_NAME}` variables, and kukeond fills them with its own run path
+and socket when it renders the cell, so a daemon bootstrapped with
+`kuke init --run-path X` mounts the client from `X/bin/client/` and its socket
+directory from beside `X/kukeond.sock`. Inside the cell the paths are always the
+ones below.
 
 | Selector         | Mounted                                                                                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

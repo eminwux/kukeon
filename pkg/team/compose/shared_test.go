@@ -224,21 +224,41 @@ func TestHostMountProfiles(t *testing.T) {
 			if pair.Blueprint.Metadata.Name != tc.want || pair.Blueprint.Spec.Prefix != tc.want {
 				t.Fatalf("blueprint = %q, want %q", pair.Blueprint.Metadata.Name, tc.want)
 			}
-			container := work(t, pair, interactive)
-			got := map[string]hostMount{}
-			for _, volume := range container.Volumes {
-				if volume.Kind == api.VolumeKindVolume || volume.Target == "/opt/cni" {
-					continue
-				}
-				got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
-			}
-			if !reflect.DeepEqual(got, tc.targets) {
-				t.Fatalf("host mounts = %v, want %v", got, tc.targets)
-			}
 			_, socket := tc.targets["/run/kukeon/kukeond"]
-			host := slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock")
-			if host != socket {
-				t.Fatalf("KUKEON_HOST set = %v, want %v: %v", host, socket, container.Env)
+			// The standard layout renders the literal paths of before #1710;
+			// another run path and socket move every source, never a target.
+			for _, layout := range []struct {
+				paths     cellblueprint.HostPaths
+				sources   *strings.Replacer
+				kukeonEnv string
+			}{
+				{cellblueprint.HostPaths{}, strings.NewReplacer(), "unix:///run/kukeon/kukeond/kukeond.sock"},
+				{
+					cellblueprint.HostPaths{RunPath: "/srv/kx", Socket: "/run/kx/daemon.sock"},
+					strings.NewReplacer("/run/kukeon/", "/run/kx/", "/opt/kukeon", "/srv/kx"),
+					"unix:///run/kukeon/kukeond/daemon.sock",
+				},
+			} {
+				container := workOf(t, renderCellAt(t, pair, interactive, nil, layout.paths))
+				got := map[string]hostMount{}
+				for _, volume := range container.Volumes {
+					if volume.Kind == api.VolumeKindVolume || volume.Target == "/opt/cni" {
+						continue
+					}
+					got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
+				}
+				want := map[string]hostMount{}
+				for target, m := range tc.targets {
+					want[target] = hostMount{layout.sources.Replace(m.source), m.readOnly}
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%+v: host mounts = %v, want %v", layout.paths, got, want)
+				}
+				host := slices.Contains(container.Env, "KUKEON_HOST="+layout.kukeonEnv)
+				if host != socket {
+					t.Fatalf("%+v: KUKEON_HOST=%s set = %v, want %v: %v",
+						layout.paths, layout.kukeonEnv, host, socket, container.Env)
+				}
 			}
 			raw, err := result.MarshalYAML()
 			if err != nil {

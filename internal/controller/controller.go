@@ -157,6 +157,7 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 			ContainerdSocket:         opts.ContainerdSocket,
 			RunPath:                  opts.RunPath,
 			SecretsStagingDir:        ctr.SecretsStagingDir(opts.KukeondSocket),
+			KukeondSocket:            opts.KukeondSocket,
 			ForceRegenerateCNI:       opts.ForceRegenerateCNI,
 			KukeonGroupGID:           opts.KukeondSocketGID,
 			DefaultMemoryLimitBytes:  opts.DefaultMemoryLimitBytes,

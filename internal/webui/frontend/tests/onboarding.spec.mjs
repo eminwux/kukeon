@@ -19,10 +19,6 @@ if (!endpoint) throw new Error("Set KUKE_WEB_SMOKE_HOST to the kukeond Unix endp
 const volumesDir = process.env.KUKE_ONBOARDING_VOLUMES;
 if (!volumesDir) throw new Error("Set KUKE_ONBOARDING_VOLUMES to the volumes directory of the default scope (make e2e-onboarding does).");
 
-// Majordomo's Config bind-mounts the standard host paths of the kuke client and the daemon's socket, so
-// its cell starts only on a daemon bootstrapped there. TestOnboarding_WebUI says which daemon this is.
-const withMajordomo = process.env.KUKE_ONBOARDING_MAJORDOMO === "1";
-
 // The harness the test launches, and the file whose presence means its state volume holds a login
 // (team/connectors/claude/connector.yaml: methods[login].login.marker).
 const harness = "claude";
@@ -150,10 +146,6 @@ test("a fresh host is set up from the browser: Initialize, git, a login, a first
     const panel = page.getByRole("complementary", { name: "Majordomo panel" });
     await panel.getByLabel("Harness").selectOption({ label: `kuke-majordomo-${harness}` });
     await expect(panel.getByRole("status", { name: `${harnessTitle} login` })).toHaveText(`${harnessTitle}: not logged in`);
-    if (!withMajordomo) {
-      console.log("KUKE_ONBOARDING_MAJORDOMO is not 1: the daemon is not in the standard host layout, so majordomo is not enabled.");
-      return;
-    }
     await panel.getByRole("button", { name: "Enable majordomo" }).click();
     await panel.getByRole("group", { name: "Log in first" }).getByRole("button", { name: "Continue anyway" }).click();
     await expect.poll(() => cellState("majordomo"), { timeout: minutes(5), message: "the majordomo cell reaches Ready" }).toBe("Ready");

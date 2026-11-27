@@ -481,7 +481,12 @@ type Options struct {
 	// (ctr.SecretsStagingDir: beside the daemon's socket). Empty means
 	// ctr.DefaultSecretsStagingDir.
 	SecretsStagingDir string
-	CniConf           cni.Conf
+	// KukeondSocket is the socket the daemon serves on. With RunPath it is
+	// what a CellConfig render expands a team blueprint's host-path
+	// variables to (HostPaths, issue #1710). Empty means the standard
+	// /run/kukeon/kukeond.sock.
+	KukeondSocket string
+	CniConf       cni.Conf
 	// ForceRegenerateCNI forces ensureSpaceCNIConfig to rewrite an existing conflist
 	// even when one is present and its bridge name matches SafeBridgeName. Set by
 	// `kuke init --force-regenerate-cni` as an operator escape hatch.
@@ -528,6 +533,14 @@ func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 
 // netPolicyEnforcer returns the configured enforcer or a no-op when the
 // runner was built without one (e.g., minimal test fixtures).
+// HostPaths returns the daemon's run path and socket, the host paths a
+// CellConfig render expands the reserved host-path variables of a blueprint
+// to (cellblueprint.ExpandHostPaths, issue #1710). Inside the kukeond cell
+// both are bind-mounted at their host paths, so they are host paths too.
+func (r *Exec) HostPaths() (string, string) {
+	return r.opts.RunPath, r.opts.KukeondSocket
+}
+
 func (r *Exec) netPolicyEnforcer() netpolicy.Enforcer {
 	if r.netPolicy == nil {
 		return netpolicy.NoopEnforcer{}

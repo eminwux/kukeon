@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,21 +44,8 @@ const onboardingEnv = "KUKEON_E2E_ONBOARDING"
 // containerd store is small (a kukeon dev cell's 4 GB tmpfs).
 const reclaimBuildEnv = "KUKEON_E2E_RECLAIM_BUILD"
 
-// hostLayoutEnv makes the test bootstrap the daemon where an installed host
-// has it — run path /opt/kukeon, socket /run/kukeon/kukeond.sock — instead of
-// under a temporary run path. Team Configs that carry the kuke client
-// (majordomo) bind-mount the standard host paths, /opt/kukeon/bin/client and
-// /run/kukeon/kukeond (pkg/team/compose/renderers/kukeon/bundled), so only a
-// daemon in the standard layout can start them: the majordomo step runs in
-// this mode alone. It is opt-in because it owns those paths: the test refuses
-// to start on a host that already has a kukeon runtime there. CI sets it.
-const hostLayoutEnv = "KUKEON_E2E_HOST_LAYOUT"
-
-// The standard layout of an installed host.
-const (
-	hostLayoutRunPath = "/opt/kukeon"
-	hostLayoutSocket  = "/run/kukeon/kukeond.sock"
-)
+// majordomoCell is the cell `Enable majordomo` starts in the default scope.
+const majordomoCell = "majordomo"
 
 // onboardingTimeout bounds the browser run: one team init (a git fetch), one
 // harness image pull and two cell starts.
@@ -66,10 +54,16 @@ const onboardingTimeout = 25 * time.Minute
 // TestOnboarding_WebUI is first-run onboarding end to end (issue #1694): on a
 // host where only `kuke init` ran, a browser signs in to `kuke serve`, follows
 // the Workbench's Get started checklist — Initialize, a GitHub token that also
-// serves git, a login, a first agent — and, in the standard host layout
-// (hostLayoutEnv), enables majordomo, against a real kukeond. The browser side is internal/webui/frontend/tests/onboarding.spec.mjs;
+// serves git, a login, a first agent — and enables majordomo, against a real
+// kukeond. The browser side is internal/webui/frontend/tests/onboarding.spec.mjs;
 // this test owns the daemon: it bootstraps the runtime the way the installer
 // does, hands the spec the daemon's endpoint and tears everything down.
+//
+// The daemon runs under a temporary run path, like the rest of the suite.
+// Majordomo's Config mounts the daemon's socket directory and staged kuke
+// client, which kukeond resolves to its own run path and socket when it
+// renders the cell (#1710), so the test checks that the majordomo cell mounts
+// them from this daemon's run path.
 //
 // No vendor login happens: the spec fakes the login marker in the agent
 // template's state volume, as TestKuke_LoginIdentity does, which is why the
@@ -104,23 +98,7 @@ func TestOnboarding_WebUI(t *testing.T) {
 	}
 
 	requireInitEgressRemoved(t)
-	hostLayout := os.Getenv(hostLayoutEnv) != ""
-	var runPath string
-	if hostLayout {
-		for _, path := range []string{hostLayoutSocket, filepath.Join(hostLayoutRunPath, "data")} {
-			if _, statErr := os.Stat(path); statErr == nil {
-				t.Fatalf("%s is set but %s exists: this host has a kukeon runtime, which the test would replace",
-					hostLayoutEnv, path)
-			}
-		}
-		runPath = hostLayoutRunPath
-		// An explicit --run-path otherwise moves the socket under it
-		// (applyRunPathImpliesKukeondSocket); every kuke this test runs
-		// inherits the pin.
-		t.Setenv("KUKEOND_SOCKET", hostLayoutSocket)
-	} else {
-		runPath = getRandomRunPath(t)
-	}
+	runPath := getRandomRunPath(t)
 	t.Cleanup(func() {
 		// The same teardown as TestKuke_DaemonReset_RoundTrip. The default
 		// realm goes first and with --cascade: it holds the agent and
@@ -151,14 +129,6 @@ func TestOnboarding_WebUI(t *testing.T) {
 	}
 	// `kuke init --run-path X` brings kukeond up on X/kukeond.sock.
 	host := "unix://" + filepath.Join(runPath, "kukeond.sock")
-	majordomo := "0"
-	if hostLayout {
-		host = "unix://" + hostLayoutSocket
-		majordomo = "1"
-	} else {
-		t.Logf("%s unset: the daemon runs under %s and the majordomo step is skipped "+
-			"(its Config mounts the standard host paths)", hostLayoutEnv, runPath)
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), onboardingTimeout)
 	defer cancel()
@@ -171,8 +141,6 @@ func TestOnboarding_WebUI(t *testing.T) {
 		// team Configs live in.
 		"KUKE_ONBOARDING_VOLUMES="+kukefs.VolumesDir(
 			runPath, config.DefaultRealm, consts.KukeonDefaultSpaceName, consts.KukeonDefaultStackName),
-		// Whether the daemon is in the layout majordomo's Config mounts.
-		"KUKE_ONBOARDING_MAJORDOMO="+majordomo,
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -192,7 +160,58 @@ func TestOnboarding_WebUI(t *testing.T) {
 		_, stdout, stderr := runBinary(t, nil, kuke, getArgs...)
 		t.Logf("kuke get cells -o yaml:\n%s%s", stdout, stderr)
 		logKukeondTail(t, runPath)
+		return
 	}
+	requireMajordomoMountsDaemonPaths(t, host, runPath)
+}
+
+// requireMajordomoMountsDaemonPaths checks that the majordomo cell mounts
+// this daemon's socket directory and staged kuke client (#1710), not the
+// standard host paths, which on a dev host belong to another daemon and on
+// CI do not exist. TestKuke_ConfigCell_HostPathsFollowDaemon runs the in-cell
+// kuke against such mounts; here the work container may already have exited
+// (its role-source clone needs DNS in the cell), so the rendered cell is
+// what is checked.
+func requireMajordomoMountsDaemonPaths(t *testing.T, host, runPath string) {
+	t.Helper()
+	args := []string{
+		"--host", host, "get", "cell", majordomoCell,
+		"--realm", config.DefaultRealm,
+		"--space", consts.KukeonDefaultSpaceName,
+		"--stack", consts.KukeonDefaultStackName,
+		"-o", "json",
+	}
+	doc, err := parseCellJSON(t, runReturningBinary(t, nil, kuke, args...))
+	if err != nil {
+		t.Fatalf("parse the majordomo cell: %v", err)
+	}
+	// `kuke init --run-path X` serves on X/kukeond.sock.
+	want := map[string]string{
+		"/run/kukeon/kukeond": filepath.Join(runPath, consts.KukeondSocketShareSubdir),
+		"/.kukeon/client":     filepath.Join(runPath, "bin", "client"),
+		"/usr/local/bin/kuke": filepath.Join(runPath, "bin", "kuke-shim"),
+	}
+	for _, c := range doc.Spec.Containers {
+		if c.ID != "work" {
+			continue
+		}
+		got := map[string]string{}
+		for _, v := range c.Volumes {
+			if _, ok := want[v.Target]; ok {
+				got[v.Target] = v.Source
+			}
+		}
+		for target, source := range want {
+			if got[target] != source {
+				t.Errorf("majordomo mount %s: source %q, want %q", target, got[target], source)
+			}
+		}
+		if !slices.Contains(c.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock") {
+			t.Errorf("majordomo env %q lacks the in-cell KUKEON_HOST", c.Env)
+		}
+		return
+	}
+	t.Errorf("the majordomo cell has no work container: %+v", doc.Spec.Containers)
 }
 
 // logKukeondTail prints the end of the kukeond container log under runPath,

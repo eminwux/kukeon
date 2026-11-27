@@ -429,8 +429,9 @@ func blueprintInputs(
 		"PROJECT_DIR=${PROJECT_DIR}", "HARNESS_SETTINGS=${HARNESS_SETTINGS}", "AGENT_NAME=${AGENT_NAME}",
 	}
 	if slices.Contains(prof.Mounts, "kukeond-socket") {
-		// The socket is reached through its directory mount (issue #1483).
-		environment = append(environment, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock")
+		// The socket is reached through its directory mount (issue #1483),
+		// under the name the rendering daemon's socket has (issue #1710).
+		environment = append(environment, "KUKEON_HOST=unix:///run/kukeon/kukeond/${KUKEOND_SOCKET_NAME}")
 	}
 	if legacy {
 		// A harness without modes still branches on $PROMPT in its one onInit.
