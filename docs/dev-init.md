@@ -31,6 +31,45 @@ The socket redirect above is automatic and orthogonal to the **dev profile** (`K
 
 `podSubnetCIDR` is the egress fix. The per-space subnet allocator (`internal/cni.NewDefaultSubnetAllocator`) hands out `/24` chunks of this parent block, the first space getting `…0.0/24` with gateway `…0.1`. A nested daemon left on the default `10.88.0.0/16` reproduces the parent's exact `10.88.0.1` gateway — which is _also_ the dev-root cell's own default gateway. Once the nested bridge claims `10.88.0.1`, that address becomes a **local** address inside the cell and shadows the gateway: every outbound packet is delivered locally and the cell's egress drops to 100% loss. Redirecting the nested allocator to `10.89.0.0/16` keeps it clear of the parent's `/16`.
 
-The knob is plumbed exactly like `cgroupRoot`: `ServerConfiguration.spec.podSubnetCIDR` / `ClientConfiguration.spec.podSubnetCIDR`, the `KUKEON_POD_SUBNET_CIDR` env var, and the `kukeond --pod-subnet-cidr` flag, resolved into `cni.ConfigureSubnetParentCIDR` at process start. The canonical nested agent workflow runs `KUKEON_PROFILE=dev` (the parity tail expects `dev.kukeon.io` / `/kukeon-dev`), so the redirect lands automatically; a nested run _without_ the dev profile would also collide on namespace and cgroup, so it is not a supported configuration.
+The knob is plumbed exactly like `cgroupRoot`: `ServerConfiguration.spec.podSubnetCIDR` / `ClientConfiguration.spec.podSubnetCIDR`, the `KUKEON_POD_SUBNET_CIDR` env var, and the `kukeond --pod-subnet-cidr` flag, resolved into `cni.ConfigureSubnetParentCIDR` at process start. The canonical nested agent workflow runs `KUKEON_PROFILE=dev` (the parity tail expects `dev.kukeon.io` / `/kukeon-dev`), so the redirect lands automatically; a nested run _without_ the dev profile would also collide on namespace and cgroup, so it is not a supported configuration. The network guard below enforces the subnet part of this.
 
-The source of truth for the probe and env-var contract is `scripts/dev-init.sh` lines 38-97; the dev-profile config files are written further down under the `KUKEON_PROFILE=dev` gate.
+## Nested network guard (#1382)
+
+`10.89.0.0/16` is not proven disjoint from every parent layout, and the dev profile only writes `kukeond-dev.yaml` when the file is absent, so an existing file can hold anything. A nested run therefore checks the configuration it actually resolved before it touches the network. The checks run only nested; on a bare host the script behaves as before.
+
+`scripts/dev-init.sh` builds `hack/netguard` up front and runs it as root, under the same `sudo --preserve-env` list as the kuke admin commands, so it sees the same environment they do. It reads the cell's links, addresses and routes over netlink: the cell needs no `ip` (iproute2) or any other new tool, only the Go toolchain the build already uses.
+
+**Subnet check (`netguard check`).** This runs before the build, again right before the first-pass `kuke init`, before `kuke daemon reset`, and before the final `kuke init`. The script fails if any space subnet range the run can put on a bridge overlaps this cell's interface networks (all links, including down ones), its routes (every table), or a route's gateway, including the default gateway. The subnets checked are:
+
+- `KUKEON_POD_SUBNET_CIDR`, when it survives the sudo boundary (`kuke init` reads it in-process);
+- `podSubnetCIDR` from the server configuration `kuke init` and the kukeond it starts read: `--server-configuration` (the dev profile's `kukeond-dev.yaml`), else `KUKEOND_CONFIGURATION`, else `/etc/kukeon/kukeond.yaml`. When that file has no `podSubnetCIDR`, the compiled-in default `10.88.0.0/16` is checked;
+- `podSubnetCIDR` from the client configuration `kuke init` reads: `KUKE_CONFIGURATION`, else root's `~/.kuke/kuke.yaml` (read only when the home directory is known, like kuke);
+- the subnet of every space already persisted under `<run-path>/data/<realm>/<space>/` (conflist IPAM subnet, else `network.json`). A space keeps its subnet whatever the configuration says now. The run path resolves like `kuke init`'s: `--run-path`, else `KUKEON_RUN_PATH`, else the server configuration's `runPath`, else the client configuration's `runPath`, else `/opt/kukeon`.
+
+Bridges this instance already owns are exempt: the bridge named in a persisted space's conflist, for addresses and routes inside that space's subnet. So a rerun with its bridges still up passes, but a foreign address on the same bridge still conflicts. There is no flag to bypass the check.
+
+A rejection names each overlapping subnet, where it came from, and every conflicting entry, then says how to fix it:
+
+```
+netguard: space subnet range 10.88.0.0/16 (compiled-in default; no podSubnetCIDR in /etc/kukeon/kukeond.yaml) overlaps this cell's network:
+    gateway 10.88.0.1 dev eth0
+    interface address 10.88.0.15/24 dev eth0
+    route 10.88.0.0/24 dev eth0
+    ...
+netguard: refusing to continue. ...
+```
+
+To fix it, run `KUKEON_PROFILE=dev make dev-init`, or set `podSubnetCIDR` in the named configuration file to a block that is disjoint from every listed entry (and drop a conflicting `KUKEON_POD_SUBNET_CIDR`). A conflicting persisted space has to be purged first, because it keeps its old subnet (`sudo ./kuke purge space <space> --realm <realm> --cascade`, or `sudo ./kuke daemon reset --purge-system` for `kuke-system`).
+
+**Uplink check (`netguard snapshot` / `netguard verify`).** Before any change, the script records the cell's main-table default routes, the links they leave through (up or down), and those links' IPv4 addresses. It also sends an ICMP echo to each gateway. It compares against that baseline after `kuke daemon reset` and on every exit path, success or failure. A missing default route, link or address, or a link that went down, is reported as `STRUCTURAL DAMAGE` (the #1219 signature). A gateway that answered at baseline and stops answering is reported separately as an `EGRESS REGRESSION`. A gateway that did not answer at baseline, or a host where no raw ICMP socket can be opened, is not checked at all. Both kinds of finding fail the run. The guard only detects; it repairs nothing.
+
+**Cleanup scope.** The script's teardown removes only what the run created: the attach-smoke realm `dev-init-attach` (its space, stack and cell), that realm's containerd namespace and per-namespace BuildKit cache, and its own temp directories, including the netguard binary and baseline. `kuke daemon reset` acts on this instance's kukeond cell only. The HostNetwork CNI DEL guards from #1219, which stop a reset from detaching the daemon's own netns, are unchanged.
+
+**Limits.** The nested instance still shares the parent's kernel, so the guard cannot make it fully isolated:
+
+- It sees only this cell's network namespace. Networks the parent reaches beyond the cell's default gateway (the parent host's LAN, VPN routes on the host) are invisible here. A nested subnet that overlaps one of them passes the check, but nested cells cannot reach those addresses.
+- Kernel-wide state is shared: loaded modules, `net.bridge.*` and other global sysctls, conntrack limits, and cgroup and containerd resources. The guard does not inspect any of it.
+- It checks IPv4 only. The ICMP probe tests the gateway hop, not end-to-end egress.
+- The checks run at fixed points. A change made by something else between a check and the next step is not seen until the next check.
+
+The source of truth for the nested probe, the env-var contract and the guard is `scripts/dev-init.sh`; the dev-profile config files are written there under the `KUKEON_PROFILE=dev` gate.

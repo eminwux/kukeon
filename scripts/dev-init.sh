@@ -109,29 +109,14 @@ if [ -e "${NESTED_PROBE}" ]; then
     echo "Routing the nested kukeond through ${NESTED_SOCKET_PATH} (per-nest socket)."
     echo "Parent host's /run/kukeon/tty bind is left untouched; verified on exit."
 
-    # Nested without the dev profile is not a supported configuration
-    # (issue #1191). The socket redirect above is automatic, but the
-    # default profile still reuses the parent host's canonical kukeon.io
-    # namespaces, /kukeon cgroup root, and 10.88.0.0/16 pod subnet — and
-    # that subnet's 10.88.0.1 gateway is *also* the dev-root cell's own
-    # default gateway, so a nested default-profile run shadows the gateway
-    # and blackholes the nested cells' egress (docs/dev-init.md "Nested
-    # egress: the dev profile's pod-CIDR redirect"). The lower-blast-radius
-    # default is to warn loudly and continue (preserving the historical
-    # behavior of this script) rather than force KUKEON_PROFILE=dev; the
-    # operator is told how to opt into the supported per-nest path.
+    # The space subnet range this run would use is checked against this
+    # cell's network before anything touches it (the netguard steps below,
+    # issue #1382). There is no flag to skip that check: a nested run whose subnet
+    # overlaps the parent cell's addresses, routes or gateway fails closed.
+    # KUKEON_PROFILE=dev is the usual fix, but it is not taken as proof —
+    # the resolved configuration is what gets checked.
     if [ "${KUKEON_PROFILE}" != "dev" ]; then
-        cat >&2 <<EOF
-
-WARNING: nested 'make dev-init' without KUKEON_PROFILE=dev is not a supported
-         configuration (see docs/dev-init.md). The default profile reuses the
-         parent host's kukeon.io namespaces, /kukeon cgroup root, and
-         10.88.0.0/16 pod subnet; the shared 10.88.0.1 gateway is shadowed
-         inside this cell and the nested cells' egress is blackholed.
-         Re-run with 'KUKEON_PROFILE=dev make dev-init' for the supported
-         per-nest profile (dev.kukeon.io / /kukeon-dev / 10.89.0.0/16).
-
-EOF
+        echo "KUKEON_PROFILE is not 'dev'; the default 10.88.0.0/16 space subnet range usually overlaps the parent cell."
     fi
 
     # Snapshot the parent's per-container attach plumbing so the EXIT trap
@@ -207,68 +192,59 @@ verify_parent_attach_intact() {
     return 0
 }
 
-# detect_uplink_state reports the dev cell's uplink as "<eth0> <default>", each
-# 0|1, using `ip` when present and falling back to sysfs + /proc/net/route. The
-# fallback matters because the #1219 incident saw `ip` missing inside the cell
-# *after* the break, which masked diagnosis — the guard must not itself depend
-# on a tool the break can leave absent.
-detect_uplink_state() {
-    local have_eth0=0 have_default=0
-    if command -v ip >/dev/null 2>&1; then
-        if ip -4 addr show eth0 >/dev/null 2>&1; then have_eth0=1; fi
-        if [ -n "$(ip -4 route show default 2>/dev/null)" ]; then have_default=1; fi
-    else
-        if [ -e /sys/class/net/eth0 ]; then have_eth0=1; fi
-        # /proc/net/route: the default route is the row whose Destination
-        # (column 2) is 00000000.
-        if awk 'NR>1 && $2=="00000000"{f=1} END{exit !f}' /proc/net/route 2>/dev/null; then have_default=1; fi
-    fi
-    printf '%s %s' "${have_eth0}" "${have_default}"
+# Nested network guard (issue #1382). hack/netguard reads this cell's network
+# over netlink — no iproute2 needed — and is built before any network change,
+# so a break cannot take the tool away with it (the #1219 incident left `ip`
+# missing inside the cell). All of it runs only nested; bare hosts are
+# unchanged. It never repairs anything and touches nothing it did not create:
+# its only artifacts are the binary and the uplink baseline in NETGUARD_DIR.
+NETGUARD_DIR=""
+NETGUARD=""
+UPLINK_BASELINE=""
+
+# netguard_check fails the script when any space subnet range this run can
+# put on a bridge overlaps this cell's interface networks, routes or gateways: the
+# env/YAML values kuke init and the kukeond it starts resolve, plus every
+# persisted space's subnet. This instance's own space bridges are exempt, so a
+# rerun passes. It runs under the same sudo environment as the kuke commands
+# it guards, so it resolves the same configuration they do.
+netguard_check() {
+    [ -n "${NETGUARD}" ] || return 0
+    step "Network guard: space subnets vs this cell's network ($1)"
+    sudo --preserve-env="${PRESERVE_ENV_ADMIN}" "${NETGUARD}" check "${SERVER_CONFIG_FLAGS[@]}"
 }
 
-# verify_parent_uplink_intact is the nested-mode regression guard for issue
-# #1219. Before #1219's fix, `kuke daemon reset` on a prior HostNetwork kukeond
-# cell issued a CNI DEL against the daemon's own netns — which nested is *this*
-# dev cell's netns, whose uplink veth is named eth0 — deleting eth0 and downing
-# lo and severing the cell's network. The break otherwise surfaces two phases
-# later as a confusing `kukebuild: ... network is unreachable`; this asserts the
-# uplink survived the reset and fails fast with the real cause. It mirrors the
-# existing `verify_parent_attach_intact` post-flight and only fires nested (bare
-# hosts rarely name their primary NIC eth0). Only the present->absent transition
-# is a regression — an uplink already absent pre-reset is a pre-existing
-# condition.
-verify_parent_uplink_intact() {
-    [ -e "${NESTED_PROBE}" ] || return 0
-    local pre_eth0 pre_def post_eth0 post_def
-    read -r pre_eth0 pre_def <<<"$1"
-    read -r post_eth0 post_def <<<"$(detect_uplink_state)"
-    local broke=0
-    if [ "${pre_eth0}" = "1" ] && [ "${post_eth0}" != "1" ]; then broke=1; fi
-    if [ "${pre_def}" = "1" ] && [ "${post_def}" != "1" ]; then broke=1; fi
-    if [ "${broke}" -eq 1 ]; then
-        cat >&2 <<EOF
-
-POST-RESET: 'kuke daemon reset' severed this dev cell's uplink
-            (eth0 ${pre_eth0}->${post_eth0}, default route ${pre_def}->${post_def}).
-            This is the issue #1219 signature: a HostNetwork-cell CNI DEL ran
-            against this cell's own netns, deleting eth0 and/or downing lo. The
-            break would otherwise surface two phases later as a confusing
-            'kukebuild: ... network is unreachable'. Re-plumb the uplink (see
-            issue #1219's manual-recovery steps) before re-running.
-EOF
-        exit 1
+# netguard_verify_uplink compares this cell's uplink (default route, its link
+# and addresses) with the baseline taken before any change, and separately
+# whether a gateway that answered ICMP then still does. A failure is reported
+# once: the baseline is dropped so the EXIT trap does not repeat it.
+netguard_verify_uplink() {
+    [ -n "${UPLINK_BASELINE}" ] || return 0
+    if ! sudo "${NETGUARD}" verify --baseline "${UPLINK_BASELINE}" --phase "$1"; then
+        UPLINK_BASELINE=""
+        return 1
     fi
-    echo "post-reset: dev cell uplink (eth0 + default route) survived the reset"
 }
 
-# Register the post-flight check BEFORE any state-mutating step so an
+# exit_checks runs on every exit path, success or failure.
+exit_checks() {
+    local rc=0
+    netguard_verify_uplink "at exit" || rc=1
+    verify_parent_attach_intact || rc=1
+    if [ -n "${NETGUARD_DIR}" ]; then
+        sudo rm -rf "${NETGUARD_DIR}"
+    fi
+    return "${rc}"
+}
+
+# Register the post-flight checks BEFORE any state-mutating step so an
 # early failure (e.g. during `make kuke`, `kuke build`, or the first
 # `kuke init`) still surfaces a disturbance of the parent's attach
-# plumbing. The smoke section below replaces this trap with
-# `cleanup_attach_smoke`, whose last step is the same
-# `verify_parent_attach_intact` invocation — so the post-flight contract
-# holds at every exit point in the script.
-trap 'verify_parent_attach_intact || exit 1' EXIT
+# plumbing or uplink. The smoke section below replaces this trap with
+# `cleanup_attach_smoke`, whose last step is the same `exit_checks`
+# invocation — so the post-flight contract holds at every exit point in
+# the script.
+trap 'exit_checks || exit 1' EXIT
 
 if [ "${KUKEON_PROFILE}" = "dev" ]; then
     step "KUKEON_PROFILE=dev: enabling dev-profile (suffix dev.kukeon.io, cgroup /kukeon-dev, pod CIDR 10.89.0.0/16)"
@@ -351,6 +327,20 @@ EOF
     BUILD_KUKEOND_CONFIG_FLAGS=(--kukeond-config "${DEV_PROFILE_SERVER_CONFIG}")
     PRESERVE_ENV_WORKLOAD="KUKEON_HOST,KUKE_CONFIGURATION"
     PRESERVE_ENV_ADMIN="KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION"
+fi
+
+# Nested network guard, first pass (issue #1382): before the build, the
+# daemon reset or any CNI call, so a conflicting subnet fails in seconds.
+if [ -e "${NESTED_PROBE}" ]; then
+    step "Network guard: build hack/netguard"
+    NETGUARD_DIR="$(mktemp -d)"
+    go build -o "${NETGUARD_DIR}/netguard" ./hack/netguard
+    NETGUARD="${NETGUARD_DIR}/netguard"
+    netguard_check "before any network change"
+
+    step "Network guard: snapshot this cell's uplink"
+    sudo "${NETGUARD}" snapshot --out "${NETGUARD_DIR}/uplink.json"
+    UPLINK_BASELINE="${NETGUARD_DIR}/uplink.json"
 fi
 
 # Pre-flight: writable install prefix and run path (issue #1413). Runs before
@@ -488,6 +478,7 @@ if [ ! -d "${SYSTEM_REALM_DIR}" ]; then
     # provisioning at the end of that pass may fail because the local image
     # is not yet built into containerd. Tolerate that — the second init
     # below recreates the cell after the build succeeds.
+    netguard_check "before first-pass kuke init"
     sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke init \
         --kukeond-image "${KUKEOND_IMAGE_REF}" \
         "${SERVER_CONFIG_FLAGS[@]}" \
@@ -504,15 +495,15 @@ fi
 # is the same anti-pattern but doesn't bite today — its first-pass init
 # is idempotent on a pre-bootstrapped host.
 if sudo test -d "${KUKEOND_CELL_DIR}"; then
-    # Snapshot the dev cell's uplink before the reset so the post-reset guard
-    # below can fail loud if `kuke daemon reset` severed it (issue #1219). Only
-    # the prior-cell branch can hit the bug — the detach only fires destructively
-    # against a previously-inited HostNetwork kukeond cell with a live root task.
-    UPLINK_PRE="$(detect_uplink_state)"
+    netguard_check "before kuke daemon reset"
     step "Reset prior kukeond cell"
     sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke daemon reset \
         "${SERVER_CONFIG_FLAGS[@]}"
-    verify_parent_uplink_intact "${UPLINK_PRE}"
+    # Fail loud right here if the reset severed this cell's uplink (issue
+    # #1219: a HostNetwork-cell CNI DEL against the daemon's own netns, which
+    # nested is this cell's). It would otherwise surface two phases later as
+    # a confusing `kukebuild: ... network is unreachable`.
+    netguard_verify_uplink "after kuke daemon reset"
 else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
@@ -529,6 +520,7 @@ sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION=
     "${BUILD_KUKEOND_CONFIG_FLAGS[@]}" \
     --realm kuke-system .
 
+netguard_check "before kuke init"
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
 sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke init \
     --kukeond-image "${KUKEOND_IMAGE_REF}" \
@@ -700,9 +692,10 @@ cleanup_attach_smoke() {
     # still be live before this script exits. Runs after the nested
     # daemon's smoke artifacts are torn down so we catch any late
     # disturbance, and runs on the error-exit path too (the trap fires
-    # regardless of exit status). Returns non-zero to surface the
+    # regardless of exit status). The same exit_checks re-verify the
+    # uplink against its baseline. Returns non-zero to surface the
     # disturbance even when the rest of the script succeeded.
-    verify_parent_attach_intact || exit 1
+    exit_checks || exit 1
 }
 trap cleanup_attach_smoke EXIT
 
