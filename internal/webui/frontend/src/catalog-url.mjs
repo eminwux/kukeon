@@ -5,7 +5,7 @@ const coordinates = ["realm", "space", "stack", "cell"];
 export function catalogAPI(kind, scope) {
   const params = new URLSearchParams();
   scope.slice(0, -1).forEach((value, i) => params.set(coordinates[i], value));
-  return `/api/catalog/${kind}/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
+  return `/catalog/${kind}/${encodeURIComponent(scope.at(-1) ?? "")}?${params}`;
 }
 
 // The delete route sits beside the detail route and takes the same scope query.

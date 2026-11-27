@@ -1,3 +1,6 @@
+import { currentRoutePath, routeHref } from "./router";
+import { configRoute, newTeamRoute, sourcesRoute, teamsRoute } from "./teams.mjs";
+
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
@@ -5,12 +8,16 @@ export type Route = { view: string; scope: string[]; parent: string[]; document:
 
 // Home is the Workbench grid (#1635); the Overview, the first Manage page, lives at #/resources.
 const HOME = (): Route => ({ view: "workbench", scope: [], parent: [], document: false });
-export const homeLink = "#/";
-export const overviewLink = "#/resources";
+export function homeLink(): string {
+  return routeHref("/");
+}
+export function overviewLink(): string {
+  return routeHref("/resources");
+}
 
 export function readRoute(): Route {
   try {
-    const raw = window.location.hash.slice(1);
+    const raw = currentRoutePath();
     const [path, query] = raw.split("?");
     const params = new URLSearchParams(query);
     // The Workbench grid is home: #/, the empty hash, #/workspace without a cell scope and unparsable
@@ -78,43 +85,57 @@ export function readRoute(): Route {
 
 // The cell terminal keeps its historical #/workspace/<realm>/<space>/<stack>/<cell> route.
 export function workspaceLink(scope: string[]): string {
-  return "#/workspace/" + scope.map(encodeURIComponent).join("/");
+  return routeHref("/workspace/" + scope.map(encodeURIComponent).join("/"));
 }
 export function newCellLink(config?: string[]): string {
-  return "#/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : "");
+  return routeHref("/new-cell" + (config?.length ? `?config=${encodeURIComponent(JSON.stringify(config))}` : ""));
 }
 export function newConfigLink(blueprint?: string[]): string {
-  return "#/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : "");
+  return routeHref("/new-config" + (blueprint?.length ? `?blueprint=${encodeURIComponent(JSON.stringify(blueprint))}` : ""));
 }
 export function newAgentLink(): string {
-  return "#/agents/new";
+  return routeHref("/agents/new");
 }
 export function newSecretLink(): string {
-  return "#/new-secret";
+  return routeHref("/new-secret");
 }
 // catalogPageLink opens a catalog document's page; edit opens a Secret's Replace value form.
 export function catalogPageLink(kind: string, scope: string[], options: { document?: boolean; edit?: boolean } = {}): string {
-  return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (options.document ? "?document=1" : options.edit ? "?edit=1" : "");
+  return routeHref(`/${kind}/` + scope.map(encodeURIComponent).join("/") + (options.document ? "?document=1" : options.edit ? "?edit=1" : ""));
 }
 export function settingsLink(): string {
-  return "#/settings";
+  return routeHref("/settings");
 }
 export function healthLink(): string {
-  return "#/daemon/health";
+  return routeHref("/daemon/health");
 }
 export function daemonLink(section?: "logs"): string {
-  return "#/daemon" + (section ? `/${section}` : "");
+  return routeHref("/daemon" + (section ? `/${section}` : ""));
 }
 export function imagesLink(realm?: string, ref?: string): string {
-  return "#/images" + [realm, ref].filter((value): value is string => !!value).map(value => "/" + encodeURIComponent(value)).join("");
+  return routeHref("/images" + [realm, ref].filter((value): value is string => !!value).map(value => "/" + encodeURIComponent(value)).join(""));
 }
 export function resourceLink(scope: string[], document = false): string {
-  return "#/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "");
+  return routeHref("/resource/" + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""));
 }
 export function listLink(depth: number, parent: string[] = [], state?: string): string {
   const query = [parent.length ? `parent=${encodeURIComponent(JSON.stringify(parent))}` : "", state ? `state=${encodeURIComponent(state)}` : ""].filter(Boolean).join("&");
-  return `#/${titles[depth].toLowerCase()}` + (query ? `?${query}` : "");
+  return routeHref(`/${titles[depth].toLowerCase()}` + (query ? `?${query}` : ""));
 }
+export function teamsLink(name?: string, section?: "edit" | "export"): string {
+  return routeHref(teamsRoute(name, section));
+}
+export function newTeamLink(): string {
+  return routeHref(newTeamRoute);
+}
+export function sourcesLink(name?: string): string {
+  return routeHref(sourcesRoute(name));
+}
+// configPageLink opens a Config's page from its scope and name.
+export function configPageLink(scope: string[], name: string): string {
+  return routeHref(configRoute(scope, name));
+}
+// apiPath is the API path of a resource, relative to the transport's apiBase.
 export function apiPath(scope: string[]): string {
-  return "/api/" + scope.map((name, i) => `${kinds[i]}s/${encodeURIComponent(name)}`).join("/");
+  return "/" + scope.map((name, i) => `${kinds[i]}s/${encodeURIComponent(name)}`).join("/");
 }

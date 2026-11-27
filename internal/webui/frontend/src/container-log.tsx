@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ErrorNotice, toFailure, type Failure } from "./request";
 import { apiPath } from "./routes";
 import { terminalThemeFor, type Theme } from "./terminal";
+import { apiFetch } from "./transport";
 
 // One chunk of GET …/containers/{name}/log (issue #1620). data is base64 of the raw stream bytes.
 type LogChunk = { source?: string; data?: string | null; start?: number; next?: number; size?: number; truncated?: boolean; more?: boolean };
@@ -14,7 +15,7 @@ const CHUNKS_PER_SYNC = 8;
 // null means the container has no stream file yet (404 log_unavailable).
 async function readChunk(scope: string[], container: string, offset: number, signal: AbortSignal): Promise<LogChunk | null> {
   const url = `${apiPath(scope)}/containers/${encodeURIComponent(container)}/log?offset=${offset}&maxBytes=${TAIL_BYTES}`;
-  const response = await fetch(url, { signal, headers: { Accept: "application/json" } });
+  const response = await apiFetch(url, { signal, headers: { Accept: "application/json" } });
   let body: { error?: Failure } & LogChunk = {};
   try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
   if (response.status === 404 && body.error?.code === "log_unavailable") return null;

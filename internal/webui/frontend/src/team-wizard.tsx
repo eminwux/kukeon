@@ -10,8 +10,10 @@ import {
   roleConnectorRows, roleHarnesses, stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 import type { Available, ProjectInput } from "./team-form.mjs";
-import { editPayload, needsForce, originLabel, refLabel, sourcesLink, teamsAPI, teamsLink } from "./teams.mjs";
+import { editPayload, needsForce, originLabel, refLabel, teamsAPI } from "./teams.mjs";
 import type { Draft, FormConnector, FormRole, RoleConnectorView, Selection, SourceContents, Sources, TeamForm, TeamOutcome, TeamView, ViewTask } from "./teams.mjs";
+import { navigate } from "./router";
+import { sourcesLink, teamsLink } from "./routes";
 
 // The team wizard (#1644, AC2 and AC4): one component for New team
 // (#/new-team) and Edit team (#/teams/<name>/edit). Its state is the server's
@@ -238,7 +240,7 @@ function CredentialsStep({ form, connectors, defaultConnectors, missing, inherit
   form: TeamForm; connectors: ReturnType<typeof useResource<Connector[]>>; defaultConnectors: Record<string, FormConnector>; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[];
   resolving: boolean; notes: string[]; resolveError?: Failure; disabled: boolean; onForm: (form: TeamForm) => void;
 }) {
-  const secrets = useResource<unknown[]>("/api/catalog/secrets", 0);
+  const secrets = useResource<unknown[]>("/catalog/secrets", 0);
   return <div className="wizard-step">
     <label className="schema-check"><input type="checkbox" checked={form.connectors.inherit} disabled={disabled} onChange={event => onForm(withConnectorsInherit(form, event.target.checked, defaultConnectors))} />Use the defaults' connector choices</label>
     {!form.connectors.inherit && <>
@@ -276,7 +278,7 @@ function YamlTab({ name, document, onChanged }: { name: string; document: string
       if (action === "preview") { setPreview(outcome); return; }
       notify({ key: `team-apply:${name}`, tone: "success", message: `Team ${name} applied.` });
       onChanged();
-      window.location.hash = teamsLink(name);
+      navigate(teamsLink(name));
     } catch (caught) { setError(toFailure(caught)); }
     finally { setPending(""); }
   }
@@ -297,7 +299,7 @@ function YamlTab({ name, document, onChanged }: { name: string; document: string
 export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamView; onChanged: () => void }) {
   const steps = stepsFor(mode);
   const name = team?.summary.name ?? "";
-  const sources = useResource<Sources>("/api/sources", 0);
+  const sources = useResource<Sources>("/sources", 0);
   const [tab, setTab] = useState<"form" | "yaml">("form");
   const [step, setStep] = useState(0);
   const [project, setProject] = useState<ProjectInput>(emptyProject());
@@ -318,7 +320,7 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
   const defaultRoles = sources.data?.defaultForm?.roles ?? inheritedRoles;
   const defaultConnectors = sources.data?.defaultForm?.connectors ?? {};
   const configured = team?.view?.tasks ?? [];
-  const connectors = useResource<Connector[]>("/api/connectors", 0);
+  const connectors = useResource<Connector[]>("/connectors", 0);
   // What the last dry run resolved per role and connector (#1745). It outlives a form change, so Resolves to
   // keeps the previous rows, dimmed, until the next dry run answers.
   const [resolved, setResolved] = useState<{ rows: RoleConnectorView[]; notes: string[] }>();
@@ -360,7 +362,7 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
       const added = outcome.result?.team ?? name;
       notify({ key: `team-${mode}:${added}`, tone: "success", message: mode === "new" ? `Team ${added} added.` : `Team ${added} applied.` });
       onChanged();
-      window.location.hash = teamsLink(added);
+      navigate(teamsLink(added));
     } catch (caught) {
       const failure = toFailure(caught);
       if (mode === "new" && needsForce(failure)) setReplace(true);

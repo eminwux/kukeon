@@ -4,6 +4,7 @@ import { apiPath } from "./routes";
 import { rememberFocus, useModalDialog } from "./focus";
 import { Icon } from "./icons";
 import { TerminalSession, sessionId, type Session, type TerminalState, type Theme } from "./terminal";
+import { apiFetch } from "./transport";
 
 // `kuke exec` in the browser (#1432): run one command, or open a shell, in a container of a running
 // cell. Both run as the container's own user unless root is chosen, and root is chosen only through
@@ -86,7 +87,7 @@ export function ExecPanel({ scope, container, theme, visible, expanded, onClose 
     if (running || !command.trim()) return;
     setRunning(true); setFailure(undefined);
     try {
-      const response = await fetch(base, {
+      const response = await apiFetch(base, {
         method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({ command, identity: asRoot ? "root" : "container", ...(asRoot ? { confirmRoot: true } : {}) }),
       });

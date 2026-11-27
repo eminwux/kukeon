@@ -14,6 +14,7 @@ import {
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
+import { navigate, routeHref } from "./router";
 
 // The Connectors page (#1548, §7). It iterates GET /api/connectors: a
 // connector added as one connector.yaml is listed, given identities and
@@ -29,9 +30,9 @@ function deliveryText(item: Delivered): string {
     : item.delivery === deliveryRegistry ? "image pulls of a Realm"
     : item.delivery;
 }
-function identityLink(identity: SecretRef): string { return "#/secrets/" + [...refScope(identity), identity.name].map(encodeURIComponent).join("/"); }
+function identityLink(identity: SecretRef): string { return routeHref("/secrets/" + [...refScope(identity), identity.name].map(encodeURIComponent).join("/")); }
 function configLink(config: { name: string; realm?: string; space?: string; stack?: string }): string {
-  return "#/configs/" + [config.realm, config.space, config.stack, config.name].filter((value): value is string => !!value).map(encodeURIComponent).join("/");
+  return routeHref("/configs/" + [config.realm, config.space, config.stack, config.name].filter((value): value is string => !!value).map(encodeURIComponent).join("/"));
 }
 function firstRealm(inventory: InventoryResource): string {
   const realms = inventory.data?.rows[0] ?? [];
@@ -305,7 +306,7 @@ function IdentityPage({ connector, connectors, action, identity, target, identit
 }) {
   const title = connector.title || connector.name;
   const back = connectorsLink(connector.name, target);
-  const leave = () => { window.location.hash = back; };
+  const leave = () => { navigate(back); };
   const saved = () => { onChanged(); leave(); };
   const levels = connectorLevels(connector);
   const [store, setStore] = useScope(inventory, target && scopeAt(target, levels.includes(scopeLevels[0]) ? scopeLevels[0] : levels[0]));
@@ -397,7 +398,7 @@ function DefaultsPanel({ connector, identities, revision, inventory, initialScop
   const title = connector.title || connector.name;
   const targets = defaultTargets(connector);
   const [scope, setScope] = useScope(inventory, initialScope);
-  const defaults = useResource<ConnectorDefault[]>(scope.realm && targets.length ? `/api/connectors/defaults?${scopeQuery(scope)}` : null, revision);
+  const defaults = useResource<ConnectorDefault[]>(scope.realm && targets.length ? `/connectors/defaults?${scopeQuery(scope)}` : null, revision);
   if (!targets.length) return null;
   const levels = connectorLevels(connector);
   return <section className="panel connector-defaults" aria-label={`${title} default identity`}>
@@ -473,13 +474,13 @@ function ConnectorDetail({ connector, connectors, usage, secrets, logins, logins
 }
 
 export function ConnectorsPage({ name, target, action, identity, revision, inventory, onChanged, onTitle }: { name?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
-  const catalog = useResource<Connector[]>("/api/connectors", revision);
-  const usage = useResource<ConnectorUsage[]>("/api/connectors/status", revision);
-  const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
+  const catalog = useResource<Connector[]>("/connectors", revision);
+  const usage = useResource<ConnectorUsage[]>("/connectors/status", revision);
+  const secrets = useResource<unknown[]>("/catalog/secrets", revision);
   // Login identities (#1685). While a login session runs the list is re-read
   // every few seconds, so a row's status follows the login as it ends.
   const [tick, setTick] = useState(0);
-  const logins = useResource<unknown[]>("/api/connectors/logins", revision + tick);
+  const logins = useResource<unknown[]>("/connectors/logins", revision + tick);
   const running = (logins.data ?? []).some(item => !!(item as { session?: unknown } | null)?.session);
   useEffect(() => {
     if (!running) return undefined;

@@ -9,7 +9,7 @@ import { scheduleText, type Schedule, type ScheduleStatus } from "./schedule-for
 import { when } from "./schedule";
 import { TerminalWorkspace, cellId, useTerminalSessions, type TerminalManager } from "./terminal";
 import { CellSidebar } from "./cell-sidebar";
-import { Login, useSession } from "./auth";
+import { auth, configureAuth, useSession, type AuthAdapter } from "./auth";
 import { useSettings, type Theme } from "./settings";
 import { UserMenu } from "./user-menu";
 import { gridGroupingKey, sidebarGroupingKey, useCellFilter } from "./cell-filter";
@@ -19,7 +19,7 @@ import { activeCells, configDisplayName, instanceLabels, matchesState, ownDispla
 import { useTabVisible, useUnread } from "./use-unread";
 import { RenameControl, renameCell, renameConfig } from "./display-name";
 import { useInventory, type Inventory, type InventoryResource, type Doc, type RuntimeStatus } from "./inventory";
-import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, overviewLink, titles, readRoute, resourceLink, listLink, newAgentLink, newCellLink, settingsLink, workspaceLink, type Route } from "./routes";
+import { apiPath, catalogTitles, daemonLink, healthLink, homeLink, imagesLink, kinds, listLink, newAgentLink, newCellLink, newTeamLink, overviewLink, readRoute, resourceLink, settingsLink, sourcesLink, teamsLink, titles, workspaceLink, type Route } from "./routes";
 import type { CreatedAgent } from "./new-agent";
 import { manageAttention, viewOf } from "./views.mjs";
 import { ManageNav } from "./manage-nav";
@@ -44,9 +44,10 @@ import { ParentRowActions, type ParentAction } from "./scope-actions";
 import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, mobileMaxWidth, useMajordomo, useMajordomoDock, useViewportWidth } from "./majordomo";
 import { HealthPage, storedHealthSeen, type Summary } from "./health";
 import { connectorsLink } from "./connector-ui";
-import { newTeamLink, sourcesLink, teamsLink } from "./teams.mjs";
 import { NewSecretPage } from "./secret-form";
 import { DriftDiff } from "./drift-diff";
+import { configureRouter, navigate, onRouteChange, routeHref, type Router } from "./router";
+import { apiFetch, configureTransport, type Transport } from "./transport";
 
 const failureStates = ["Failed", "Error", "Degraded"];
 
@@ -255,7 +256,7 @@ type ParentActionResponse = {
 
 async function readCellPresence(scope: string[]): Promise<boolean | null> {
   try {
-    const response = await fetch(apiPath(scope), { headers: { Accept: "application/json" } });
+    const response = await apiFetch(apiPath(scope), { headers: { Accept: "application/json" } });
     if (response.status === 404) return false;
     return response.ok ? true : null;
   } catch {
@@ -428,9 +429,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   // main is no longer inert; choosing a link closes it and leaves focus to the new page.
   const closeMenu = () => { restoreMenuFocus.current = true; setMenuOpen(false); };
   useEffect(() => {
-    const changed = () => { setRoute(readRoute()); setMenuOpen(false); };
-    window.addEventListener("hashchange", changed);
-    return () => window.removeEventListener("hashchange", changed);
+    return onRouteChange(() => { setRoute(readRoute()); setMenuOpen(false); });
   }, []);
   useEffect(() => {
     if (!menuOpen) {
@@ -443,11 +442,11 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   }, [menuOpen]);
-  const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/api/connection", revision);
+  const connection = useResource<{ endpoint: string; version: string; daemonVersion?: string }>("/connection", revision);
   const inventory = useInventory(revision, settings.refreshSeconds * 1000);
   // The newest health report feeds the Overview's Health card and the Manage dot (#1635).
   const [reportReads, setReportReads] = useState(0);
-  const reports = useResource<Summary[]>("/api/health/reports", revision + reportReads);
+  const reports = useResource<Summary[]>("/health/reports", revision + reportReads);
   const [seenId, setSeenId] = useState(storedHealthSeen);
   const latestReport = useRef<string | undefined>(undefined);
   latestReport.current = reports.data?.[0]?.id;
@@ -480,7 +479,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   // a removal started from the Cells table keeps the table, where the row drops on the next inventory read.
   function leaveRemovedCell(scope: string[]) {
     terminals.removeCell(scope);
-    if (screenCell.current === JSON.stringify(scope)) window.location.hash = homeLink;
+    if (screenCell.current === JSON.stringify(scope)) navigate(homeLink());
   }
   // Resolves to the action's final feedback, undefined when another action on the cell is still running.
   async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions, quiet = false): Promise<LifecycleFeedback | undefined> {
@@ -498,7 +497,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             : `${action === "start" ? "Starting" : "Stopping"} cell…`;
     record({ action, phase: "pending", message: pendingMessage });
     try {
-      const response = await fetch(`${apiPath(scope)}/${action}`, {
+      const response = await apiFetch(`${apiPath(scope)}/${action}`, {
         method: "POST",
         headers: action === "purge" ? { Accept: "application/json", "Content-Type": "application/json" } : { Accept: "application/json" },
         ...(action === "purge" ? { body: JSON.stringify(requestedPurgeOptions(options?.force, options?.cascade)) } : {}),
@@ -655,7 +654,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       if (presence === false) {
         for (const cell of cells) terminals.removeCell(cell);
         const current = readRoute();
-        if (current.scope.length >= scope.length && scope.every((part, index) => current.scope[index] === part)) window.location.hash = homeLink;
+        if (current.scope.length >= scope.length && scope.every((part, index) => current.scope[index] === part)) navigate(homeLink());
       }
       const text = presence === false ? ` A fresh daemon read confirms the ${kind} is gone.`
         : presence === true ? ` A fresh daemon read confirms the ${kind} still exists.`
@@ -663,7 +662,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       return { removed: presence === false, text };
     };
     try {
-      const response = await fetch(`${apiPath(scope)}/${action}`, {
+      const response = await apiFetch(`${apiPath(scope)}/${action}`, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify(requestedPurgeOptions(options.force, options.cascade)),
@@ -723,13 +722,13 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     inventory.upsertCell(cell);
     setRevision(value => value + 1);
     const openTerminal = options.start && options.attach && typeof selected?.id === "string";
-    window.location.hash = openTerminal ? workspaceLink(scope) : resourceLink(scope);
+    navigate(openTerminal ? workspaceLink(scope) : resourceLink(scope));
     const key = `create:${JSON.stringify(scope)}`;
     const link = { href: resourceLink(scope), label: "View cell details" };
     notify({ key, tone: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.`, link });
     if (!start) return;
     try {
-      const response = await fetch(`${apiPath(scope)}/start`, { method: "POST", headers: { Accept: "application/json" } });
+      const response = await apiFetch(`${apiPath(scope)}/start`, { method: "POST", headers: { Accept: "application/json" } });
       let body: { error?: { message?: string } } = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
@@ -748,7 +747,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     setRevision(value => value + 1);
     const named = config.annotations?.["kukeon.io/display-name"];
     notify({ key: `agent:${JSON.stringify(scope)}`, tone: "success", message: `Agent ${named ? `${named} ` : ""}created: cell ${scope.join(" / ")} started.`, link: { href: resourceLink(scope), label: "View cell details" } });
-    window.location.hash = workspaceLink(scope);
+    navigate(workspaceLink(scope));
   }
   // Workbench (terminals) or Manage (resources), derived from the route and never stored (#1635).
   const view = viewOf(route);
@@ -795,7 +794,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   // Why the Manage side of the switch shows a dot; empty means no dot.
   const attention = manageAttention({ daemonError: inventory.daemon.error, versionMismatch: versions.mismatch, reports: reports.data, seenId });
   // The breadcrumb root names the view: Workbench pages start at the grid, Manage pages at the Overview.
-  const crumbRoot = view === "workbench" ? <a href={homeLink}>Workbench</a> : <a href={overviewLink}>Overview</a>;
+  const crumbRoot = view === "workbench" ? <a href={homeLink()}>Workbench</a> : <a href={overviewLink()}>Overview</a>;
   const shellStyle = { "--sidebar-width": `${sidebar.width}px` } as CSSProperties;
   const pageTitle = heading ? `${heading} · kukeon` : "kukeon";
   useEffect(() => { document.title = pageTitle; }, [pageTitle]);
@@ -816,7 +815,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       <button ref={sidebarClose} className="sidebar-close" aria-label="Close sidebar" onClick={closeMenu}>×</button>
       <div className="sidebar-panel">
         <div className="sidebar-header">
-          <a className="brand" href={homeLink}><BrandMark /><span className="brand-title">kukeon</span></a>
+          <a className="brand" href={homeLink()}><BrandMark /><span className="brand-title">kukeon</span></a>
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
         <MajordomoSidebarEntry major={major} dock={dock} onChanged={refresh} />
@@ -842,10 +841,10 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
         <nav className="view-switch" aria-label="View">
-          <a href={homeLink} aria-current={view === "workbench" ? "true" : undefined}><Icon name="terminal" /><span className="view-switch-label">Workbench</span></a>
-          <a href={overviewLink} aria-current={view === "manage" ? "true" : undefined} aria-label={attention.length ? `Manage: ${attention.join("; ")}` : undefined} title={attention.length ? attention.join("; ") : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span>{attention.length > 0 && <span className="view-switch-dot" aria-hidden="true" />}</a>
+          <a href={homeLink()} aria-current={view === "workbench" ? "true" : undefined}><Icon name="terminal" /><span className="view-switch-label">Workbench</span></a>
+          <a href={overviewLink()} aria-current={view === "manage" ? "true" : undefined} aria-label={attention.length ? `Manage: ${attention.join("; ")}` : undefined} title={attention.length ? attention.join("; ") : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span>{attention.length > 0 && <span className="view-switch-dot" aria-hidden="true" />}</a>
         </nav>
-        <nav className="breadcrumbs" aria-label="Resource scope">{route.view === "settings" ? <><a href={settingsLink()}>Settings</a><span>Profile</span></> : isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a>{teamAction ? <><a href={teamsLink(route.scope[0])}>{route.scope[0]}</a><span>{teamAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Teams</span> : route.view === "new-team" ? <><a href={teamsLink()}>Teams</a><span>New team</span></> : sourcesView ? route.scope[0] ? <><a href={sourcesLink()}>Sources</a><span>{route.scope[0]}</span></> : <span>Sources</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={`#/${route.view}`}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
+        <nav className="breadcrumbs" aria-label="Resource scope">{route.view === "settings" ? <><a href={settingsLink()}>Settings</a><span>Profile</span></> : isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a>{teamAction ? <><a href={teamsLink(route.scope[0])}>{route.scope[0]}</a><span>{teamAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Teams</span> : route.view === "new-team" ? <><a href={teamsLink()}>Teams</a><span>New team</span></> : sourcesView ? route.scope[0] ? <><a href={sourcesLink()}>Sources</a><span>{route.scope[0]}</span></> : <span>Sources</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={routeHref(`/${route.view}`)}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <MajordomoToolbarButton dock={dock} />
@@ -858,7 +857,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{route.view === "workbench" && <a className="header-action page-heading-action" href={newAgentLink()}>New agent</a>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} autoAttach={settings.autoAttach} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} onChanged={() => setRevision(value => value + 1)} />
-        {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
+        {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink()} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refreshes every {settings.refreshSeconds} s.</footer>
       </div>
     </main>
@@ -866,19 +865,34 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   </div></AskProvider>;
 }
 
-const root = document.getElementById("root");
-if (!root) throw new Error("Missing application root");
-// Root shows the login screen until the session is known and valid (#1652), so no inventory,
+// Root shows the sign-in screen until the session is known and valid (#1652), so no inventory,
 // screenshot or terminal request runs before sign-in; signing out unmounts the app and with it
-// every terminal connection. The theme applies to the login screen too.
+// every terminal connection. The theme applies to the sign-in screen too.
 function Root() {
   const [settings] = useSettings();
   const { session, retry, signedIn, signOut } = useSession();
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
   if (session.phase !== "signed-in") {
-    return <Login checking={session.phase === "checking"} notice={session.phase === "unavailable" ? session.error : undefined} onRetry={() => void retry()} onSignedIn={signedIn} />;
+    const { SignIn } = auth();
+    return <SignIn checking={session.phase === "checking"} notice={session.phase === "unavailable" ? session.error : undefined} onRetry={() => void retry()} onSignedIn={signedIn} />;
   }
   return <NotificationProvider><App user={session.user} onSignOut={() => void signOut()} /></NotificationProvider>;
 }
 
-createRoot(root).render(<StrictMode><Root /></StrictMode>);
+// ConsoleOptions are the seams a host injects (#1752); each defaults to what kuke serve uses: the
+// same-origin /api transport, hash routing and the local root sign-in.
+export type ConsoleOptions = {
+  transport?: Partial<Transport>;
+  router?: Router;
+  auth?: AuthAdapter;
+};
+
+// mountConsole configures the seams and renders the console into element.
+export function mountConsole(element: Element, options: ConsoleOptions = {}) {
+  configureTransport(options.transport);
+  configureRouter(options.router);
+  configureAuth(options.auth);
+  const root = createRoot(element);
+  root.render(<StrictMode><Root /></StrictMode>);
+  return root;
+}

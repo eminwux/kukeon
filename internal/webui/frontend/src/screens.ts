@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiPath } from "./routes";
+import { apiFetch } from "./transport";
 
 // One tile's terminal screen (#1635): the last text read, whether the cell has no screen to read, and
 // whether the last refresh failed so the text shown is old.
@@ -28,7 +29,7 @@ export function useCellScreens(scopes: string[][], enabled: boolean): Record<str
     const read = async (scope: string[]) => {
       let next: Screen | null = null;
       try {
-        const response = await fetch(`${apiPath(scope)}/screenshot`, { headers: { Accept: "application/json" }, signal: controller.signal });
+        const response = await apiFetch(`${apiPath(scope)}/screenshot`, { headers: { Accept: "application/json" }, signal: controller.signal });
         let body: { text?: unknown; error?: { code?: string } } = {};
         try { body = await response.json(); } catch { /* Treated as a failed read below. */ }
         if (response.ok && typeof body.text === "string") next = { text: body.text };

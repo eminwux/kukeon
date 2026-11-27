@@ -1,9 +1,8 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { teamsLink } from "./teams.mjs";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
-import { workspaceLink } from "./routes";
+import { teamsLink, workspaceLink } from "./routes";
 import {
   allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, defaultTargets, emptyGitForm, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
   formatSecretReference, harnessEphemeral, identitiesFor, identityDefaultOn, identityErrors, identityFields, identityPayload, keepsLogin, linkedGitIdentity, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeAtLevel, scopeChoices, scopeLevel, scopeLevels, scopeParts, scopeQuery,
@@ -11,6 +10,8 @@ import {
   joinPerson, splitPerson,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
+import { apiFetch } from "./transport";
+import { navigate, routeHref } from "./router";
 
 // Shared pieces of the connectors UI (#1548, §7). Nothing here names a
 // connector: every label, field and choice comes from GET /api/connectors, the
@@ -23,28 +24,28 @@ export function toFailure(caught: unknown): Failure {
 // sendJSON posts a JSON body and returns the decoded result, or throws the
 // server's { code, message }. Secret material only ever travels in this body.
 export async function sendJSON<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
+  const response = await apiFetch(path, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw result.error ?? { code: "http_error", message: `HTTP ${response.status}` };
   return result as T;
 }
 export function connectorAPI(connector: string, action: "defaults" | "identities" | "import" | "logins" | "login"): string {
-  return `/api/connectors/${encodeURIComponent(connector)}/${action}`;
+  return `/connectors/${encodeURIComponent(connector)}/${action}`;
 }
 export function connectorsLink(connector?: string, scope?: Partial<Scope>): string {
   const parts = scopeParts(scope);
-  return "#/connectors" + (connector ? `/${encodeURIComponent(connector)}` : "") + (connector && parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
+  return routeHref("/connectors" + (connector ? `/${encodeURIComponent(connector)}` : "") + (connector && parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
 // newIdentityLink opens a connector's New identity page, storing on the given scope.
 export function newIdentityLink(connector: string, scope?: Partial<Scope>): string {
   const parts = scopeParts(scope);
-  return `#/connectors/${encodeURIComponent(connector)}/new-identity` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
+  return routeHref(`/connectors/${encodeURIComponent(connector)}/new-identity` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
 // rotateIdentityLink opens the Rotate page of one stored identity; scope is the connector page's to return to.
 export function rotateIdentityLink(connector: string, identity: Partial<SecretRef>, scope?: Partial<Scope>): string {
   const ref = secretRef(identity);
   const parts = scopeParts(scope);
-  return `#/connectors/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : "");
+  return routeHref(`/connectors/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
 function levelTitle(level: string): string { return `${level[0].toUpperCase()}${level.slice(1)}`; }
 export function levelLabel(level: string, scope: Partial<Scope>): string { return `${levelTitle(level)} — ${scopeParts(scopeAt(scope, level)).join(" / ")}`; }
@@ -55,7 +56,7 @@ export function ConnectorStateBadge({ status }: { status: ConnectorStatus }) {
   return <span className={`state-badge tone-${tone}`}><span className="state-dot" aria-hidden="true" />{status.state === stateResolved ? "Resolved" : blocksCells(status) ? "Unresolved" : "Not set"}</span>;
 }
 
-export function volumeLink(ref: VolumeRef): string { return "#/volumes/" + [ref.realm, ref.space, ref.stack, ref.name].filter(Boolean).map(value => encodeURIComponent(value as string)).join("/"); }
+export function volumeLink(ref: VolumeRef): string { return routeHref("/volumes/" + [ref.realm, ref.space, ref.stack, ref.name].filter(Boolean).map(value => encodeURIComponent(value as string)).join("/")); }
 // StateVolume names a state volume: a link to the Volume when the Config names
 // its scope, the bare name otherwise.
 function StateVolume({ status }: { status: ConnectorStatus }) {
@@ -90,7 +91,7 @@ export function StatusIdentity({ status, team = "" }: { status: ConnectorStatus;
 export async function startLogin(connector: string, volume: Partial<SecretRef>, method?: string): Promise<LoginIdentity | undefined> {
   const result = await sendJSON<LoginResult>(connectorAPI(connector, "login"), loginBody(volume.name ?? "", volume, method));
   const [identity] = loginIdentitiesFor([result.identity], connector);
-  if (identity?.session) window.location.hash = workspaceLink(sessionScope(identity.session));
+  if (identity?.session) navigate(workspaceLink(sessionScope(identity.session)));
   return identity;
 }
 
@@ -348,7 +349,7 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
   const targets = offerDefault ? defaultTargets(connector) : [];
   const [method, setMethod] = useState(() => (targets.find(item => connector.methods.find(m => m.name === item.method)?.default) ?? targets[0])?.method ?? "");
   const target = targets.find(item => item.method === method) ?? targets[0];
-  const defaults = useResource<unknown[]>(target && scope.realm ? `/api/connectors/defaults?${scopeQuery(scope)}` : null, 0);
+  const defaults = useResource<unknown[]>(target && scope.realm ? `/connectors/defaults?${scopeQuery(scope)}` : null, 0);
   // "Make this the default" follows the scope — on where no default resolves
   // yet, and for a new token with git — until the user sets it.
   const [makeDefault, setMakeDefault] = useState<boolean>();
@@ -483,7 +484,7 @@ function PickForConfig({ status, config, identities, logins = [], onChanged, onC
     if (pending) return;
     setPending(true); setError(undefined);
     try {
-      await sendJSON("/api/configs/connector", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, connector: status.connector, identity });
+      await sendJSON("/configs/connector", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, connector: status.connector, identity });
       notify({ key: `connector-pick:${status.connector}:${config.name}`, tone: "success", message: identity ? `Config ${config.name} now uses ${identity.name} for ${title}.` : `Config ${config.name} uses the ${title} default again.` });
       onChanged(); onClose();
     } catch (caught) { setError(toFailure(caught)); }
@@ -572,9 +573,9 @@ export function ConnectorIdentities({ statuses, team = "" }: { statuses: Connect
 export function ConfigConnectors({ doc, revision, onChanged }: { doc: ConfigDoc; scope?: string[]; revision: number; onChanged: () => void }) {
   const statuses = connectorStatuses(doc);
   // Nothing is fetched for a Config that requires no connector.
-  const catalog = useResource<Connector[]>(statuses.length ? "/api/connectors" : null, revision);
-  const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/api/catalog/secrets" : null, revision);
-  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/api/connectors/logins" : null, revision);
+  const catalog = useResource<Connector[]>(statuses.length ? "/connectors" : null, revision);
+  const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/catalog/secrets" : null, revision);
+  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/connectors/logins" : null, revision);
   if (!statuses.length) return null;
   const team = teamOf(doc);
   const blocking = statuses.filter(blocksCells);

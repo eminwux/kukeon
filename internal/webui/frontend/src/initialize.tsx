@@ -17,7 +17,7 @@ export type InitResult = { teams: InitTeam[]; notes: string[] };
 // Error codes of POST /api/teams/init the prompt branches on.
 export const codeInitialized = "already_initialized";
 export const codeGitMissing = "git_missing";
-export const initAPI = "/api/teams/init";
+export const initAPI = "/teams/init";
 
 type Phase = "idle" | "pending" | "conflict" | "reapplying" | "done";
 type InitState = { phase: Phase; error?: Failure; result?: InitResult; completed: number };

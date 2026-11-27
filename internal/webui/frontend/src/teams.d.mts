@@ -4,7 +4,7 @@ export const codeExists: string;
 export const codeReserved: string;
 export const codeInUse: string;
 export const defaultsAPI: string;
-export const newTeamLink: string;
+export const newTeamRoute: string;
 export const inspectAPI: string;
 
 export type TeamSummary = {
@@ -81,8 +81,8 @@ export type Draft = { origin: { kind: string; detail?: string }; name: string; f
 export type DeleteResult = { deleted: boolean; removed: { kind: string; name: string; action: string }[]; liveCells: string[]; keptVolumes: string[] };
 export type SourceForm = { name: string; url: string; refKind: string; ref: string; identity: string; force?: boolean };
 
-export function teamsLink(name?: string, section?: "edit" | "export"): string;
-export function sourcesLink(name?: string): string;
+export function teamsRoute(name?: string, section?: "edit" | "export"): string;
+export function sourcesRoute(name?: string): string;
 export function teamsAPI(name?: string, action?: string): string;
 export function exportAPI(name: string, options?: { hostFields?: boolean; explicit?: boolean }): string;
 export function sourcesAPI(name?: string, action?: string): string;
@@ -108,5 +108,5 @@ export function inheritingNote(change: DefaultsChange | undefined): string;
 export function deleteSummary(result: DeleteResult | undefined): { removed: string[]; liveCells: string[]; keptVolumes: string[] };
 export function teamConfigs(configs: unknown, team: string): { name: string; scope: string[] }[];
 export function listOrigin(list: { inherited?: boolean } | undefined): string;
-export function configLink(scope: string[], name: string): string;
+export function configRoute(scope: string[], name: string): string;
 export function repositoryFromSource(source: unknown): { name: string; url: string; branch: string; ref: string };

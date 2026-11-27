@@ -46,8 +46,8 @@ export function RefFields({ kind, value, disabled, label = "Ref", allowNone = fa
 // route returns secret data), plus "Default", the account's or the realm's
 // git default for the host.
 export function GitIdentitySelect({ value, disabled, label = "Git identity", onChange }: { value: string; disabled: boolean; label?: string; onChange: (value: string) => void }) {
-  const secrets = useResource<unknown[]>("/api/catalog/secrets", 0);
-  const connectors = useResource<unknown[]>("/api/connectors", 0);
+  const secrets = useResource<unknown[]>("/catalog/secrets", 0);
+  const connectors = useResource<unknown[]>("/connectors", 0);
   const names = gitIdentities(secrets.data, connectors.data);
   const choices = value && !names.includes(value) ? [value, ...names] : names;
   return <label className="schema-field"><span>{label}</span>

@@ -15,9 +15,9 @@ const refs = {
 
 for (const kind of ["blueprints", "configs"]) {
   test(`${kind} URLs keep the name out of every scope slot`, () => {
-    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.realm))), { path: `/api/catalog/${kind}/claude`, params: { realm: "default" } });
-    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.space))), { path: `/api/catalog/${kind}/claude`, params: { realm: "default", space: "team" } });
-    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.stack))), { path: `/api/catalog/${kind}/claude`, params: { realm: "default", space: "team", stack: "agents" } });
+    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.realm))), { path: `/catalog/${kind}/claude`, params: { realm: "default" } });
+    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.space))), { path: `/catalog/${kind}/claude`, params: { realm: "default", space: "team" } });
+    assert.deepEqual(parse(catalogAPI(kind, referenceScope(refs.stack))), { path: `/catalog/${kind}/claude`, params: { realm: "default", space: "team", stack: "agents" } });
     for (const ref of Object.values(refs)) {
       assert.ok(!Object.values(parse(catalogAPI(kind, referenceScope(ref))).params).includes(ref.name));
     }
@@ -30,10 +30,10 @@ test("reference scope ignores non-string and empty coordinates", () => {
 });
 
 test("names are path-encoded", () => {
-  assert.equal(catalogAPI("configs", ["default", "a b"]), "/api/catalog/configs/a%20b?realm=default");
+  assert.equal(catalogAPI("configs", ["default", "a b"]), "/catalog/configs/a%20b?realm=default");
 });
 
 test("delete URLs append /delete to the path and keep the scope query", () => {
-  assert.deepEqual(parse(catalogDeleteAPI("secrets", ["default", "team", "agents", "cell", "token"])), { path: "/api/catalog/secrets/token/delete", params: { realm: "default", space: "team", stack: "agents", cell: "cell" } });
-  assert.equal(catalogDeleteAPI("configs", ["default", "a b"]), "/api/catalog/configs/a%20b/delete?realm=default");
+  assert.deepEqual(parse(catalogDeleteAPI("secrets", ["default", "team", "agents", "cell", "token"])), { path: "/catalog/secrets/token/delete", params: { realm: "default", space: "team", stack: "agents", cell: "cell" } });
+  assert.equal(catalogDeleteAPI("configs", ["default", "a b"]), "/catalog/configs/a%20b/delete?realm=default");
 });

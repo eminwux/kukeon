@@ -2,6 +2,8 @@ import { useRef, useState, type FormEvent } from "react";
 import { ErrorNotice, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { RowAction, RowActions } from "./icons";
+import { apiFetch } from "./transport";
+import { routeHref } from "./router";
 
 // RegistryCredential is the redacted realm entry kuke serve returns (#1407,
 // #1548). A Secret-backed entry names the realm Secret holding the credential;
@@ -50,7 +52,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
     const body = JSON.stringify({ server: target, username: username.trim(), password: token });
     setToken("");
     try {
-      const response = await fetch(`/api/realms/${encodeURIComponent(realm)}/registry-credentials`, {
+      const response = await apiFetch(`/realms/${encodeURIComponent(realm)}/registry-credentials`, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body,
@@ -74,7 +76,7 @@ export function RegistryCredentialsPanel({ realm, credentials, onSaved }: { real
     <div className="panel-body">
       <p className="description">Pull credentials for private registries. Each is stored as a Secret of the realm; tokens are write-only and never shown. Saving an entry for an existing server replaces it, and moves a legacy inline entry into a Secret.</p>
       {credentials.length ? <table className="data-table"><thead><tr><th scope="col">Server</th><th scope="col">Username</th><th scope="col">Stored in</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-        {credentials.map(cred => <tr key={cred.serverAddress ?? ""}><td>{cred.serverAddress ? <code>{cred.serverAddress}</code> : serverLabel()}</td><td>{cred.username || <span className="description">In the Secret</span>}</td><td>{cred.secretRef ? <>Secret <a className="resource-name" href={`#/secrets/${encodeURIComponent(cred.secretRef.realm || realm)}/${encodeURIComponent(cred.secretRef.name)}`}>{cred.secretRef.name}</a></> : <span className="badge" title="Save this entry again to move its password into a Secret.">Inline (legacy)</span>}</td><td className="row-actions"><RowActions><RowAction icon="edit" label={`Replace credential for ${serverLabel(cred.serverAddress)}`} title="Replace credential" onClick={() => edit(cred)} /></RowActions></td></tr>)}
+        {credentials.map(cred => <tr key={cred.serverAddress ?? ""}><td>{cred.serverAddress ? <code>{cred.serverAddress}</code> : serverLabel()}</td><td>{cred.username || <span className="description">In the Secret</span>}</td><td>{cred.secretRef ? <>Secret <a className="resource-name" href={routeHref(`/secrets/${encodeURIComponent(cred.secretRef.realm || realm)}/${encodeURIComponent(cred.secretRef.name)}`)}>{cred.secretRef.name}</a></> : <span className="badge" title="Save this entry again to move its password into a Secret.">Inline (legacy)</span>}</td><td className="row-actions"><RowActions><RowAction icon="edit" label={`Replace credential for ${serverLabel(cred.serverAddress)}`} title="Replace credential" onClick={() => edit(cred)} /></RowActions></td></tr>)}
       </tbody></table> : <p>No registry credentials are configured for this realm.</p>}
       <form className="registry-credential-form" aria-label="Add or replace registry credential" method="post" autoComplete="off" onSubmit={submit}>
         <label>Server (empty: from image reference)<input name="server" value={server} placeholder="ghcr.io" autoComplete="off" spellCheck={false} onChange={e => setServer(e.target.value)} /></label>

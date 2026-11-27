@@ -19,23 +19,23 @@ const list = value => Array.isArray(value) ? value : [];
 const text = value => typeof value === "string" ? value : "";
 const trimmed = value => text(value).trim();
 
-// teamsLink opens the Teams list, one team's page, or its edit or export
-// screen.
-export function teamsLink(name, section) {
-  if (!name) return "#/teams";
-  return "#/teams/" + encodeURIComponent(name) + (section === "edit" || section === "export" ? "/" + section : "");
+// teamsRoute is the route path of the Teams list, one team's page, or its
+// edit or export screen; routes.ts turns it into a link through the router.
+export function teamsRoute(name, section) {
+  if (!name) return "/teams";
+  return "/teams/" + encodeURIComponent(name) + (section === "edit" || section === "export" ? "/" + section : "");
 }
 
-export const newTeamLink = "#/new-team";
+export const newTeamRoute = "/new-team";
 
-export function sourcesLink(name) {
-  return "#/sources" + (name ? "/" + encodeURIComponent(name) : "");
+export function sourcesRoute(name) {
+  return "/sources" + (name ? "/" + encodeURIComponent(name) : "");
 }
 
-// teamsAPI is a teams route: the list, one team, or one team's action.
+// teamsAPI is a teams API path: the list, one team, or one team's action.
 export function teamsAPI(name, action) {
-  if (!name) return "/api/teams";
-  return "/api/teams/" + encodeURIComponent(name) + (action ? "/" + action : "");
+  if (!name) return "/teams";
+  return "/teams/" + encodeURIComponent(name) + (action ? "/" + action : "");
 }
 
 // exportAPI is kuke team export NAME with its --host-fields and
@@ -48,12 +48,12 @@ export function exportAPI(name, options = {}) {
 // sourcesAPI is a Sources route: the list (and create), the inspect of an
 // unstored Source, or one stored Source's action.
 export function sourcesAPI(name, action) {
-  if (!name) return "/api/sources";
-  return "/api/sources/" + encodeURIComponent(name) + (action ? "/" + action : "");
+  if (!name) return "/sources";
+  return "/sources/" + encodeURIComponent(name) + (action ? "/" + action : "");
 }
-export const inspectAPI = "/api/sources/inspect";
+export const inspectAPI = "/sources/inspect";
 
-export const defaultsAPI = "/api/team-defaults";
+export const defaultsAPI = "/team-defaults";
 
 // refOf names the ref a source is read at: its branch, tag or commit.
 export function refOf(source) {
@@ -235,9 +235,9 @@ export function listOrigin(list) {
   return list?.inherited ? "inherited" : "declared";
 }
 
-// configLink opens a Config's page.
-export function configLink(scope, name) {
-  return "#/configs/" + [...list(scope), name].map(encodeURIComponent).join("/");
+// configRoute is the route path of a Config's page.
+export function configRoute(scope, name) {
+  return "/configs/" + [...list(scope), name].map(encodeURIComponent).join("/");
 }
 
 // repositoryFromSource is the New Cell repository entry a stored Source

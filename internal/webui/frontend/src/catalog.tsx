@@ -1,8 +1,7 @@
 import { useRef, useState } from "react";
-import { teamsLink } from "./teams.mjs";
 import { secretTypeOf, teamOf } from "./connectors.mjs";
 import { ErrorNotice, useResource } from "./request";
-import { catalogPageLink, catalogTitles, newCellLink, newConfigLink, newSecretLink, resourceLink, workspaceLink } from "./routes";
+import { catalogPageLink, catalogTitles, newCellLink, newConfigLink, newSecretLink, resourceLink, teamsLink, workspaceLink } from "./routes";
 import { ScopePath, StateBadge } from "./status";
 import type { InventoryResource, Row } from "./inventory";
 import { cellsForBlueprint, cellsForConfig, configsForBlueprint, configsForStateVolume, volumeMounts, type ConfigDoc } from "./relationships.mjs";
@@ -18,13 +17,15 @@ import { nextColumn, scheduleColumn, validTime, type Schedule, type ScheduleStat
 import { configDisplayName, isTemplate, ownDisplayName } from "./cells.mjs";
 import { RenameControl, renameConfig } from "./display-name";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
+import { apiFetch } from "./transport";
+import { navigate, routeHref } from "./router";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
 type Reference = { kind: string; name: string; realm: string; space?: string; stack?: string; cell?: string };
 const coordinates = ["realm", "space", "stack", "cell"] as const;
 function scopeOf(metadata: Metadata): string[] { return coordinates.map(key => metadata[key]).filter((value): value is string => !!value); }
-export function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
+export function catalogLink(kind: string, scope: string[], document = false): string { return routeHref(`/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "")); }
 function referenceScope(ref: Reference): string[] { return [...scopeOf(ref), ref.name]; }
 function references(doc: { [key: string]: unknown }): Reference[] {
   const result: Reference[] = [];
@@ -106,8 +107,8 @@ function VolumeMountTable({ mounts, inventory }: { mounts: ReturnType<typeof vol
   </>;
 }
 function VolumeRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
-  const volumes = useResource<CatalogDoc[]>("/api/catalog/volumes", revision);
-  const configs = useResource<RelatedCatalogDoc[]>("/api/catalog/configs", revision);
+  const volumes = useResource<CatalogDoc[]>("/catalog/volumes", revision);
+  const configs = useResource<RelatedCatalogDoc[]>("/catalog/configs", revision);
   const mounts = inventory.data && volumes.data ? volumeMounts(inventory.data.rows[3], volumes.data, doc) : [];
   const logins = configsForStateVolume(configs.data, doc);
   // A Volume tagged with a connector is a login identity (#1685).
@@ -147,7 +148,7 @@ function ConfigRelationships({ doc, revision, inventory }: { doc: CatalogDoc; re
   </div>;
 }
 function BlueprintRelationships({ doc, revision, inventory }: { doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
-  const configs = useResource<RelatedCatalogDoc[]>("/api/catalog/configs", revision);
+  const configs = useResource<RelatedCatalogDoc[]>("/catalog/configs", revision);
   const blueprint: Reference = { kind: "blueprints", name: doc.metadata.name, realm: doc.metadata.realm ?? "", space: doc.metadata.space, stack: doc.metadata.stack };
   const matches = configs.data ? configsForBlueprint(configs.data, blueprint) : [];
   const cellRows = inventory.data ? cellsForBlueprint(inventory.data.rows[3], matches) as Array<Row & { config: RelatedCatalogDoc }> : [];
@@ -176,8 +177,8 @@ const deleteConsequence: Record<string, string> = {
 // Dependents the catalog already loads elsewhere: Cells by Config lineage, and Configs (plus their Cells)
 // by Blueprint reference. Nothing else is inferred.
 function DeleteDependents({ kind, doc, revision, inventory }: { kind: string; doc: CatalogDoc; revision: number; inventory: InventoryResource }) {
-  const configs = useResource<RelatedCatalogDoc[]>(kind === "blueprints" ? "/api/catalog/configs" : null, revision);
-  const volumes = useResource<CatalogDoc[]>(kind === "volumes" ? "/api/catalog/volumes" : null, revision);
+  const configs = useResource<RelatedCatalogDoc[]>(kind === "blueprints" ? "/catalog/configs" : null, revision);
+  const volumes = useResource<CatalogDoc[]>(kind === "volumes" ? "/catalog/volumes" : null, revision);
   if (kind === "volumes") {
     const mounts = inventory.data && volumes.data ? volumeMounts(inventory.data.rows[3], volumes.data, doc) : [];
     return <section className="catalog-delete-dependents" aria-label="Known related resources"><h3>Cells mounting this Volume</h3>
@@ -228,14 +229,14 @@ export function CatalogDeleteConfirmation({ kind, doc, revision, inventory, onCa
 // Asks kukeond whether the document still exists: true, false, or null when the read itself failed.
 async function readCatalogPresence(kind: string, scope: string[]): Promise<boolean | null> {
   try {
-    const response = await fetch(catalogAPI(kind, scope), { headers: { Accept: "application/json" } });
+    const response = await apiFetch(catalogAPI(kind, scope), { headers: { Accept: "application/json" } });
     if (response.ok) return true;
     const body = await response.json().catch(() => ({}));
     return body.error?.code === "not_found" ? false : null;
   } catch { return null; }
 }
 function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; revision: number; inventory: InventoryResource; onChanged: () => void }) {
-  const list = useResource<CatalogDoc[]>(`/api/catalog/${kind}`, revision);
+  const list = useResource<CatalogDoc[]>(`/catalog/${kind}`, revision);
   // A mount count is shown only from a complete inventory: a partial one would undercount.
   const mountedBy = (doc: CatalogDoc) => kind !== "volumes" || !inventory.data || inventory.data.failures.length || !list.data ? "—" : String(volumeMounts(inventory.data.rows[3], list.data, doc).length);
   const { notify } = useNotify();
@@ -255,7 +256,7 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     if (!quiet) notify({ key: `catalog-delete:${kind}:${key}`, tone: "pending", title: target, message: `Deleting ${singular[kind].toLowerCase()}…` });
     let message: string | null = null;
     try {
-      const response = await fetch(catalogDeleteAPI(kind, scope), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: "{}" });
+      const response = await apiFetch(catalogDeleteAPI(kind, scope), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: "{}" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         message = body.error?.message ?? `HTTP ${response.status}`;
@@ -319,7 +320,7 @@ function SecretValue({ doc, scope, edit, onChanged }: { doc: CatalogDoc; scope: 
   const plain = catalogPageLink("secrets", scope);
   if (connector) return <section className="panel secret-value" aria-label="Secret value"><div className="panel-heading"><h2>Value</h2></div><div className="panel-body"><p className="description">This Secret is an identity of connector <a className="resource-name" href={connectorsLink(connector)}><code>{connector}</code></a>. Rotate it on the connector's page, which checks it against the connector; it is not replaced here.</p></div></section>;
   return <section className="panel secret-value" aria-label="Secret value"><div className="panel-heading"><h2>Value</h2>{!edit && <a className="document-action" href={catalogPageLink("secrets", scope, { edit: true })}>Replace value</a>}</div><div className="panel-body">
-    {edit ? <SecretForm scope={scope.slice(0, -1)} existing={doc as { metadata: Metadata; spec?: { type?: string } }} onSaved={() => { onChanged(); window.location.hash = plain; }} onCancel={() => { window.location.hash = plain; }} />
+    {edit ? <SecretForm scope={scope.slice(0, -1)} existing={doc as { metadata: Metadata; spec?: { type?: string } }} onSaved={() => { onChanged(); navigate(plain); }} onCancel={() => { navigate(plain); }} />
       : <p className="description">The value is write-only and never shown. Replace value stores new material under the same name, scope and type.</p>}
   </div></section>;
 }
@@ -362,7 +363,7 @@ function CatalogDetails({ kind, scope, document, edit = false, revision, invento
   const doc = detail.data;
   return <>
     {/* The page's actions share one header row; creating from this resource is its primary action, last on the right (#1603). */}
-    <div className="detail-actions"><a href={`#/${kind}`}>← Back to {kind}</a><div>{doc && askKinds[kind] && <AskMajordomo question={catalogQuestion(askKinds[kind], scope, catalogState(kind, doc))} subject={`${askKinds[kind]} ${scope.join(" / ")}`} />}<a className="document-action" href={catalogLink(kind, scope, !document)}>{document ? "Show overview" : "View document"}</a>
+    <div className="detail-actions"><a href={routeHref(`/${kind}`)}>← Back to {kind}</a><div>{doc && askKinds[kind] && <AskMajordomo question={catalogQuestion(askKinds[kind], scope, catalogState(kind, doc))} subject={`${askKinds[kind]} ${scope.join(" / ")}`} />}<a className="document-action" href={catalogLink(kind, scope, !document)}>{document ? "Show overview" : "View document"}</a>
       {doc && kind === "configs" && !document && <a className="new-cell-action" href={newCellLink(scope)}>Create Cell from this Config <span aria-hidden="true">→</span></a>}
       {doc && kind === "blueprints" && !document && <a className="new-cell-action" href={newConfigLink(scope)}>Create Config from this Blueprint <span aria-hidden="true">→</span></a>}</div></div>
     {detail.loading && <p role="status">Loading {kind} document…</p>}

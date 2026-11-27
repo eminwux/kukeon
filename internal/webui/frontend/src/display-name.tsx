@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { displayNameError } from "./cells.mjs";
 import { apiPath } from "./routes";
 import type { ConfigRef } from "./inventory";
+import { apiFetch } from "./transport";
 
 // The display names of #1692: the kukeon.io/display-name annotation on an agent's Config or on one of its
 // cells. Setting or clearing one never restarts, recreates or marks a cell OutOfSync; the daemon writes
@@ -10,7 +11,7 @@ import type { ConfigRef } from "./inventory";
 type Annotations = Record<string, string> | undefined;
 
 async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
+  const response = await apiFetch(path, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
   let result: { error?: { message?: string } } & Record<string, unknown> = {};
   try { result = await response.json(); } catch { /* Use the HTTP status below. */ }
   if (!response.ok) throw new Error(result.error?.message ?? `Request failed (HTTP ${response.status})`);
@@ -24,7 +25,7 @@ function annotationsOf(value: unknown): Annotations {
 
 // renameConfig sets (or, with "", clears) an agent's display name; it returns the Config's annotations.
 export async function renameConfig(config: ConfigRef, displayName: string): Promise<Annotations> {
-  const result = await post("/api/configs/display-name", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, displayName });
+  const result = await post("/configs/display-name", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, displayName });
   return annotationsOf(result.config);
 }
 

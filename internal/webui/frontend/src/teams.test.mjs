@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  configLink, deleteSummary, editPayload, exportAPI, inheritingNote, isDefault, listOrigin, needsForce, originLabel, pairRows, planSections, refErrors, refLabel, refOf,
-  repositoryFromSource, sourceErrors, sourceItems, sourcePayload, sourceTeams, sourcesAPI, sourcesLink, taskLabel, teamConfigs, teamsAPI, teamsLink, toggledDefaults, usesLabel, validName,
+  configRoute, deleteSummary, editPayload, exportAPI, inheritingNote, isDefault, listOrigin, needsForce, originLabel, pairRows, planSections, refErrors, refLabel, refOf,
+  repositoryFromSource, sourceErrors, sourceItems, sourcePayload, sourceTeams, sourcesAPI, sourcesRoute, taskLabel, teamConfigs, teamsAPI, teamsRoute, toggledDefaults, usesLabel, validName,
 } from "./teams.mjs";
 
 const defaults = {
@@ -11,21 +11,21 @@ const defaults = {
   defaultHarnesses: [{ name: "claude", source: "kukeon", path: "team/harnesses/claude" }, { name: "codex", source: "kukeon", path: "team/harnesses/codex" }],
 };
 
-test("links and API paths encode the team and source names", () => {
-  assert.equal(teamsLink(), "#/teams");
-  assert.equal(teamsLink("my team"), "#/teams/my%20team");
-  assert.equal(teamsLink("web", "edit"), "#/teams/web/edit");
-  assert.equal(teamsLink("web", "export"), "#/teams/web/export");
-  assert.equal(teamsLink("web", "bogus"), "#/teams/web");
-  assert.equal(sourcesLink(), "#/sources");
-  assert.equal(sourcesLink("a b"), "#/sources/a%20b");
-  assert.equal(teamsAPI(), "/api/teams");
-  assert.equal(teamsAPI("kuke", "reapply"), "/api/teams/kuke/reapply");
-  assert.equal(sourcesAPI(), "/api/sources");
-  assert.equal(sourcesAPI("a/b", "inspect"), "/api/sources/a%2Fb/inspect");
-  assert.equal(exportAPI("web"), "/api/teams/web/export");
-  assert.equal(exportAPI("web", { hostFields: true, explicit: true }), "/api/teams/web/export?hostFields=1&explicit=1");
-  assert.equal(configLink(["default", "web", "default"], "web-dev"), "#/configs/default/web/default/web-dev");
+test("route and API paths encode the team and source names", () => {
+  assert.equal(teamsRoute(), "/teams");
+  assert.equal(teamsRoute("my team"), "/teams/my%20team");
+  assert.equal(teamsRoute("web", "edit"), "/teams/web/edit");
+  assert.equal(teamsRoute("web", "export"), "/teams/web/export");
+  assert.equal(teamsRoute("web", "bogus"), "/teams/web");
+  assert.equal(sourcesRoute(), "/sources");
+  assert.equal(sourcesRoute("a b"), "/sources/a%20b");
+  assert.equal(teamsAPI(), "/teams");
+  assert.equal(teamsAPI("kuke", "reapply"), "/teams/kuke/reapply");
+  assert.equal(sourcesAPI(), "/sources");
+  assert.equal(sourcesAPI("a/b", "inspect"), "/sources/a%2Fb/inspect");
+  assert.equal(exportAPI("web"), "/teams/web/export");
+  assert.equal(exportAPI("web", { hostFields: true, explicit: true }), "/teams/web/export?hostFields=1&explicit=1");
+  assert.equal(configRoute(["default", "web", "default"], "web-dev"), "/configs/default/web/default/web-dev");
 });
 
 test("refs read branch, tag or commit, in that order, and are checked as the server does", () => {

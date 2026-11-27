@@ -4,8 +4,10 @@ import { useNotify } from "./notifications";
 import { sendJSON, toFailure } from "./connector-ui";
 import { GitIdentitySelect, RefFields } from "./team-plan";
 import { InitializePrompt } from "./initialize";
-import { defaultsAPI, inheritingNote, isDefault, refLabel, sourceErrors, sourceItems, sourcePayload, sourcesAPI, sourcesLink, sourceTeams, taskLabel, teamsLink, toggledDefaults, usesLabel } from "./teams.mjs";
+import { defaultsAPI, inheritingNote, isDefault, refLabel, sourceErrors, sourceItems, sourcePayload, sourcesAPI, sourceTeams, taskLabel, toggledDefaults, usesLabel } from "./teams.mjs";
 import type { DefaultsChange, SourceChange, SourceContents, SourceForm, Sources, StoredSource } from "./teams.mjs";
+import { navigate } from "./router";
+import { sourcesLink, teamsLink } from "./routes";
 
 // The Sources page (#1644, AC6), a Manage entry of its own: a stored Source
 // belongs to no team. It is kuke get sources with the teams that use each,
@@ -85,7 +87,7 @@ function SourceDetail({ name, sources, onChanged }: { name: string; sources: Sou
     <section className="panel" aria-label="Source overview">
       <div className="panel-heading"><h2>Overview</h2><div className="connector-actions">
         <button type="button" disabled={!!pending} onClick={() => void act<SourceContents>("inspect", sourcesAPI(name, "inspect"), {}, setContents)}>{pending === "inspect" ? "Fetching…" : contents ? "Refresh" : "Show contents"}</button>
-        <button type="button" className="danger-action" disabled={!!pending} onClick={() => void act<{ deleted: boolean }>("delete", sourcesAPI(name, "delete"), {}, () => { notify({ key: `source-delete:${name}`, tone: "success", message: `Source ${name} deleted.` }); onChanged(); window.location.hash = sourcesLink(); })}>{pending === "delete" ? "Deleting…" : "Delete"}</button>
+        <button type="button" className="danger-action" disabled={!!pending} onClick={() => void act<{ deleted: boolean }>("delete", sourcesAPI(name, "delete"), {}, () => { notify({ key: `source-delete:${name}`, tone: "success", message: `Source ${name} deleted.` }); onChanged(); navigate(sourcesLink()); })}>{pending === "delete" ? "Deleting…" : "Delete"}</button>
       </div></div>
       <div className="panel-body"><dl className="details-grid">
         <dt>Address</dt><dd className="mono-id">{source.url}</dd>
