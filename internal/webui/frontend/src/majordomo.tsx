@@ -5,7 +5,8 @@ import { apiPath } from "./routes";
 import { StateBadge } from "./status";
 import { Icon } from "./icons";
 import type { Schedule, ScheduleStatus } from "./schedule-format.mjs";
-import { TerminalSession, cellId, sessionId, unavailableStates, type TerminalManager, type Theme } from "./terminal";
+import { TerminalSession, cellId, sessionId, unavailableStates, useReattach, type TerminalManager, type Theme } from "./terminal";
+import { useSettings } from "./settings";
 import { configForCell, sameScopedReference } from "./relationships.mjs";
 import { configLabel } from "./cells.mjs";
 import { InitializePrompt } from "./initialize";
@@ -408,11 +409,16 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
   useEffect(() => { if (!notLoggedIn) setAskLogin(false); }, [notLoggedIn]);
   const containersReady = !containers.loading && !!containers.data;
 
-  // Attach when the panel shows a running cell — on the first activation of its tab — unless detached.
+  // With Auto-attach terminals on (#1745), attach when the panel shows a running cell — on the first
+  // activation of its tab — unless detached, and attach again when its connection drops, like the cell
+  // terminal does.
+  const [{ autoAttach }] = useSettings();
+  const canAutoAttach = autoAttach && dock.open && !!scope && running && !!selected && !detached[key] && containersReady;
   useEffect(() => {
-    if (!dock.open || !scope || !running || !selected || current || detached[key] || !containersReady) return;
-    manager.attach(scope, selected);
-  }, [dock.open, key, running, selected, current, detached[key], containersReady, manager.attach]);
+    if (!canAutoAttach || current) return;
+    manager.attach(scope!, selected);
+  }, [canAutoAttach, key, selected, current, manager.attach]);
+  const forgetReattach = useReattach(current, canAutoAttach, session => manager.attach(session.scope, session.container));
   // A waiting question goes to the active tab's terminal as soon as it has a session to take it.
   useEffect(() => {
     if (!dock.question || !current || current.state !== "attached") return;
@@ -463,9 +469,10 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
       : current ? { tone: current.state, label: current.state === "attached" ? "Attached" : current.state === "connecting" ? "Connecting…" : current.message || "Disconnected" }
         : detached[key] ? { tone: "disconnected", label: "Detached" }
           : !containers.loading && !eligible.length ? { tone: "disconnected", label: "No attachable container" }
-            : { tone: "connecting", label: "Connecting…" };
+            : !autoAttach ? { tone: "disconnected", label: "Detached" }
+              : { tone: "connecting", label: "Connecting…" };
   const canReconnect = !!scope && running && !!selected && !live;
-  const reconnect = () => { if (scope && selected) { setDetached(old => ({ ...old, [key]: false })); manager.attach(scope, selected); } };
+  const reconnect = () => { if (scope && selected) { setDetached(old => ({ ...old, [key]: false })); forgetReattach(currentId); manager.attach(scope, selected); } };
   const form = (title: string, note: string) => <>
     <p>{title}</p>
     <label>Harness<select value={config ? JSON.stringify([...configScope(config), config.metadata.name]) : ""} disabled={!!pending} onChange={event => setChosen(event.target.value)}>{offered.map(doc => { const id = JSON.stringify([...configScope(doc), doc.metadata.name]); return <option key={id} value={id}>{doc.metadata.name}</option>; })}</select></label>

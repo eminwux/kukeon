@@ -212,7 +212,7 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
 
 // cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
 // between them keeps the TerminalWorkspace, and therefore every attached session, alive.
-function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, operations, onLifecycleAction, dockedCells, onOpenDock, onChanged }: {
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, autoAttach, operations, onLifecycleAction, dockedCells, onOpenDock, onChanged }: {
   onChanged: () => void;
   dockedCells: string[];
   onOpenDock: () => void;
@@ -223,6 +223,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
   inventory: InventoryResource;
   manager: TerminalManager;
   theme: Theme;
+  autoAttach: boolean;
   operations: Record<string, LifecycleFeedback>;
   onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
 }) {
@@ -343,7 +344,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       </div>
     </div>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCells={dockedCells} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} autoAttach={autoAttach} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCells={dockedCells} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
     <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
@@ -491,10 +492,13 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         return;
       }
 
+      // With Auto-attach terminals on (#1745) a restarted cell's terminal attaches to the new process by
+      // itself, and a stopped one's when Start drops the interrupted session below.
       if (action === "stop" || action === "restart") {
         terminals.interruptCell(scope, action === "stop"
-          ? "Cell stopped. The previous terminal session ended. Reconnect after the cell starts."
-          : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.");
+          ? settings.autoAttach ? "Cell stopped. The previous terminal session ended. Start the cell here to attach again." : "Cell stopped. The previous terminal session ended. Reconnect after the cell starts."
+          : settings.autoAttach ? "Cell restarted. The previous terminal session ended; attaching to the new process…" : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.",
+        action === "restart" && settings.autoAttach);
       }
       if (action === "kill") {
         if (body.killed) {
@@ -544,7 +548,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       if (action === "start") terminals.dropInterrupted(scope);
       const message = action === "start" ? "Cell started."
         : action === "stop" ? "Cell stopped. The previous terminal session ended."
-        : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";
+        : settings.autoAttach ? "Cell restarted. The previous terminal session ended; the terminal attaches to the new process." : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";
       recordOperation(scope, { action, phase: "success", message });
     } catch (error) {
       if (action === "stop" || action === "restart") {
@@ -667,6 +671,9 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       let body: { error?: { message?: string } } = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`);
+      // The cell screen attaches by itself only with Auto-attach terminals on (#1745); Attach a terminal
+      // asked for one, so it attaches here otherwise.
+      if (openTerminal && !settings.autoAttach) terminals.attach(scope, selected.id as string);
       notify({ key, tone: "success", message: `Cell ${scope.join(" / ")} started.${!selected ? " No attachable workload was defined." : openTerminal ? " The terminal will attach to its selected workload when ready." : ""}`, link });
     } catch (error) {
       notify({ key, tone: "error", message: `Cell ${scope.join(" / ")} was created stopped, but start failed: ${error instanceof Error ? error.message : "The daemon request failed."}`, link });
@@ -788,7 +795,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{route.view === "workbench" && <a className="header-action page-heading-action" href={newAgentLink()}>New agent</a>}</div>}
-        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} onChanged={() => setRevision(value => value + 1)} />
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} autoAttach={settings.autoAttach} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} onChanged={() => setRevision(value => value + 1)} />
         {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refreshes every {settings.refreshSeconds} s.</footer>
       </div>
