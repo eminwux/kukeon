@@ -303,9 +303,9 @@ and an optional git identity, realm-scoped and owned by no team. The realm's
 `TeamDefaults` is what a team that omits `roles`, `harnesses` or `connectors`
 inherits; its default roles and harnesses name Sources, and it holds no
 sources itself. When the realm has none, `kuke team init` stores the Source
-`kukeon` and creates a `TeamDefaults` with that Source's `claude` and `codex`
-harnesses, so a project team needs only roles; an existing `TeamDefaults` is
-never changed by init, and
+`kukeon` and creates a `TeamDefaults` with that Source's `codex`, `claude` and
+`script` harnesses, so a project team needs only roles; an existing
+`TeamDefaults` is never changed by init, and
 [`kuke team init --upgrade`](../cli/kuke-team-init.md#upgrading-the-kuke-team)
 (which `kuke update` and the installer run) moves the `kukeon` Source to the
 revision of the running `kuke`. Store further Sources and pick the defaults

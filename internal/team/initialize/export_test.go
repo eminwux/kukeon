@@ -135,7 +135,7 @@ func TestExportExplicitDefaults(t *testing.T) {
 		t.Fatalf("export does not decode: %v\n%s", err, raw)
 	}
 	if len(exported.Spec.Roles) != 1 || exported.Spec.Roles[0].Name != "majordomo" ||
-		len(exported.Spec.Harnesses) != 2 {
+		len(exported.Spec.Harnesses) != len(config.InitialHarnesses()) {
 		t.Fatalf("inherited lists not written:\n%s", raw)
 	}
 	if len(exported.Spec.Sources) != 1 || exported.Spec.Sources[0].URL != "github.com/eminwux/kukeon" ||

@@ -52,13 +52,23 @@ func MajordomoSource() Source {
 	return KukeonSource()
 }
 
-// MajordomoHarnesses are the shipped harnesses of the kukeon source, the ones
-// the kuke team runs on and the defaults init registers.
+// MajordomoHarnesses are the shipped agent harnesses of the kukeon source, the
+// ones the kuke team and the default team run on.
 func MajordomoHarnesses() []Harness {
 	return []Harness{
 		{Name: "codex", Source: "kukeon", Path: "team/harnesses/codex"},
 		{Name: "claude", Source: "kukeon", Path: "team/harnesses/claude"},
 	}
+}
+
+// InitialHarnesses are the harnesses of the kukeon source kuke team init
+// registers in a realm's first TeamDefaults: the kuke team's agent harnesses
+// and the script harness, so a project team that inherits them can run a
+// program role. An unpinned agent role pairs only with the harnesses it
+// declares, so it skips script.
+func InitialHarnesses() []Harness {
+	return append(MajordomoHarnesses(),
+		Harness{Name: "script", Source: "kukeon", Path: "team/harnesses/script"})
 }
 
 // Majordomo returns the self-contained initial declaration of the kuke team:

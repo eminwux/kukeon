@@ -156,7 +156,7 @@ func TestTeamViewAndEdit(t *testing.T) {
 		v.Project.Ref != "branch main" || v.Project.ClonePath != "/home/user/proj" {
 		t.Fatalf("project = %+v", v.Project)
 	}
-	if v.Roles.Inherited || len(v.Roles.Items) != 1 || !v.Harnesses.Inherited || len(v.Harnesses.Items) != 2 ||
+	if v.Roles.Inherited || len(v.Roles.Items) != 1 || !v.Harnesses.Inherited || len(v.Harnesses.Items) != 3 ||
 		!v.Connectors.Inherited || !v.Sources.Inherited {
 		t.Fatalf("lists = %+v", v)
 	}

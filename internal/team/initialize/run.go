@@ -109,8 +109,8 @@ func Init(ctx context.Context, opts InitOptions) (Outcome, error) {
 
 // initKuke applies the kuke team (issue #1618, AC7). "Already initialized" is the
 // stored kuke Team. When the realm has no TeamDefaults, init creates one in
-// the same apply, with the kukeon source and its claude and codex harnesses,
-// so a project team needs only roles; an existing TeamDefaults is never
+// the same apply, with the kukeon source's claude, codex and script
+// harnesses, so a project team needs only roles; an existing TeamDefaults is never
 // changed. Partial daemon application is not rolled back; a forced rerun
 // converges the team.
 func initKuke(ctx context.Context, opts InitOptions) (Outcome, error) {
@@ -173,13 +173,13 @@ func initKuke(ctx context.Context, opts InitOptions) (Outcome, error) {
 }
 
 // InitialDefaults is the TeamDefaults init creates in a realm that has none:
-// the codex and claude harnesses of the kukeon source. It has no sources
-// (#1643: init stores the kukeon Source, at the ref the kuke team reads it
-// from, beside it) and no default roles: those come from the Sources the
-// operator stores.
+// the codex, claude and script harnesses of the kukeon source
+// (config.InitialHarnesses). It has no sources (#1643: init stores the kukeon
+// Source, at the ref the kuke team reads it from, beside it) and no default
+// roles: those come from the Sources the operator stores.
 func InitialDefaults(realm string) *config.TeamDefaults {
 	defaults := config.EmptyDefaults(realm)
-	defaults.Spec.Defaults = config.Defaults{Harnesses: config.MajordomoHarnesses()}
+	defaults.Spec.Defaults = config.Defaults{Harnesses: config.InitialHarnesses()}
 	return defaults
 }
 
