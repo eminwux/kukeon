@@ -176,19 +176,11 @@ Harness images (the `kuke` team's claude, codex and opencode images) are not bui
 
 ## Uninstall
 
-`kuke uninstall` removes all kukeon runtime state from the host — stops, disables, and removes the `kukeond` systemd unit (if installed), then stops and deletes the `kukeond` cell, clears `/run/kukeon`, and wipes `/opt/kukeon` and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass `-y` to skip the prompt in scripts:
+`kuke uninstall` removes all kukeon runtime state from the host — stops, disables, and removes the web UI's `kuke-serve.service` and the `kukeond.service` systemd units (each one if installed), then stops and deletes the `kukeond` cell, clears `/run/kukeon`, and wipes `/opt/kukeon` and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass `-y` to skip the prompt in scripts:
 
 ```bash
 sudo kuke uninstall -y
 sudo rm -f /usr/local/bin/kuke /usr/local/bin/kukeond /usr/local/bin/kukebuild /usr/local/bin/kukepause
-```
-
-`kuke uninstall` removes `kukeond.service` but not the web UI's unit. Remove `kuke-serve.service` yourself, before the binaries, so it does not restart a `kuke serve` that has no daemon to talk to:
-
-```bash
-sudo systemctl disable --now kuke-serve.service
-sudo rm -f /etc/systemd/system/kuke-serve.service
-sudo systemctl daemon-reload
 ```
 
 `uninstall` only touches CNI conflists Kukeon itself generated; other files under `/etc/cni/net.d` are left alone. If you want to remove the `kukeon` system group too, finish with `sudo groupdel kukeon`.

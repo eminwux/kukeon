@@ -98,7 +98,7 @@ sudo kuke uninstall          # interactive: prompts for "yes"
 sudo kuke uninstall -y       # non-interactive (scripts)
 ```
 
-What it does, in order: stop the daemon, purge every realm with `--cascade` (including `kuke-system`), release kukeon-owned bind mounts under `/run/kukeon`, remove `/run/kukeon` and the configured run path (default `/opt/kukeon`), and remove the `kukeon` system user/group if present.
+What it does, in order: stop, disable and remove the `kuke-serve.service` and `kukeond.service` systemd units (each one if installed), stop the daemon, purge every realm with `--cascade` (including `kuke-system`), release kukeon-owned bind mounts under `/run/kukeon`, remove `/run/kukeon` and the configured run path (default `/opt/kukeon`), and remove the `kukeon` system user/group if present.
 
 **Half-cleaned-host gate.** If any realm fails to drop its containerd namespace, the subsequent dir / account removal is **skipped** (not silently best-effort), every skipped row in the report is annotated, and the exit code is non-zero. Tearing out `/opt/kukeon` while a residual namespace is still pinning overlay mounts on disk would strand the next `kuke init` with stale containerd state — the skip is the safe default. Resolve the realm-purge failure (see [Troubleshooting](troubleshooting.md#kuke-uninstall-reports-skipped-realm-purge-failed)) and re-run.
 

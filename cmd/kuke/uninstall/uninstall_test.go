@@ -165,14 +165,14 @@ func runCmd(
 	return runCmdWithSystemd(t, stub, skippedSystemdRemover, stdin, args...)
 }
 
-// skippedSystemdRemover stands in for the real removeKukeondSystemdUnit on
-// tests that do not care about the systemd path. Returns Skipped=true so the
-// renderer prints no systemd row, matching the dev-host code path.
-func skippedSystemdRemover(_ context.Context) uninstall.SystemdRemovalReport {
-	return uninstall.SystemdRemovalReport{
-		Skipped:    true,
-		SkipReason: "test stub",
-		UnitPath:   uninstall.SystemdUnitPath,
+// skippedSystemdRemover stands in for the real removeSystemdUnits on tests
+// that do not care about the systemd path. Returns Skipped=true for both
+// units so the renderer prints no systemd row, matching the dev-host code
+// path.
+func skippedSystemdRemover(_ context.Context) []uninstall.SystemdRemovalReport {
+	return []uninstall.SystemdRemovalReport{
+		{Skipped: true, SkipReason: "test stub", UnitPath: uninstall.WebUISystemdUnitPath},
+		{Skipped: true, SkipReason: "test stub", UnitPath: uninstall.SystemdUnitPath},
 	}
 }
 
@@ -452,13 +452,19 @@ func TestUninstall_SystemdUnitRemovedRendersRow(t *testing.T) {
 			}, nil
 		},
 	}
-	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
+	removed := func(path string) uninstall.SystemdRemovalReport {
 		return uninstall.SystemdRemovalReport{
-			UnitPath:       uninstall.SystemdUnitPath,
+			UnitPath:       path,
 			Stopped:        true,
 			Disabled:       true,
 			FileRemoved:    true,
 			DaemonReloaded: true,
+		}
+	}
+	systemd := func(_ context.Context) []uninstall.SystemdRemovalReport {
+		return []uninstall.SystemdRemovalReport{
+			removed(uninstall.WebUISystemdUnitPath),
+			removed(uninstall.SystemdUnitPath),
 		}
 	}
 	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
@@ -468,9 +474,60 @@ func TestUninstall_SystemdUnitRemovedRendersRow(t *testing.T) {
 	if !ctrlCalled {
 		t.Errorf("controller.Uninstall did not fire after successful systemd teardown; output:\n%s", out)
 	}
-	wantRow := "systemd unit " + uninstall.SystemdUnitPath + ": stopped, disabled, removed"
-	if !strings.Contains(out, wantRow) {
-		t.Errorf("expected systemd row %q; got:\n%s", wantRow, out)
+	for _, path := range []string{uninstall.WebUISystemdUnitPath, uninstall.SystemdUnitPath} {
+		wantRow := "systemd unit " + path + ": stopped, disabled, removed"
+		if !strings.Contains(out, wantRow) {
+			t.Errorf("expected systemd row %q; got:\n%s", wantRow, out)
+		}
+	}
+	webUI := strings.Index(out, uninstall.WebUISystemdUnitPath)
+	kukeond := strings.Index(out, uninstall.SystemdUnitPath)
+	if webUI > kukeond {
+		t.Errorf("expected the kuke-serve row before the kukeond row; got:\n%s", out)
+	}
+}
+
+// TestUninstall_SystemdWebUIAbsentRendersSkipRow pins issue #1708's report
+// shape on a host installed with KUKE_SKIP_WEB_UI=1: kukeond.service is
+// removed and the absent kuke-serve.service gets its own skipped row, so the
+// operator can tell the web UI unit was checked rather than forgotten.
+func TestUninstall_SystemdWebUIAbsentRendersSkipRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				SocketDir: "/run/kukeon",
+				RunPath:   "/opt/kukeon",
+				UserName:  "kukeon",
+				GroupName: "kukeon",
+			}, nil
+		},
+	}
+	systemd := func(_ context.Context) []uninstall.SystemdRemovalReport {
+		return []uninstall.SystemdRemovalReport{
+			{UnitPath: uninstall.WebUISystemdUnitPath, Skipped: true, SkipReason: "unit file absent"},
+			{
+				UnitPath:       uninstall.SystemdUnitPath,
+				Stopped:        true,
+				Disabled:       true,
+				FileRemoved:    true,
+				DaemonReloaded: true,
+			},
+		}
+	}
+	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	wantRows := []string{
+		"systemd unit " + uninstall.WebUISystemdUnitPath + ": skipped (unit file absent)",
+		"systemd unit " + uninstall.SystemdUnitPath + ": stopped, disabled, removed",
+	}
+	for _, want := range wantRows {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected systemd row %q; got:\n%s", want, out)
+		}
 	}
 }
 
@@ -493,12 +550,12 @@ func TestUninstall_SystemdPartialPath(t *testing.T) {
 			}, nil
 		},
 	}
-	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
+	systemd := func(_ context.Context) []uninstall.SystemdRemovalReport {
 		// stop/disable/daemon-reload all failed (no systemd PID 1); file
 		// removed succeeded — the binding step.
-		return uninstall.SystemdRemovalReport{
-			UnitPath:    uninstall.SystemdUnitPath,
-			FileRemoved: true,
+		return []uninstall.SystemdRemovalReport{
+			{UnitPath: uninstall.WebUISystemdUnitPath, Skipped: true, SkipReason: "unit file absent"},
+			{UnitPath: uninstall.SystemdUnitPath, FileRemoved: true},
 		}
 	}
 	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
@@ -553,13 +610,16 @@ func TestUninstall_SystemdFailureShortCircuits(t *testing.T) {
 		},
 	}
 	sentinel := errors.New("synthetic daemon-reload failure")
-	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
-		return uninstall.SystemdRemovalReport{
-			UnitPath:    uninstall.SystemdUnitPath,
-			Stopped:     true,
-			Disabled:    true,
-			FileRemoved: true,
-			Err:         sentinel,
+	systemd := func(_ context.Context) []uninstall.SystemdRemovalReport {
+		return []uninstall.SystemdRemovalReport{
+			{UnitPath: uninstall.WebUISystemdUnitPath, Skipped: true, SkipReason: "unit file absent"},
+			{
+				UnitPath:    uninstall.SystemdUnitPath,
+				Stopped:     true,
+				Disabled:    true,
+				FileRemoved: true,
+				Err:         sentinel,
+			},
 		}
 	}
 	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")

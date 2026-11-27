@@ -65,9 +65,11 @@ func NewUninstallCmd() *cobra.Command {
 const uninstallLongDesc = `Remove all kukeon runtime state from this host.
 
 This is the global counterpart to "kuke purge" (which is per-resource). It:
-  1. Stops, disables, and removes the kukeond systemd unit (no-op on hosts
-     without systemd, or where the unit was never installed). Done first so
-     a Restart=on-failure unit cannot respawn kukeond mid-uninstall.
+  1. Stops, disables, and removes the web UI systemd unit (kuke-serve.service)
+     and then the kukeond systemd unit (kukeond.service), followed by one
+     systemctl daemon-reload. Each unit is a no-op on hosts without systemd,
+     or where that unit was never installed. Done first so a
+     Restart=on-failure unit cannot respawn kukeond mid-uninstall.
   2. Purges every realm with --cascade (drains spaces, stacks, cells,
      containers and their containerd tasks/containers, and deletes the
      containerd namespaces created by kukeon). For every realm whose
@@ -163,10 +165,16 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	// was never installed (dev hosts via `make dev-init`, systemd-less
 	// distros).
 	systemdRemover := resolveSystemdRemover(cmd)
-	systemdReport := systemdRemover(cmd.Context())
-	printSystemdRemoval(cmd, systemdReport)
-	if systemdReport.Err != nil {
-		return systemdReport.Err
+	systemdReports := systemdRemover(cmd.Context())
+	printSystemdRemoval(cmd, systemdReports)
+	var systemdErrs []error
+	for _, r := range systemdReports {
+		if r.Err != nil {
+			systemdErrs = append(systemdErrs, r.Err)
+		}
+	}
+	if err := errors.Join(systemdErrs...); err != nil {
+		return err
 	}
 
 	ctrl := resolveController(cmd, logger, runPath)
@@ -186,33 +194,49 @@ func resolveSystemdRemover(cmd *cobra.Command) SystemdRemover {
 	if mock, ok := cmd.Context().Value(MockSystemdRemoverKey{}).(SystemdRemover); ok {
 		return mock
 	}
-	return removeKukeondSystemdUnit
+	return removeSystemdUnits
 }
 
-// printSystemdRemoval renders the SystemdRemovalReport as the first line of
-// the uninstall output so the operator sees the unit-teardown outcome
-// before the realm/filesystem rows. Quiet on the skip path: a host that
-// never had the unit installed (e.g. `make dev-init`) should not emit a
-// systemd row at all, matching the existing report's terse style on the
-// no-daemon path.
-func printSystemdRemoval(cmd *cobra.Command, r SystemdRemovalReport) {
+// printSystemdRemoval renders one row per systemd unit above the
+// realm/filesystem rows so the operator sees the unit-teardown outcome
+// first. Quiet when every unit was skipped: a host that never had the units
+// installed (e.g. `make dev-init`, or no systemctl at all) should not emit a
+// systemd row, matching the existing report's terse style on the no-daemon
+// path. Once any unit was acted on, the skipped ones get a row too, so an
+// installed host without the web UI unit (KUKE_SKIP_WEB_UI=1) reads as
+// "skipped (unit file absent)" rather than silently missing.
+func printSystemdRemoval(cmd *cobra.Command, reports []SystemdRemovalReport) {
 	out := cmd.OutOrStdout()
-	if r.Skipped {
-		// Quiet skip — no systemd row at all.
+	allSkipped := true
+	for _, r := range reports {
+		if !r.Skipped {
+			allSkipped = false
+			break
+		}
+	}
+	if allSkipped {
 		return
 	}
+	for _, r := range reports {
+		fmt.Fprintf(out, "  - systemd unit %s: %s\n", r.UnitPath, systemdOutcome(r))
+	}
+}
+
+func systemdOutcome(r SystemdRemovalReport) string {
 	switch {
+	case r.Skipped:
+		return fmt.Sprintf("skipped (%s)", r.SkipReason)
 	case r.Err != nil:
-		fmt.Fprintf(out, "  - systemd unit %s: failed: %v\n", r.UnitPath, r.Err)
+		return fmt.Sprintf("failed: %v", r.Err)
 	case r.Stopped && r.Disabled && r.FileRemoved && r.DaemonReloaded:
-		fmt.Fprintf(out, "  - systemd unit %s: stopped, disabled, removed\n", r.UnitPath)
+		return "stopped, disabled, removed"
 	default:
 		// Partial: at least one best-effort sub-step did not succeed. Show
 		// each independently so the operator can tell which (e.g. stop
 		// failed because there's no systemd PID 1 vs. file remove
 		// succeeded — the binding step did its job).
-		fmt.Fprintf(out, "  - systemd unit %s: partial (stop=%t disable=%t remove=%t reload=%t)\n",
-			r.UnitPath, r.Stopped, r.Disabled, r.FileRemoved, r.DaemonReloaded)
+		return fmt.Sprintf("partial (stop=%t disable=%t remove=%t reload=%t)",
+			r.Stopped, r.Disabled, r.FileRemoved, r.DaemonReloaded)
 	}
 }
 
@@ -230,7 +254,7 @@ func resolveController(cmd *cobra.Command, logger *slog.Logger, runPath string) 
 func confirm(cmd *cobra.Command, runPath, socketDir string) (bool, error) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "kuke uninstall will remove ALL kukeon runtime state on this host:")
-	fmt.Fprintln(out, "  - the kukeond systemd unit (stop + disable + remove, if installed)")
+	fmt.Fprintln(out, "  - the kuke-serve and kukeond systemd units (stop + disable + remove, if installed)")
 	fmt.Fprintln(out, "  - every realm (cascade), including the kuke-system realm and the kukeond cell")
 	fmt.Fprintln(out, "  - the kukeon containerd namespaces")
 	fmt.Fprintf(out, "  - %s/ (kukeond socket dir)\n", socketDir)
