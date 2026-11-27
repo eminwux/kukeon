@@ -236,6 +236,24 @@ func formOf(team *config.Team, catalog *connector.Catalog) teamForm {
 	return out
 }
 
+// defaultsForm is the TeamDefaults' roles and connector choices in the
+// form's shape (#1746): what a team that inherits them starts from when the
+// wizard switches inheritance off, so the form shows each default role's
+// harness, initial path, image needs, task selection and connector switches,
+// and each default connector choice, as the defaults declare them.
+type defaultsForm struct {
+	Roles      []formRole               `json:"roles"`
+	Connectors map[string]formConnector `json:"connectors"`
+}
+
+// defaultsFormOf is d's roles and connector choices as form items.
+func defaultsFormOf(d config.Defaults, catalog *connector.Catalog) defaultsForm {
+	scratch := &config.Team{}
+	scratch.Spec.Roles, scratch.Spec.Connectors = d.Roles, d.Connectors
+	form := formOf(scratch, catalog)
+	return defaultsForm{Roles: form.Roles.Items, Connectors: form.Connectors.Items}
+}
+
 // roleConnectorsOf is a role entry's connector switches. A legacy
 // needs.secrets opt-in shows as on and is not rewritten (D7).
 func roleConnectorsOf(role *config.Role, catalog *connector.Catalog) []formRoleConnector {
@@ -277,8 +295,11 @@ func cloneBool(v *bool) *bool {
 // everything else kept (D2): metadata.realm, spec.secrets, each role's
 // connectors and needs.secrets (matched by name, else by source and path)
 // except where a connector switch changed (#1649), and each source's git
-// block besides its identity (matched by alias).
-func (f teamForm) apply(base *config.Team, catalog *connector.Catalog) (*config.Team, error) {
+// block besides its identity (matched by alias). inherited are the roles
+// base inherits, the TeamDefaults' (#1746): a form that declares the roles
+// of a base that omits them builds each one over the default role it
+// copies, so the default's needs.secrets and connectors are kept.
+func (f teamForm) apply(base *config.Team, inherited []config.Role, catalog *connector.Catalog) (*config.Team, error) {
 	if base == nil {
 		base = &config.Team{APIVersion: config.APIVersion, Kind: config.KindTeam}
 	}
@@ -325,12 +346,16 @@ func (f teamForm) apply(base *config.Team, catalog *connector.Catalog) (*config.
 	}
 	out.Spec.Roles = nil
 	if !f.Roles.Inherit {
+		roles := base.Spec.Roles
+		if roles == nil {
+			roles = inherited
+		}
 		out.Spec.Roles = make([]config.Role, 0, len(f.Roles.Items))
 		for _, item := range f.Roles.Items {
-			out.Spec.Roles = append(out.Spec.Roles, item.role(base.Spec.Roles))
+			out.Spec.Roles = append(out.Spec.Roles, item.role(roles))
 		}
 		for i, item := range f.Roles.Items {
-			if err := item.applyConnectors(&out, &out.Spec.Roles[i], baseRole(item, base.Spec.Roles), catalog); err != nil {
+			if err := item.applyConnectors(&out, &out.Spec.Roles[i], baseRole(item, roles), catalog); err != nil {
 				return nil, err
 			}
 		}

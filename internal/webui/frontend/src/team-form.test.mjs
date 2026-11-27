@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   availableSources, createBody, cronErrors, draftPayload, editBody, emptyProject, gitIdentities, initialPathValid, inspectRequest, projectErrors, rolesErrors, sourcesErrors, stepErrors, stepsFor,
   roleConnectorRows, roleHarnesses, suspendOf, switchOf, taskRows, tasksErrors, togglable, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole,
-  seededRole, withRoleConnector, withRolePatch, withSource, withTask,
+  seededRole, withRoleConnector, withRolePatch, withSource, withTask, cleanPath, sameAddress, sameRepository, selectedIndex,
 } from "./team-form.mjs";
 
 // form is a team's form as GET /api/teams/{name} returns it.
@@ -253,4 +253,108 @@ test("a role selected again keeps its connector switches", () => {
   assert.deepEqual(kept.roles.items[0].connectors, [{ name: "github", enabled: true }]);
   const fromDefaults = withInherit({ ...form(), roles: { inherit: true, items: [] } }, "roles", false, [{ name: "majordomo", source: "kukeon", path: "team/roles/majordomo", connectors: [{ name: "github", enabled: true, identity: "x" }] }]);
   assert.deepEqual(fromDefaults.roles.items[0].connectors, [{ name: "github", enabled: true, identity: "x" }]);
+});
+
+// #1746: one repository offered under two aliases. The agents team's project is the stored Source agents, which
+// is offered again as its own group; the kukeon team names its project by address and the stored kukeon Source by
+// another spelling of it.
+const agentsStored = [{ name: "agents", url: "github.com/eminwux/agents", branch: "main" }, { name: "kukeon", url: "git@github.com:eminwux/kukeon" }];
+const agentsForm = () => ({
+  ...form(), name: "agents", project: { alias: "project", stored: "agents", refKind: "branch", ref: "main" },
+  roles: { inherit: false, items: [{ name: "pm", source: "agents", path: "pm", image: [], tasks: { all: true, items: [] }, connectors: [] }] },
+});
+
+test("a role selected through one alias of a repository is selected in every group of it, once", () => {
+  const start = agentsForm();
+  const available = availableSources(start, agentsStored);
+  assert.deepEqual(available.map(source => source.alias), ["project", "agents", "kukeon"], "both groups of the repository stay listed");
+  assert.equal(available[0].url, "github.com/eminwux/agents", "the project carries its stored Source's address");
+  assert.ok(sameRepository(available[0], available[1]));
+  assert.ok(!sameRepository(available[0], available[2]));
+  assert.equal(selectedIndex(start.roles.items, "project", "pm", available), 0);
+  assert.equal(selectedIndex(start.roles.items, "kukeon", "pm", available), -1, "another repository's pm is not this one");
+  assert.equal(selectedIndex(start.roles.items, "project", "pm"), -1, "without the offered sources only the alias matches");
+  // Ticking it in the project group leaves the list unchanged; Next is not blocked by a duplicate.
+  const ticked = withRole(start, { name: "pm", source: "project", path: "pm" }, true, [], undefined, available);
+  assert.deepEqual(ticked.roles.items, start.roles.items);
+  assert.deepEqual(rolesErrors(ticked), []);
+  // Unticking it there removes the entry selected through agents.
+  assert.deepEqual(withRole(start, { name: "pm", source: "project", path: "pm" }, false, [], undefined, available).roles.items, []);
+  // A role not selected yet can be selected from either group, under that group's alias.
+  const none = { ...start, roles: { inherit: false, items: [] } };
+  assert.equal(withRole(none, { name: "dev", source: "project", path: "dev" }, true, [], undefined, available).roles.items[0].source, "project");
+  assert.equal(withRole(none, { name: "dev", source: "agents", path: "dev" }, true, [], undefined, available).roles.items[0].source, "agents");
+});
+
+test("a harness selected through project is selected in the stored Source's group of the same address, and the reverse", () => {
+  const kukeon = { ...form(), name: "kukeon", project: { alias: "project", url: "https://github.com/eminwux/kukeon.git" } };
+  const claude = { name: "claude", source: "project", path: "team/harnesses/claude" };
+  const viaProject = { ...kukeon, harnesses: { inherit: false, items: [claude] } };
+  let available = availableSources(viaProject, agentsStored);
+  assert.equal(selectedIndex(viaProject.harnesses.items, "kukeon", "team/harnesses/claude", available), 0);
+  const ticked = withHarness(viaProject, { ...claude, source: "kukeon" }, true, [], available);
+  assert.equal(ticked.harnesses.items.length, 1);
+  const viaStored = { ...kukeon, harnesses: { inherit: false, items: [{ ...claude, source: "kukeon" }] } };
+  available = availableSources(viaStored, agentsStored);
+  assert.equal(selectedIndex(viaStored.harnesses.items, "project", "team/harnesses/claude", available), 0);
+  assert.equal(withHarness(viaStored, claude, true, [], available).harnesses.items.length, 1);
+});
+
+test("addresses compare as gitcred.SameRepository does; paths as path.Clean", () => {
+  for (const spelling of ["https://github.com/o/r.git", "git@github.com:o/r", "ssh://git@github.com:22/o/r.git", "https://user@GitHub.com/o/r/", "github.com/o/r"]) {
+    assert.ok(sameAddress("github.com/o/r", spelling), spelling);
+  }
+  assert.ok(!sameAddress("github.com/o/r", "github.com/o/other"));
+  assert.ok(!sameAddress("github.com/o/r", "gitlab.com/o/r"));
+  assert.ok(sameAddress("/srv/repo", " /srv/repo "), "a local path compares as written");
+  assert.ok(!sameAddress("/srv/repo", "/srv/repo.git"));
+  assert.ok(!sameRepository({ alias: "a", stored: "", url: "" }, { alias: "b", stored: "", url: "" }), "no address is no match");
+  for (const [raw, clean] of [["./dev", "dev"], ["dev/", "dev"], ["a//b/../c", "a/c"], ["", "."], ["/a/../..", "/"], ["../x", "../x"], ["team/roles/./pm/", "team/roles/pm"]]) {
+    assert.equal(cleanPath(raw), clean, raw);
+  }
+  const declared = [{ name: "dev", source: "agents", path: "./dev" }, { name: "qa", source: "agents", path: "qa/" }];
+  assert.equal(selectedIndex(declared, "agents", "dev"), 0);
+  assert.equal(selectedIndex(declared, "agents", "qa"), 1);
+});
+
+test("two harnesses of one name keep the Roles step from going on, as two roles of one name do", () => {
+  const twice = { ...form(), harnesses: { inherit: false, items: [{ name: "claude", source: "project", path: "h/claude" }, { name: "claude", source: "kukeon", path: "team/harnesses/claude" }] } };
+  assert.deepEqual(rolesErrors(twice), ["Harness claude is selected twice; remove one."]);
+  assert.deepEqual(stepErrors("roles", { form: twice }), ["Harness claude is selected twice; remove one."]);
+});
+
+// defaultRoles is /api/sources defaultForm.roles: the default roles as the server's form models them.
+const defaultRoles = () => [{
+  name: "lead", source: "kukeon", path: "team/roles/majordomo", harness: "claude", initialPath: "$HOME/work", image: ["go", "node"],
+  tasks: { all: false, items: [{ name: "health-sweep", schedule: "@daily", suspend: false }] },
+  connectors: [{ name: "example-token", enabled: false }, { name: "git", enabled: false }, { name: "github", enabled: true, identity: "bot-token" }],
+}];
+
+test("switching off the default roles starts from them as the defaults declare them", () => {
+  const catalog = [{ name: "example-token" }, { name: "github" }, { name: "git", delivery: "git" }, { name: "claude", harness: "claude" }];
+  const inheriting = { ...form(), roles: { inherit: true, items: [] } };
+  const want = defaultRoles().map(role => ({ ...role, connectors: role.connectors.map(item => ({ name: item.name, enabled: item.enabled, identity: item.identity ?? "" })) }));
+  // Edit team (no seed) and New team (the catalog as seed): a default role keeps what the defaults declare.
+  for (const seed of [undefined, catalog]) {
+    const next = withInherit(inheriting, "roles", false, defaultRoles(), seed);
+    assert.deepEqual(next.roles, { inherit: false, items: want }, seed ? "new team" : "edit");
+  }
+  // Selecting one more role from an inherited list also keeps the defaults' fields.
+  const added = withRole(inheriting, { name: "pm", source: "agents", path: "pm" }, true, defaultRoles());
+  assert.deepEqual(added.roles.items[0], want[0]);
+});
+
+test("switching off the defaults' connector choices starts from them; back on inherits again", () => {
+  const defaults = { claude: { method: "api-key", identity: "claude-key", state: "ephemeral" }, git: { method: "", identity: "git-ssh" } };
+  const inheriting = form();
+  let next = withConnectorsInherit(inheriting, false, defaults);
+  assert.deepEqual(next.connectors, { inherit: false, items: defaults });
+  next.connectors.items.claude.method = "changed";
+  assert.equal(defaults.claude.method, "api-key", "the defaults are copied, not shared");
+  // A change while inheriting starts from the defaults too.
+  next = withConnector(inheriting, "git", { identity: "other" }, defaults);
+  assert.deepEqual(next.connectors.items, { claude: defaults.claude, git: { method: "", identity: "other" } });
+  // A list the team declares keeps its own items.
+  assert.deepEqual(withConnectorsInherit({ ...form(), connectors: { inherit: false, items: { git: { method: "token" } } } }, false, defaults).connectors.items, { git: { method: "token" } });
+  assert.deepEqual(withConnectorsInherit(next, true, defaults).connectors, { inherit: true, items: {} });
 });

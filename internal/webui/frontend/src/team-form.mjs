@@ -128,7 +128,10 @@ export function availableSources(form, stored) {
   const out = [];
   const taken = new Set();
   if (form?.project) {
-    out.push({ alias: projectAlias, stored: trimmed(form.project.stored), url: trimmed(form.project.url), refKind: text(form.project.refKind), ref: text(form.project.ref), identity: text(form.project.identity), declared: true });
+    // A project that refers to a stored Source carries that Source's address, so it matches the Source's own
+    // group (#1746).
+    const backing = trimmed(form.project.stored) ? list(stored).find(item => item.name === trimmed(form.project.stored)) : undefined;
+    out.push({ alias: projectAlias, stored: trimmed(form.project.stored), url: trimmed(form.project.url) || text(backing?.url), refKind: text(form.project.refKind), ref: text(form.project.ref), identity: text(form.project.identity), declared: true });
     taken.add(projectAlias);
   }
   for (const source of list(form?.sources)) {
@@ -158,9 +161,91 @@ export function inspectRequest(source) {
   return { path: sourcesAPI(trimmed(source?.stored) || trimmed(source?.alias), "inspect"), body: {} };
 }
 
-// selected reports whether the form selects a role or harness of a source.
-export function selectedIndex(items, source, path) {
-  return list(items).findIndex(item => item.source === source && item.path === path);
+// cleanPath mirrors Go's path.Clean, which the server compares a declared
+// path with a discovered one by (Discover): "./dev" and "dev/" are "dev".
+export function cleanPath(value) {
+  const raw = text(value);
+  if (!raw) return ".";
+  const rooted = raw.startsWith("/");
+  const parts = [];
+  for (const part of raw.split("/")) {
+    if (!part || part === ".") continue;
+    if (part !== "..") parts.push(part);
+    else if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+    else if (!rooted) parts.push("..");
+  }
+  const joined = parts.join("/");
+  return rooted ? `/${joined}` : joined || ".";
+}
+
+const other = raw => ({ transport: "other", host: "", path: raw });
+const unsafeHost = value => /[\s\p{Cc}]/u.test(value);
+
+// shortHost mirrors gitcred's: "github.com/o/r" is an https address.
+function shortHost(raw) {
+  if (!raw || raw.includes("://") || raw.startsWith(".")) return "";
+  const slash = raw.indexOf("/");
+  if (slash < 0) return "";
+  const host = raw.slice(0, slash);
+  if (!raw.slice(slash + 1).replace(/^\/+|\/+$/g, "") || !host.includes(".") || /[:@]/.test(host) || unsafeHost(raw)) return "";
+  return host;
+}
+
+// parseRemote mirrors gitcred.ParseRemote, for its transport, host and path.
+function parseRemote(value) {
+  const raw = trimmed(shortHost(text(value)) ? `https://${text(value)}` : value);
+  const scheme = raw.indexOf("://");
+  if (scheme >= 0) {
+    const kind = raw.slice(0, scheme).toLowerCase();
+    const transport = { ssh: "ssh", "git+ssh": "ssh", "ssh+git": "ssh", https: "https", http: "http" }[kind];
+    if (!transport) return other(raw);
+    let url;
+    try { url = new URL(raw); } catch { return other(raw); }
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (!host) return other(raw);
+    let path = url.pathname;
+    try { path = decodeURIComponent(path); } catch { /* keep it encoded */ }
+    return { transport, host, path: path.replace(/^\//, "") };
+  }
+  // scp-like: a colon before any slash, and not a relative path.
+  const colon = raw.indexOf(":");
+  const slash = raw.indexOf("/");
+  if (colon <= 0 || (slash >= 0 && slash < colon) || raw.startsWith(".")) return other(raw);
+  let host = raw.slice(0, colon);
+  const at = host.lastIndexOf("@");
+  const user = at >= 0 ? host.slice(0, at) : "";
+  if (at >= 0) host = host.slice(at + 1);
+  if (!host || unsafeHost(user + host)) return other(raw);
+  return { transport: "ssh", host: host.toLowerCase(), path: raw.slice(colon + 1).replace(/^\//, "") };
+}
+
+const repositoryPath = path => path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+
+// sameAddress mirrors gitcred.SameRepository: two addresses name one
+// repository whatever their transport, user and .git suffix.
+export function sameAddress(a, b) {
+  const ra = parseRemote(a);
+  const rb = parseRemote(b);
+  if (ra.transport === "other" || rb.transport === "other") return trimmed(a) === trimmed(b);
+  return ra.host === rb.host && repositoryPath(ra.path) === repositoryPath(rb.path);
+}
+
+// sameRepository reports whether two offered sources (availableSources) are
+// one repository: the same stored Source, else the same address (#1746).
+export function sameRepository(a, b) {
+  if (!a || !b) return false;
+  if (a.alias === b.alias) return true;
+  if (trimmed(a.stored) && trimmed(a.stored) === trimmed(b.stored)) return true;
+  return !!trimmed(a.url) && !!trimmed(b.url) && sameAddress(a.url, b.url);
+}
+
+// selectedIndex finds the item that selects a role or harness of a source:
+// by the source's alias, or, given available (availableSources), by any
+// alias of the same repository (#1746); paths compare cleaned.
+export function selectedIndex(items, source, path, available = []) {
+  const offered = list(available).find(item => item.alias === source);
+  const want = cleanPath(path);
+  return list(items).findIndex(item => cleanPath(item.path) === want && (item.source === source || (!!offered && sameRepository(offered, list(available).find(entry => entry.alias === item.source)))));
 }
 
 // withInherit switches a list between inheriting the defaults and listing
@@ -197,10 +282,13 @@ export function seededRole(role, seed) {
 
 // withRole selects or drops one offered role. A selected role starts with
 // every task it declares and, with seed, every per-role connector on.
-export function withRole(form, role, on, inherited = [], seed) {
+// available, when given, makes a role selected through another alias of the
+// same repository count as selected (#1746): it is not added twice, and
+// dropping it drops that entry.
+export function withRole(form, role, on, inherited = [], seed, available = []) {
   const next = withInherit(form, "roles", false, inherited, seed);
   const items = [...next.roles.items];
-  const at = selectedIndex(items, role.source, role.path);
+  const at = selectedIndex(items, role.source, role.path, available);
   if (on && at < 0) items.push(seededRole(roleItem({ name: role.name, source: role.source, path: role.path }), seed));
   if (!on && at >= 0) items.splice(at, 1);
   return { ...next, roles: { inherit: false, items } };
@@ -212,11 +300,11 @@ export function withRolePatch(form, index, patch) {
   return { ...form, roles: { ...form.roles, items } };
 }
 
-// withHarness selects or drops one offered harness.
-export function withHarness(form, harness, on, inherited = []) {
+// withHarness selects or drops one offered harness; available as withRole.
+export function withHarness(form, harness, on, inherited = [], available = []) {
   const next = withInherit(form, "harnesses", false, inherited);
   const items = [...next.harnesses.items];
-  const at = selectedIndex(items, harness.source, harness.path);
+  const at = selectedIndex(items, harness.source, harness.path, available);
   if (on && at < 0) items.push({ name: harness.name, source: harness.source, path: harness.path });
   if (!on && at >= 0) items.splice(at, 1);
   return { ...next, harnesses: { inherit: false, items } };
@@ -363,6 +451,12 @@ export function rolesErrors(form) {
     names.add(role.name);
     if (!initialPathValid(trimmed(role.initialPath))) errors.push(`Role ${role.name}: the initial path is $HOME, $HOME/<directory> or a clean absolute path (letters, digits, _, ., / and -).`);
   }
+  // The server refuses two harnesses of one name too (validate.go, unique).
+  const harnesses = new Set();
+  for (const harness of list(form?.harnesses?.items)) {
+    if (harnesses.has(harness.name)) errors.push(`Harness ${harness.name} is selected twice; remove one.`);
+    harnesses.add(harness.name);
+  }
   return errors;
 }
 
@@ -458,8 +552,15 @@ export function withRoleConnector(form, roleIndex, name, patch) {
   return withRolePatch(form, roleIndex, { connectors });
 }
 
-export function withConnectorsInherit(form, inherit) {
-  return { ...form, connectors: inherit ? { inherit: true, items: {} } : { inherit: false, items: { ...(form?.connectors?.items ?? {}) } } };
+// withConnectorsInherit switches the connector choices between the
+// defaults' and the team's own. Turning inheritance off starts from
+// inherited, the defaults' choices (#1746), so nothing changes until the
+// user picks.
+export function withConnectorsInherit(form, inherit, inherited = {}) {
+  if (inherit) return { ...form, connectors: { inherit: true, items: {} } };
+  const current = form?.connectors ?? { inherit: true, items: {} };
+  const items = current.inherit ? Object.fromEntries(Object.entries(inherited ?? {}).map(([name, choice]) => [name, { ...choice }])) : { ...(current.items ?? {}) };
+  return { ...form, connectors: { inherit: false, items } };
 }
 
 // createBody is the POST /api/teams{,/preview} body of a new team: the

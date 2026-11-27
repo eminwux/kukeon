@@ -64,7 +64,12 @@ export type Source = { name: string; url: string; branch?: string; tag?: string;
 export type Selection = { name: string; source: string; path: string };
 export type SourceUse = { team?: string; as: string; name: string };
 export type StoredSource = Source & { usedBy: SourceUse[]; defaultRoles: Selection[]; defaultHarnesses: Selection[] };
-export type Sources = { sources: StoredSource[]; defaultRoles: Selection[]; defaultHarnesses: Selection[] };
+// defaultForm is the default roles and connector choices in the form's shape (#1746): what a team starts from
+// when it stops inheriting them.
+export type Sources = {
+  sources: StoredSource[]; defaultRoles: Selection[]; defaultHarnesses: Selection[];
+  defaultForm?: { roles: FormRole[]; connectors: Record<string, FormConnector> };
+};
 export type OfferedTask = { name: string; schedule?: string; suspend?: boolean; args?: string };
 export type OfferedRole = { name: string; path: string; harnesses: string[]; tasks: OfferedTask[]; default: boolean };
 export type OfferedHarness = { name: string; path: string; default: boolean };

@@ -94,6 +94,10 @@ type sourcesListView struct {
 	Sources          []storedSourceView `json:"sources"`
 	DefaultRoles     []selectionView    `json:"defaultRoles"`
 	DefaultHarnesses []selectionView    `json:"defaultHarnesses"`
+	// DefaultForm is the default roles and connector choices in the team
+	// form's shape (#1746): what the wizard starts from when a team stops
+	// inheriting them.
+	DefaultForm defaultsForm `json:"defaultForm"`
 }
 
 func usesView(uses []initialize.SourceUse) []sourceUseView {
@@ -122,6 +126,7 @@ func (a *teamAPI) listSources(ctx context.Context, client kukeonv1.Client, _ *ht
 		Sources:          make([]storedSourceView, 0, len(stored)),
 		DefaultRoles:     make([]selectionView, 0, len(d.Roles)),
 		DefaultHarnesses: make([]selectionView, 0, len(d.Harnesses)),
+		DefaultForm:      defaultsFormOf(d, a.catalog),
 	}
 	for _, role := range d.Roles {
 		view.DefaultRoles = append(

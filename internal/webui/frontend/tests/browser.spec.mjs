@@ -6869,6 +6869,89 @@ test("Edit team disables per-role access while the team inherits its roles (#164
   await expect(access.getByRole("checkbox", { name: "GitHub for dev" })).toBeDisabled();
 });
 
+// #1746: the project of team agents is the stored Source agents, which the Roles step offers again as its own
+// group. A role selected through agents shows as selected in the project group too, and is not added twice.
+test("Edit team agents shows a role selected through agents as selected in the project group, once", async ({ page }) => {
+  const world = await mockTeams(page);
+  const base = world.webForm();
+  world.webForm = () => ({ ...base, project: { ...base.project, stored: "agents" } });
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("heading", { name: "Roles and harnesses" })).toBeVisible();
+  const roles = steps.getByRole("group", { name: "Roles" });
+  // Both groups of the repository are listed.
+  await expect(roles.getByRole("region", { name: "Source project" })).toBeVisible();
+  await expect(roles.getByRole("region", { name: "Source agents" })).toBeVisible();
+  const project = roles.getByRole("region", { name: "Source project" });
+  await project.getByRole("button", { name: "Show contents" }).click();
+  const dev = project.getByRole("checkbox", { name: "Role dev from project" });
+  await expect(dev).toBeChecked();
+  await expect(project.locator("label", { has: page.getByRole("checkbox", { name: "Role dev from project" }) })).toContainText("selected through agents");
+  await expect(roles.locator(".wizard-role")).toHaveCount(1);
+  await expect(steps.getByRole("list", { name: "Step problems" })).toHaveCount(0);
+  // A role not selected yet is selected from the project group, and then shows as selected in agents.
+  await project.getByRole("checkbox", { name: "Role pm from project" }).check();
+  await expect(roles.locator(".wizard-role")).toHaveCount(2);
+  const agents = roles.getByRole("region", { name: "Source agents" });
+  await agents.getByRole("button", { name: "Show contents" }).click();
+  await expect(agents.getByRole("checkbox", { name: "Role pm from agents" })).toBeChecked();
+  await expect(agents.getByRole("checkbox", { name: "Role dev from agents" })).toBeChecked();
+  // Unticking dev in the project group drops the entry selected through agents.
+  await dev.uncheck();
+  await expect(roles.locator(".wizard-role")).toHaveCount(1);
+  await expect(agents.getByRole("checkbox", { name: "Role dev from agents" })).not.toBeChecked();
+  for (let i = 0; i < 3; i++) await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  expect(lastPost(world, "/api/teams/preview").form.roles.items.map(role => `${role.name}@${role.source}`)).toEqual(["pm@project"]);
+});
+
+// #1746: switching off "Use the default roles" and "Use the defaults' connector choices" starts from the defaults
+// as the server's form models them, and sends them unchanged.
+test("Edit team switches off the defaults and starts from the default roles and connector choices", async ({ page }) => {
+  const world = await mockTeams(page);
+  const inheriting = world.webForm();
+  inheriting.roles = { inherit: true, items: [] };
+  world.webForm = () => inheriting;
+  world.webView.roles = { ...world.webView.roles, inherited: true };
+  const lead = {
+    name: "dev", source: "agents", path: "dev", harness: "claude", initialPath: "$HOME/work", image: ["go", "node"],
+    tasks: { all: false, items: [{ name: "pick-issue", schedule: "@daily", suspend: false }] },
+    connectors: [{ name: "git", enabled: false, identity: "" }, { name: "github", enabled: true, identity: "bot-token" }],
+  };
+  world.sources.defaultForm = { roles: [lead], connectors: { claude: { method: "subscription", identity: "claude-key", state: "ephemeral" } } };
+  await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: roleAccessConnectors }));
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("checkbox", { name: "Use the default roles" }).uncheck();
+  await expect(steps.locator(".wizard-role select")).toHaveValue("claude");
+  await expect(steps.getByLabel("Image needs")).toHaveValue("go, node");
+  await expect(steps.getByLabel("Initial path")).toHaveValue("$HOME/work");
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByLabel("Select dev task pick-issue")).toBeChecked();
+  await expect(steps.getByLabel("Cron of dev task pick-issue")).toHaveValue("@daily");
+  await expect(steps.getByLabel("Schedule of dev task pick-issue")).toHaveValue("on");
+  await steps.getByRole("button", { name: "Next" }).click();
+  const access = steps.getByRole("group", { name: "Per-role access" });
+  await expect(access.getByRole("checkbox", { name: "GitHub for dev" })).toBeChecked();
+  await expect(access.getByLabel("Identity of github for dev")).toHaveValue("bot-token");
+  await steps.getByRole("checkbox", { name: "Use the defaults' connector choices" }).uncheck();
+  await expect(steps.getByLabel("Method of claude")).toHaveValue("subscription");
+  await expect(steps.getByLabel("Identity of claude", { exact: true })).toHaveValue("claude-key");
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  const sent = lastPost(world, "/api/teams/preview");
+  expect(sent.form.roles).toEqual({ inherit: false, items: [lead] });
+  expect(sent.form.connectors).toEqual({ inherit: false, items: world.sources.defaultForm.connectors });
+  // Switching the connector choices back on sends an inherited list.
+  await steps.getByRole("button", { name: "4. Credentials" }).click();
+  await steps.getByRole("checkbox", { name: "Use the defaults' connector choices" }).check();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  await expect.poll(() => lastPost(world, "/api/teams/preview").form.connectors).toEqual({ inherit: true, items: {} });
+});
+
 test("a team page lists each Config's connectors with identity, level and who asks for it (#1649)", async ({ page }) => {
   const world = await mockTeams(page);
   world.webView.connectors = { inherited: true, items: [], roles: roleAccessRows };

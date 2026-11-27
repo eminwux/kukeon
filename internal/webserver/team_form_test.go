@@ -204,7 +204,7 @@ func TestFormRoundTrip(t *testing.T) {
 		if err = json.Unmarshal(raw, &form); err != nil {
 			t.Fatal(err)
 		}
-		got, err := form.apply(team, connectortest.Catalog(t))
+		got, err := form.apply(team, nil, connectortest.Catalog(t))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -229,7 +229,7 @@ func TestFormMapsInheritanceAndTasks(t *testing.T) {
 	form.Roles.Items[1].Image = []string{" rust "}
 	form.Harnesses.Inherit = true
 	form.Connectors = formConnectors{Items: map[string]formConnector{"claude": {Method: "api-key"}}}
-	got, err := form.apply(base, connectortest.Catalog(t))
+	got, err := form.apply(base, nil, connectortest.Catalog(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,24 +258,24 @@ func TestFormMapsInheritanceAndTasks(t *testing.T) {
 	// stored Source.
 	form = formOf(base, connectortest.Catalog(t))
 	form.Sources[0].Identity = ""
-	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil ||
+	if got, err = form.apply(base, nil, connectortest.Catalog(t)); err != nil ||
 		got.Spec.Sources[0].Git.IdentityRef != nil ||
 		got.Spec.Sources[0].Git.Author == nil {
 		t.Fatalf("clear identity: %v %+v", err, got.Spec.Sources[0].Git)
 	}
 	form.Sources[1].Identity = "other"
-	if _, err = form.apply(base, connectortest.Catalog(t)); err == nil ||
+	if _, err = form.apply(base, nil, connectortest.Catalog(t)); err == nil ||
 		!strings.Contains(err.Error(), "stored Source") {
 		t.Fatalf("identity on a reference: %v", err)
 	}
 	form = formOf(base, connectortest.Catalog(t))
 	form.Project.RefKind, form.Project.Ref = "", "main"
-	if _, err = form.apply(base, connectortest.Catalog(t)); err == nil {
+	if _, err = form.apply(base, nil, connectortest.Catalog(t)); err == nil {
 		t.Fatal("a ref without a kind was accepted")
 	}
 	form = formOf(base, connectortest.Catalog(t))
 	form.Project.RefKind, form.Project.Ref = "tag", "v2"
-	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil || got.Spec.ProjectSource.Tag != "v2" ||
+	if got, err = form.apply(base, nil, connectortest.Catalog(t)); err != nil || got.Spec.ProjectSource.Tag != "v2" ||
 		got.Spec.ProjectSource.Branch != "" || got.Spec.ProjectSource.Stored != "web" {
 		t.Fatalf("project ref: %v %+v", err, got.Spec.ProjectSource)
 	}
@@ -322,7 +322,7 @@ func TestFormRoleConnectors(t *testing.T) {
 		base := config.Majordomo()
 		form := formOf(base, catalog)
 		roleSwitch(t, &form, "github").Enabled = true
-		got, err := form.apply(base, catalog)
+		got, err := form.apply(base, nil, catalog)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -339,7 +339,7 @@ func TestFormRoleConnectors(t *testing.T) {
 		base := decode(roleConnector)
 		form := formOf(base, catalog)
 		roleSwitch(t, &form, "github").Identity = "bot-token"
-		got, err := form.apply(base, catalog)
+		got, err := form.apply(base, nil, catalog)
 		if err != nil || got.Spec.Roles[0].Connectors["github"].Identity != "bot-token" {
 			t.Fatalf("%v %+v", err, got.Spec.Roles[0].Connectors)
 		}
@@ -349,7 +349,7 @@ func TestFormRoleConnectors(t *testing.T) {
 		base.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}}
 		form := formOf(base, catalog)
 		roleSwitch(t, &form, "github").Enabled = false
-		got, err := form.apply(base, catalog)
+		got, err := form.apply(base, nil, catalog)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -362,7 +362,7 @@ func TestFormRoleConnectors(t *testing.T) {
 		base := decode(roleConnector)
 		form := formOf(base, catalog)
 		form.Roles.Inherit = true
-		if got, err := form.apply(base, catalog); err != nil || got.Spec.Roles != nil {
+		if got, err := form.apply(base, nil, catalog); err != nil || got.Spec.Roles != nil {
 			t.Fatalf("%v %+v", err, got.Spec.Roles)
 		}
 	})
@@ -371,7 +371,7 @@ func TestFormRoleConnectors(t *testing.T) {
 		form := formOf(base, catalog)
 		form.Roles.Items[0].Connectors = append(form.Roles.Items[0].Connectors,
 			formRoleConnector{Name: "claude", Enabled: true})
-		if _, err := form.apply(base, catalog); err == nil || !strings.Contains(err.Error(), "spec.connectors") {
+		if _, err := form.apply(base, nil, catalog); err == nil || !strings.Contains(err.Error(), "spec.connectors") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -396,7 +396,7 @@ func TestFormTaskHarnesses(t *testing.T) {
 	sweep.Harnesses["codex"] = formTaskHarness{Schedule: "@daily", Suspend: &on}
 	sweep.Harnesses["claude"] = formTaskHarness{}
 	form.Roles.Items[0].Tasks.Items[0] = sweep
-	got, err := form.apply(base, connectortest.Catalog(t))
+	got, err := form.apply(base, nil, connectortest.Catalog(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestFormTaskHarnesses(t *testing.T) {
 	}
 	// Clearing every override writes a nil map.
 	form.Roles.Items[0].Tasks.Items[0].Harnesses = map[string]formTaskHarness{"codex": {}}
-	if got, err = form.apply(base, connectortest.Catalog(t)); err != nil {
+	if got, err = form.apply(base, nil, connectortest.Catalog(t)); err != nil {
 		t.Fatal(err)
 	}
 	if entry, _ = got.Spec.Roles[0].TaskSelection("health-sweep"); entry.Harnesses != nil {
@@ -422,5 +422,20 @@ func TestFormTaskHarnesses(t *testing.T) {
 	if before, _ := base.Spec.Roles[0].TaskSelection("health-sweep"); len(before.Harnesses) != 2 ||
 		*before.Harnesses["codex"].Suspend != true {
 		t.Fatalf("base changed: %+v", before.Harnesses)
+	}
+}
+
+// TestDefaultsForm is #1746: the defaults' connector choices come in the
+// form's shape with their harness state (#1685), and with no defaults the
+// lists are empty, not null.
+func TestDefaultsForm(t *testing.T) {
+	got := defaultsFormOf(config.Defaults{Connectors: map[string]config.ConnectorChoice{
+		"claude": {Method: "api-key", Identity: "claude-key", State: config.StateEphemeral},
+	}}, connectortest.Catalog(t))
+	if want := (formConnector{Method: "api-key", Identity: "claude-key", State: config.StateEphemeral}); got.Connectors["claude"] != want {
+		t.Fatalf("connectors = %+v", got.Connectors)
+	}
+	if raw := jsonBody(t, defaultsFormOf(config.Defaults{}, nil)); raw != `{"roles":[],"connectors":{}}` {
+		t.Fatalf("empty = %s", raw)
 	}
 }

@@ -1,4 +1,4 @@
-import type { Draft, DraftSource, FormRoleConnector, FormSource, RoleConnectorView, TeamForm } from "./teams.mjs";
+import type { Draft, DraftSource, FormConnector, FormRoleConnector, FormSource, RoleConnectorView, TeamForm } from "./teams.mjs";
 
 export const projectAlias: string;
 export const projectModes: string[];
@@ -22,13 +22,16 @@ export function withSource(form: TeamForm, index: number | undefined, patch: Par
 export function withProject(form: TeamForm, patch: Partial<FormSource>): TeamForm;
 export function availableSources(form: TeamForm | undefined, stored: { name: string; url: string; identity?: string; branch?: string; tag?: string; commit?: string }[] | undefined): Available[];
 export function inspectRequest(source: Partial<Available>): { path: string; body: Record<string, unknown> };
-export function selectedIndex(items: { source: string; path: string }[] | undefined, source: string, path: string): number;
+export function cleanPath(value: string | undefined): string;
+export function sameAddress(a: string, b: string): boolean;
+export function sameRepository(a: Available | undefined, b: Available | undefined): boolean;
+export function selectedIndex(items: { source: string; path: string }[] | undefined, source: string, path: string, available?: Available[]): number;
 type ConnectorSeed = { name: string; harness?: string; delivery?: string }[];
 export function withInherit(form: TeamForm, field: "roles" | "harnesses", inherit: boolean, inherited?: unknown[], seed?: ConnectorSeed): TeamForm;
 export function seededRole<T extends { connectors?: FormRoleConnector[] }>(role: T, seed?: ConnectorSeed): T;
-export function withRole(form: TeamForm, role: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[], seed?: ConnectorSeed): TeamForm;
+export function withRole(form: TeamForm, role: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[], seed?: ConnectorSeed, available?: Available[]): TeamForm;
 export function withRolePatch(form: TeamForm, index: number, patch: Record<string, unknown>): TeamForm;
-export function withHarness(form: TeamForm, harness: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[]): TeamForm;
+export function withHarness(form: TeamForm, harness: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[], available?: Available[]): TeamForm;
 export function imageList(value: string): string[];
 export function switchOf(task: { suspend?: boolean | null } | undefined): string;
 export function suspendOf(state: string): boolean | null;
@@ -41,8 +44,8 @@ export function rolesErrors(form: TeamForm | undefined): string[];
 export function initialPathValid(value: string): boolean;
 export function tasksErrors(form: TeamForm | undefined): string[];
 export function stepErrors(key: string, state: WizardState): string[];
-export function withConnector(form: TeamForm, name: string, patch: { method?: string; identity?: string }, inherited?: Record<string, { method?: string; identity?: string }>): TeamForm;
-export function withConnectorsInherit(form: TeamForm, inherit: boolean): TeamForm;
+export function withConnector(form: TeamForm, name: string, patch: { method?: string; identity?: string }, inherited?: Record<string, FormConnector>): TeamForm;
+export function withConnectorsInherit(form: TeamForm, inherit: boolean, inherited?: Record<string, FormConnector>): TeamForm;
 export type RoleConnectorRow = { name: string; title: string; enabled: boolean; identity: string; required: boolean; states: { config: string; state: string; fill: string }[] };
 export function togglable(connector: { harness?: string; delivery?: string } | undefined): boolean;
 export function roleConnectorRows(role: { name: string; connectors?: FormRoleConnector[] } | undefined, connectors: { name: string; title?: string; harness?: string; delivery?: string }[] | undefined, viewRows?: RoleConnectorView[]): RoleConnectorRow[];

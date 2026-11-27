@@ -349,7 +349,11 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 		if err != nil {
 			return nil, fmt.Errorf("%w: declaration: %w", errdefs.ErrInvalidTeam, err)
 		}
-		team, err := req.Form.apply(base, a.catalog)
+		inherited, err := inheritedRoles(ctx, opts.Client, base, req.Form)
+		if err != nil {
+			return nil, err
+		}
+		team, err := req.Form.apply(base, inherited, a.catalog)
 		if err != nil {
 			return nil, err
 		}
@@ -384,7 +388,11 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 	if base == nil {
 		return nil, fmt.Errorf("%w: %s", errdefs.ErrTeamNotFound, name)
 	}
-	team, err := req.Form.apply(base, a.catalog)
+	inherited, err := inheritedRoles(ctx, opts.Client, base, req.Form)
+	if err != nil {
+		return nil, err
+	}
+	team, err := req.Form.apply(base, inherited, a.catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -398,6 +406,22 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 		return nil, err
 	}
 	return a.outcomeView(ctx, previewerOf(opts.Client), outcome)
+}
+
+// inheritedRoles are the TeamDefaults' roles when form declares the roles of
+// a base that inherits them (#1746), so apply builds each over the default
+// role it copies; nil otherwise, without reading the defaults.
+func inheritedRoles(
+	ctx context.Context, client initialize.Client, base *config.Team, form *teamForm,
+) ([]config.Role, error) {
+	if form.Roles.Inherit || base.Spec.Roles != nil {
+		return nil, nil
+	}
+	defaults, err := initialize.Defaults(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	return defaults.Spec.Defaults.Roles, nil
 }
 
 // draftRequest is what the wizard's Project step reads: create team's
