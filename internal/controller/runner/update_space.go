@@ -23,8 +23,14 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// UpdateSpace updates an existing space with new metadata and compatible spec fields.
-// It only updates fields that are backward-compatible (labels).
+// UpdateSpace updates an existing space with the backward-compatible fields of
+// desired: labels, spec.defaults and spec.network. spec.defaults and
+// spec.network are replaced, so a desired document without spec.network
+// clears the space's egress policy (the space becomes unconstrained). The
+// egress policy is installed on the host firewall before the space is
+// persisted (#1703), the order CreateSpace uses: an invalid rule fails the
+// update without being stored, so the reconcile loop never re-asserts a policy
+// it cannot install.
 // Breaking changes (name, realm association, CNI config path) should be rejected before calling this method.
 func (r *Exec) UpdateSpace(desired intmodel.Space) (intmodel.Space, error) {
 	// Get existing space
@@ -37,7 +43,15 @@ func (r *Exec) UpdateSpace(desired intmodel.Space) (intmodel.Space, error) {
 	// canonical labels when the user's desired doc omits them (issue #455).
 	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 	existing.Spec.Defaults = desired.Spec.Defaults
+	existing.Spec.Network = desired.Spec.Network
 	// Note: CNIConfigPath is not updated as it's a breaking change
+
+	// Rebuild the space's egress chain from the new policy. The enforcer
+	// flushes and refills the chain, so removed rules and an allow→deny flip
+	// take effect here, not on a later reconcile tick.
+	if policyErr := r.applySpaceEgressPolicy(existing); policyErr != nil {
+		return intmodel.Space{}, policyErr
+	}
 
 	// Update metadata file
 	if updateErr := r.UpdateSpaceMetadata(existing); updateErr != nil {
