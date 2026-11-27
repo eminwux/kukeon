@@ -7,12 +7,17 @@ runs only when the files it covers changed; the rest show as skipped.
 | Job                 | Runs when these change                                                                                                 | Run locally                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                              | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check`       |
-| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                               |
-| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                                     |
+| `Go unit tests (…)` | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                               |
+| `Go e2e tests (…)`  | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                                     |
 | `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                            | `make web-ui-check`, `make web-ui-unit` and `make web-ui-test`                                 |
 | `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                          | `make test-harnesses`                                                                          |
 | `Onboarding e2e`    | `scripts/install.sh`, `internal/team/**`, `internal/webserver/**`, `internal/webui/**`, `team/**`, `pkg/team/**`, …    | `make e2e-onboarding` (root required; see [below](#make-e2e-onboarding))                       |
 | `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `scripts/install-test.sh`, `Makefile`                                    | `make install.sh`, `git diff --exit-code docs/site/install.sh`, `bash scripts/install-test.sh` |
+
+On a pull request the Go unit and e2e jobs run twice, once per architecture:
+`(amd64)` on `ubuntu-latest` and `(arm64)` on `ubuntu-24.04-arm`. On `main`
+only the `(amd64)` legs run. Locally you test your host's architecture only;
+the other one is left to CI.
 
 A change under `internal/webui/frontend/` or `internal/webui/dist/` runs the
 web UI job and not the Go jobs. The `Detect changed areas` job at the top of

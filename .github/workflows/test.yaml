@@ -220,11 +220,21 @@ jobs:
             exit 1
           fi
 
+  # Every release ships linux-arm64 binaries and a linux/arm64 kukeond image,
+  # so on a pull request this job and the e2e job below also run on a native
+  # arm64 runner (#1239). Only on a pull request: called from edge.yaml the
+  # event is `push` or `workflow_dispatch`, the list is amd64 alone, and the
+  # edge publish never waits for an arm64 runner. fail-fast is off so a red
+  # arm64 leg does not cancel the amd64 one, and each shows its own result.
   unit:
-    name: Go unit tests
+    name: Go unit tests (${{ matrix.arch }})
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64","arm64"]' || '["amd64"]') }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -256,12 +266,17 @@ jobs:
   # /var/run/docker/containerd/containerd.toml). No docker daemon is needed.
   # Mirrors the local-dev contract documented in AGENTS.md and
   # docs/site/install/build-from-source.md. Runs in parallel with the unit
-  # job above (no shared resources).
+  # job above (no shared resources). The arch matrix is the unit job's: arm64
+  # on pull requests only.
   e2e:
-    name: Go e2e tests
+    name: Go e2e tests (${{ matrix.arch }})
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64","arm64"]' || '["amd64"]') }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -308,12 +323,19 @@ jobs:
       # only)". Install the upstream containernetworking/plugins tarball to
       # match that contract; the Debian/Ubuntu apt package lands at
       # /usr/lib/cni and would miss the path kukeon's CNI manager probes.
+      # The tarball's architecture is the runner's (RUNNER_ARCH is X64 or
+      # ARM64).
       - name: Install CNI plugins to /opt/cni/bin
         env:
           CNI_VERSION: v1.4.1
         run: |
+          case "$RUNNER_ARCH" in
+            X64) cni_arch=amd64 ;;
+            ARM64) cni_arch=arm64 ;;
+            *) echo "::error::no CNI plugins tarball for runner arch ${RUNNER_ARCH}"; exit 1 ;;
+          esac
           sudo mkdir -p /opt/cni/bin
-          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" \
+          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${cni_arch}-${CNI_VERSION}.tgz" \
             | sudo tar -C /opt/cni/bin -xz
           test -x /opt/cni/bin/bridge
           test -x /opt/cni/bin/host-local
