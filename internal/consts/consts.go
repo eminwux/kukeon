@@ -233,6 +233,14 @@ const (
 	// opt-in for the workload side. Issue #599.
 	KukeonContainerKukettyLogFile = "kuketty.log"
 
+	// KukeonContainerSupervisorFile is the basename of the status document
+	// (kind: TerminalSupervisor) an Attachable container's kuketty writes
+	// inside KukeonContainerTTYDir, peer to the socket, capture and log files.
+	// kuketty rewrites it through a temporary file and a rename on every
+	// change; kukeond reads it on every status refresh and deletes a leftover
+	// one before the task starts. Issue #1711.
+	KukeonContainerSupervisorFile = "supervisor.json"
+
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"
 	KukeonSpaceLabelKey     = "space.kukeon.io"

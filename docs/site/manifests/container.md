@@ -464,17 +464,75 @@ Set this only for cells that hosts a nested runtime (containerd, runc, dockerd, 
 
 ## status
 
-| Field          | Type                                                                                                     | Description                                                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `name`         | string                                                                                                   | Matches `metadata.name`                                                                                                |
-| `id`           | string                                                                                                   | Containerd container id                                                                                                |
-| `state`        | `Pending`, `Ready`, `Stopped`, `Paused`, `Pausing`, `Failed`, `Unknown`, `NotCreated`, `Exited`, `Error` | Lifecycle state. `Exited` = task exited 0; `Error` = task exited non-zero; `Failed` = kukeon container bring-up fault. |
-| `restartCount` | int                                                                                                      | Times the container has restarted                                                                                      |
-| `restartTime`  | RFC3339 timestamp                                                                                        | Last restart                                                                                                           |
-| `startTime`    | RFC3339 timestamp                                                                                        | Current (or last) start                                                                                                |
-| `finishTime`   | RFC3339 timestamp                                                                                        | When the task exited (zero-value if still running)                                                                     |
-| `exitCode`     | int                                                                                                      | Exit code of the last run (0 if still running)                                                                         |
-| `exitSignal`   | string                                                                                                   | Signal that terminated the task, if any                                                                                |
+| Field          | Type                                                                                                     | Description                                                                                                                                                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | string                                                                                                   | Matches `metadata.name`                                                                                                                                                                                                                                                          |
+| `id`           | string                                                                                                   | Containerd container id                                                                                                                                                                                                                                                          |
+| `state`        | `Pending`, `Ready`, `Stopped`, `Paused`, `Pausing`, `Failed`, `Unknown`, `NotCreated`, `Exited`, `Error` | Lifecycle state. `Exited` = task exited 0; `Error` = task exited non-zero; `Failed` = kukeon container bring-up fault.                                                                                                                                                           |
+| `restartCount` | int                                                                                                      | Times the container has restarted                                                                                                                                                                                                                                                |
+| `restartTime`  | RFC3339 timestamp                                                                                        | Last restart                                                                                                                                                                                                                                                                     |
+| `startTime`    | RFC3339 timestamp                                                                                        | Current (or last) start                                                                                                                                                                                                                                                          |
+| `finishTime`   | RFC3339 timestamp                                                                                        | When the task exited (zero-value if still running)                                                                                                                                                                                                                               |
+| `exitCode`     | int                                                                                                      | Exit code of the last run (0 if still running)                                                                                                                                                                                                                                   |
+| `exitSignal`   | string                                                                                                   | Signal that terminated the task, if any                                                                                                                                                                                                                                          |
+| `reason`       | string                                                                                                   | Why the container ended, when it ended on its own with a non-zero exit (see [Failure reasons](#failure-reasons)). Kept once the task record is deleted (wind-down, teardown, reboot). Empty while it runs, after a clean exit, and for a container stopped while it was running. |
+| `message`      | string                                                                                                   | Detail backing `reason`: the failing repo and git's error, the stage and its error, or the exit code and signal                                                                                                                                                                  |
+| `repos`        | array                                                                                                    | Per-repo outcome of the wrapper's clone/fetch step: `name`, `target`, `state` (`cloned`, `fetched` or `failed`), `commit`, `error`. Reported in every state, including after a failure.                                                                                          |
+| `stages`       | array                                                                                                    | Per-stage outcome of the `runOn: create` stages: `index`, `state` (`done` or `failed`), `error`, `hash`                                                                                                                                                                          |
+| `supervisor`   | object                                                                                                   | What the kuketty wrapper (attachable containers only) last reported (see [Supervisor status](#supervisor-status))                                                                                                                                                                |
+
+### Supervisor status
+
+An attachable container's kuketty wrapper is the container's terminal supervisor. It writes its status to `tty/supervisor.json` (kind `TerminalSupervisor`) on every change, and kukeond copies it into `status.supervisor`, `status.repos` and `status.stages` on every status refresh, in any state. containerd stays authoritative for the state and the exit code.
+
+| Field              | Description                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`          | The wrapper's build version                                                                                                                             |
+| `phase`            | The last phase the wrapper entered: `Config`, `Repos`, `Stages`, `Running`, or `Exited` (the terminal ended). A failure leaves it at the failing phase. |
+| `phaseSince`       | When it entered `phase`                                                                                                                                 |
+| `current`          | The repo name or stage index in progress, or the one that failed                                                                                        |
+| `error`            | A failure outside any repo or stage: the config, the control socket, the log, the git plan or the terminal start                                        |
+| `attachedTerminal` | The terminal whose workload exit becomes the wrapper's exit code; always `main` today                                                                   |
+| `terminals[]`      | `id`, `state` (as sbsh reports it: `Initializing`, `Starting`, `Ready`, `Exited`, …), `pid`, `attachers`, `lastAttachedAt`, `exit` (`code`)             |
+| `exit`             | `code` and `at`: the code the wrapper exited with. Absent while it runs, and when it was killed. Dropped when it differs from containerd's exit code.   |
+| `updatedAt`        | When the wrapper last wrote the document                                                                                                                |
+
+kukeond deletes a leftover `tty/supervisor.json` before every start, so a record from the previous run is never credited to the next one. The workload can write to `tty/`, so the document is display data: kukeond reads at most 256 KiB, refuses symlinks and other non-regular files, requires `apiVersion: v1beta1` and `kind: TerminalSupervisor`, and logs why it ignored a document. Without a valid document the last reported values stay. A container started by a kuketty older than its kukeond writes no document until it is recreated.
+
+### Failure reasons
+
+| `reason`                      | When                                                                                           | `message` names                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------- |
+| `RepoFailed`                  | The wrapper exited in phase `Repos` (a `required` repo failed)                                 | The repo and git's error          |
+| `StageFailed`                 | The wrapper exited in phase `Stages` (a `runOn: create` stage failed)                          | The stage index and its error     |
+| `SupervisorFailed`            | The wrapper exited with `supervisor.error` set                                                 | The phase and the error           |
+| `SupervisorTerminated`        | The task stopped and the wrapper recorded no exit (it was killed)                              | The last phase and the signal     |
+| `WorkloadFailed`              | The attached terminal's workload, or a non-attachable container, exited non-zero               | The exit code and signal          |
+| `SupervisorStatusUnavailable` | An attachable container exited non-zero with no valid document (missing, unsupported, invalid) | Which of those, and the exit code |
+
+A cell in `Error` takes the `reason` and `message` of its failing container, so `kuke get cell` and `kuke health` show them too. A cell that fails to start (`Failed`) takes `RepoFailed`, `StageFailed` or `SupervisorFailed` from the container that caused it, in place of `StartCellFailed`.
+
+For a required repo that cannot be cloned:
+
+```yaml
+status:
+  state: Error
+  exitCode: 70
+  reason: RepoFailed
+  message: 'required repo "role-source" failed: <git error>'
+  repos:
+    - {
+        name: role-source,
+        target: /home/claude/role,
+        state: failed,
+        error: "<git error>",
+      }
+  supervisor:
+    phase: Repos
+    current: role-source
+    attachedTerminal: main
+    exit: { code: 70 }
+```
 
 ## Minimal (embedded in a cell)
 

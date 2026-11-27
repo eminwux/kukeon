@@ -200,7 +200,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 		// it directly, as `kuke log` did before #1537.
 		return runViaHostPath(cmd, client, doc, cell, container, out, follow)
 	}
-	return describeLogError(err, cell, container)
+	return describeLogError(err, cell, container, stoppedContainerStatus(ctx, client, doc))
 }
 
 // streamContainerLog prints the container's stream through ReadContainerLog.
@@ -276,16 +276,45 @@ func streamContainerLog(
 }
 
 // describeLogError adds the cell/container context `kuke log` has always
-// reported to the errors a stream read can end with.
-func describeLogError(err error, cell, container string) error {
+// reported to the errors a stream read can end with. status is the
+// container's status when it has stopped (see stoppedContainerStatus), nil
+// otherwise.
+func describeLogError(err error, cell, container string, status lazyStatus) error {
 	var missing *missingLogFileError
 	switch {
 	case errors.Is(err, errdefs.ErrContainerNotFound):
 		return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
 	case errors.As(err, &missing):
-		return noLogFileError(cell, container, missing.path)
+		return noLogFileError(cell, container, missing.path, status())
 	}
 	return err
+}
+
+// lazyStatus returns the container's status if it has stopped, nil
+// otherwise. It is only called when the log file is missing.
+type lazyStatus func() *v1beta1.ContainerStatus
+
+// stoppedContainerStatus reads the container from kukeond and returns its
+// status when the task is no longer running, so a missing log file is
+// explained by how the container ended rather than with "try again" (issue
+// #1711). A failed read, or a container still starting or running, yields
+// nil and the historical message.
+func stoppedContainerStatus(ctx context.Context, client kukeonv1.Client, doc v1beta1.ContainerDoc) lazyStatus {
+	return func() *v1beta1.ContainerStatus {
+		res, err := client.GetContainer(ctx, doc)
+		if err != nil || !res.ContainerExists {
+			return nil
+		}
+		st := res.Container.Status
+		switch st.State {
+		case v1beta1.ContainerStateStopped, v1beta1.ContainerStateExited,
+			v1beta1.ContainerStateError, v1beta1.ContainerStateFailed:
+			return &st
+		case v1beta1.ContainerStatePending, v1beta1.ContainerStateReady, v1beta1.ContainerStatePaused,
+			v1beta1.ContainerStatePausing, v1beta1.ContainerStateUnknown, v1beta1.ContainerStateNotCreated:
+		}
+		return nil
+	}
 }
 
 // missingLogFileError carries the daemon-side path of a stream file that
@@ -299,13 +328,37 @@ func (e *missingLogFileError) Error() string { return e.cause.Error() }
 func (e *missingLogFileError) Unwrap() error { return e.cause }
 
 // noLogFileError is the message `kuke log` prints when the container exists
-// but its stream file has not been opened yet.
-func noLogFileError(cell, container, path string) error {
+// but its stream file has not been opened. For a container that has stopped
+// (stopped non-nil) the file will never appear, so the message says the
+// container exited before its terminal started and names the supervisor
+// phase and the reason kukeond derived.
+func noLogFileError(cell, container, path string, stopped *v1beta1.ContainerStatus) error {
+	if stopped == nil {
+		return fmt.Errorf(
+			"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
+			cell,
+			container,
+			path,
+		)
+	}
+	var details []string
+	if stopped.Supervisor != nil && stopped.Supervisor.Phase != "" {
+		details = append(details, "phase "+string(stopped.Supervisor.Phase))
+	}
+	switch {
+	case stopped.Reason != "" && stopped.Message != "":
+		details = append(details, stopped.Reason+": "+stopped.Message)
+	case stopped.Reason != "":
+		details = append(details, stopped.Reason)
+	default:
+		details = append(details, fmt.Sprintf("exit code %d", stopped.ExitCode))
+	}
 	return fmt.Errorf(
-		"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
+		"cell %q container %q exited before its terminal started, so it has no log file at %s (%s)",
 		cell,
 		container,
 		path,
+		strings.Join(details, "; "),
 	)
 }
 
@@ -316,9 +369,10 @@ func runViaHostPath(
 	cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.ContainerDoc,
 	cell, container string, out io.Writer, follow bool,
 ) error {
+	status := stoppedContainerStatus(cmd.Context(), client, doc)
 	result, err := client.LogContainer(cmd.Context(), doc)
 	if err != nil {
-		return describeLogError(err, cell, container)
+		return describeLogError(err, cell, container, status)
 	}
 	streamPath := result.HostCapturePath
 	if streamPath == "" {
@@ -331,7 +385,7 @@ func runViaHostPath(
 	tail := resolveTail(cmd)
 	if tailErr := tail(cmd.Context(), streamPath, out, follow); tailErr != nil {
 		if errors.Is(tailErr, os.ErrNotExist) {
-			return noLogFileError(cell, container, streamPath)
+			return noLogFileError(cell, container, streamPath, status())
 		}
 		return tailErr
 	}

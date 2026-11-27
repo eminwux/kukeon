@@ -452,6 +452,13 @@ func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 	cell.Status.State = intmodel.CellStateFailed
 	cell.Status.Reason = reason
 	cell.Status.Message = message
+	// A container that exited during bring-up because its supervisor's setup
+	// failed (a required repo, a create stage, the supervisor itself) says
+	// precisely why the cell did not start; the cell takes that reason and
+	// message instead of the generic bring-up label (issue #1711).
+	if st, ok := failingContainerStatus(cell); ok && supervisorSetupReason(st.Reason) {
+		cell.Status.Reason, cell.Status.Message = cellFailureBreadcrumb(cell)
+	}
 	if updErr := r.UpdateCellMetadata(cell); updErr != nil {
 		r.logger.WarnContext(r.ctx,
 			"failed to persist Failed state after cell startup failure",

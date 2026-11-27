@@ -287,6 +287,77 @@ func TestLog_RPC_MissingStreamFile_NamesDaemonPath(t *testing.T) {
 	}
 }
 
+// A container that stopped before its terminal started never opens its log
+// file, so `kuke log` explains how it ended instead of saying "try again"
+// (issue #1711).
+func TestLog_RPC_MissingStreamFile_StoppedContainer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "never-written")
+	cases := []struct {
+		name   string
+		status v1beta1.ContainerStatus
+		want   string
+	}{
+		{
+			name: "with supervisor status",
+			status: v1beta1.ContainerStatus{
+				State: v1beta1.ContainerStateError, ExitCode: 70,
+				Reason:     v1beta1.ContainerReasonRepoFailed,
+				Message:    `required repo "role-source" failed: fatal: could not read`,
+				Supervisor: &v1beta1.SupervisorStatus{Phase: v1beta1.SupervisorPhaseRepos},
+			},
+			want: `cell "c1" container "work" exited before its terminal started, so it has no log file at ` + path +
+				` (phase Repos; RepoFailed: required repo "role-source" failed: fatal: could not read)`,
+		},
+		{
+			name:   "without supervisor status",
+			status: v1beta1.ContainerStatus{State: v1beta1.ContainerStateError, ExitCode: 70},
+			want: `cell "c1" container "work" exited before its terminal started, so it has no log file at ` + path +
+				` (exit code 70)`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := fileBackedClient(t, path, nil, nil)
+			fc.getContainerFn = func(v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+				return kukeonv1.GetContainerResult{
+					ContainerExists: true,
+					Container:       v1beta1.ContainerDoc{Status: tc.status},
+				}, nil
+			}
+			cmd, _ := newCmdWithCtx(t, fc, nil)
+			cmd.SetArgs(logArgs())
+			err := cmd.Execute()
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error = %v\nwant  %s", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "try again") {
+				t.Errorf("a stopped container still says try again: %v", err)
+			}
+		})
+	}
+}
+
+// A running container whose terminal has not opened its log yet keeps the
+// "try again" message.
+func TestLog_RPC_MissingStreamFile_RunningContainerSaysTryAgain(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	path := filepath.Join(t.TempDir(), "never-written")
+	fc := fileBackedClient(t, path, nil, nil)
+	fc.getContainerFn = func(v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+		return kukeonv1.GetContainerResult{
+			ContainerExists: true,
+			Container:       v1beta1.ContainerDoc{Status: v1beta1.ContainerStatus{State: v1beta1.ContainerStateReady}},
+		}, nil
+	}
+	cmd, _ := newCmdWithCtx(t, fc, nil)
+	cmd.SetArgs(logArgs())
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "try again after the container produces output") {
+		t.Fatalf("error = %v, want the try-again message", err)
+	}
+}
+
 // TestLog_RPC_OldDaemonFallsBackToHostPath covers a kukeond that predates
 // ReadContainerLog: `kuke log` resolves the host path and reads it itself.
 func TestLog_RPC_OldDaemonFallsBackToHostPath(t *testing.T) {

@@ -28,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -51,26 +50,31 @@ var errRequiredRepoFailed = errors.New("one or more required repos failed to res
 // there is no daemon-rendered sidecar doc.
 // An empty repos[] is a no-op (nil statuses) — the common case. When any repo
 // marked required fails, processRepos logs each outcome and returns
-// errRequiredRepoFailed alongside the partial statuses collected so far;
-// non-required failures are logged but do not propagate. The returned
-// statuses are the payload the GetSetupStatus RPC reports into
-// ContainerStatus.Repos (phase 1b, #642) — kukeond pulls them post-Serve. On
-// a required failure kuketty exits before Serve, so those statuses are never
-// reachable over the RPC; that path stays exit-code-driven (AC #5).
+// errRequiredRepoFailed alongside the statuses of every repo; non-required
+// failures are logged but do not propagate. obs, when non-nil, is told when
+// each repo starts and how it ended, so the supervisor document reports every
+// outcome, including on the failure path (issue #1711).
 func processRepos(
 	ctx context.Context, repos []v1beta1.ContainerRepo, plan *gitplan.Plan, logger *slog.Logger,
-) ([]setupstatus.Repo, error) {
+	obs repoObserver,
+) ([]v1beta1.RepoStatus, error) {
 	if len(repos) == 0 {
 		return nil, nil
 	}
 
-	statuses := make([]setupstatus.Repo, 0, len(repos))
+	statuses := make([]v1beta1.RepoStatus, 0, len(repos))
 	var requiredFailed bool
 	for i := range repos {
 		repo := repos[i]
+		if obs != nil {
+			obs.onRepoStart(repo.Name)
+		}
 		status := resolveRepo(ctx, repo, plan, logger)
 		statuses = append(statuses, status)
-		if status.State == setupstatus.StateFailed {
+		if obs != nil {
+			obs.onRepoDone(status)
+		}
+		if status.State == v1beta1.RepoStateFailed {
 			logger.WarnContext(ctx, "repo resolution failed",
 				"repo", repo.Name, "target", repo.Target, "required", repo.Required, "error", status.Error)
 			if repo.Required {
@@ -83,6 +87,28 @@ func processRepos(
 		return statuses, errRequiredRepoFailed
 	}
 	return statuses, nil
+}
+
+// repoObserver is told when each repo starts and how it ended.
+// *supervisorReporter implements it.
+type repoObserver interface {
+	onRepoStart(name string)
+	onRepoDone(status v1beta1.RepoStatus)
+}
+
+// firstFailedRequiredRepo returns the name of the first required repo that
+// failed, or "" when none did.
+func firstFailedRequiredRepo(repos []v1beta1.ContainerRepo, statuses []v1beta1.RepoStatus) string {
+	required := make(map[string]bool, len(repos))
+	for _, r := range repos {
+		required[r.Name] = r.Required
+	}
+	for _, st := range statuses {
+		if st.State == v1beta1.RepoStateFailed && required[st.Name] {
+			return st.Name
+		}
+	}
+	return ""
 }
 
 // repoGit is the git invocation context of one repo: the effective clone URL,
@@ -128,7 +154,7 @@ func (rg repoGit) configFlags() []string {
 }
 
 // resolveRepo clones or fetches a single repo and returns its resolved
-// setupstatus.Repo. If target/.git already exists it fetches + fast-forwards
+// v1beta1.RepoStatus. If target/.git already exists it fetches + fast-forwards
 // (clone-if-absent idempotency: the writable rootfs persists across
 // kuke stop/start, so a restart never re-clones); otherwise it clones. Either
 // way the planned repo-local config and origin URL are (re)written into the
@@ -138,8 +164,8 @@ func (rg repoGit) configFlags() []string {
 // with the commit; on failure it reports State failed with the error detail.
 func resolveRepo(
 	ctx context.Context, repo v1beta1.ContainerRepo, plan *gitplan.Plan, logger *slog.Logger,
-) setupstatus.Repo {
-	status := setupstatus.Repo{Name: repo.Name, Target: repo.Target}
+) v1beta1.RepoStatus {
+	status := v1beta1.RepoStatus{Name: repo.Name, Target: repo.Target}
 	rg := planRepoGit(repo, plan)
 
 	gitDir := filepath.Join(repo.Target, ".git")
@@ -148,10 +174,10 @@ func resolveRepo(
 		exists = true
 	}
 
-	state := setupstatus.StateCloned
+	state := v1beta1.RepoStateCloned
 	var opErr error
 	if exists {
-		state = setupstatus.StateFetched
+		state = v1beta1.RepoStateFetched
 		// Re-point origin and refresh the local config first: a changed
 		// credential must be in place before the fetch that needs it.
 		if opErr = applyRepoConfig(ctx, repo, rg); opErr == nil {
@@ -163,7 +189,7 @@ func resolveRepo(
 		}
 	}
 	if opErr != nil {
-		status.State = setupstatus.StateFailed
+		status.State = v1beta1.RepoStateFailed
 		status.Error = opErr.Error()
 		return status
 	}

@@ -534,6 +534,9 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				ExitSignal:   in.Status.ExitSignal,
 				Repos:        repoStatusesToInternal(in.Status.Repos),
 				Stages:       stageStatusesToInternal(in.Status.Stages),
+				Reason:       in.Status.Reason,
+				Message:      in.Status.Message,
+				Supervisor:   in.Status.Supervisor.DeepCopy(),
 			},
 		}, nil
 	default:
@@ -566,6 +569,9 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				ExitSignal:   in.Status.ExitSignal,
 				Repos:        repoStatusesToExternal(in.Status.Repos),
 				Stages:       stageStatusesToExternal(in.Status.Stages),
+				Reason:       in.Status.Reason,
+				Message:      in.Status.Message,
+				Supervisor:   in.Status.Supervisor.DeepCopy(),
 			},
 		}, nil
 	default:
@@ -1574,6 +1580,11 @@ func convertContainerStatusesToInternal(in []ext.ContainerStatus) []intmodel.Con
 			FinishTime:   status.FinishTime,
 			ExitCode:     status.ExitCode,
 			ExitSignal:   status.ExitSignal,
+			Reason:       status.Reason,
+			Message:      status.Message,
+			Repos:        repoStatusesToInternal(status.Repos),
+			Stages:       stageStatusesToInternal(status.Stages),
+			Supervisor:   status.Supervisor.DeepCopy(),
 		}
 	}
 	return result
@@ -1597,6 +1608,11 @@ func buildContainerStatusesExternalFromInternal(in []intmodel.ContainerStatus) [
 			FinishTime:   status.FinishTime,
 			ExitCode:     status.ExitCode,
 			ExitSignal:   status.ExitSignal,
+			Reason:       status.Reason,
+			Message:      status.Message,
+			Repos:        repoStatusesToExternal(status.Repos),
+			Stages:       stageStatusesToExternal(status.Stages),
+			Supervisor:   status.Supervisor.DeepCopy(),
 		}
 	}
 	return result

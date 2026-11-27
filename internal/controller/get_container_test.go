@@ -834,11 +834,11 @@ func TestGetContainer_NameTrimming(t *testing.T) {
 	}
 }
 
-// TestGetContainer_SurfacesSetupStatuses confirms GetContainer carries the
+// TestGetContainer_SurfacesRepoAndStageStatuses confirms GetContainer carries the
 // per-repo and per-create-stage outcomes that GetCell pulled into the cell's
 // container statuses through into result.Container.Status, so
 // `kuke get container <name> -o yaml/json` renders them (issues #642, #689).
-func TestGetContainer_SurfacesSetupStatuses(t *testing.T) {
+func TestGetContainer_SurfacesRepoAndStageStatuses(t *testing.T) {
 	mockRunner := &fakeRunner{}
 
 	existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
@@ -846,7 +846,7 @@ func TestGetContainer_SurfacesSetupStatuses(t *testing.T) {
 		{ID: "test-container", Image: "alpine:latest"},
 	}
 	// GetCell-populated per-container statuses, including the stage/repo outcomes
-	// pulled over the GetSetupStatus RPC.
+	// read from the supervisor document.
 	existingCell.Status.Containers = []intmodel.ContainerStatus{
 		{
 			ID: "test-container",

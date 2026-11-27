@@ -16,7 +16,11 @@
 
 package modelhub
 
-import "time"
+import (
+	"time"
+
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
 
 type Container struct {
 	Metadata ContainerMetadata
@@ -386,6 +390,16 @@ type ContainerStatus struct {
 	// ContainerStatus.Stages payload; schema only this phase, populated in
 	// phase B (#689). Issue #635.
 	Stages []StageStatus
+	// Reason and Message mirror the v1beta1 ContainerStatus fields: how the
+	// container ended when it ended on its own with a non-zero exit. Issue
+	// #1711.
+	Reason  string
+	Message string
+	// Supervisor is the last status the container's terminal supervisor
+	// (kuketty) reported in tty/supervisor.json. The v1beta1 type is used
+	// as-is, as ConnectorStatus is in cellconfig.go: it is display data
+	// copied from the document, with no internal-only fields. Issue #1711.
+	Supervisor *v1beta1.SupervisorStatus
 }
 
 // RepoStatus mirrors the v1beta1 RepoStatus payload. Issue #617.

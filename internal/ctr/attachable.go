@@ -73,6 +73,11 @@ const (
 	// process log specifically).
 	AttachableKukettyLogPath = AttachableTTYDir + "/" + consts.KukeonContainerKukettyLogFile
 
+	// AttachableSupervisorPath is the in-container path of kuketty's status
+	// document (kind: TerminalSupervisor), peer to the log inside the tty bind
+	// mount. Issue #1711.
+	AttachableSupervisorPath = AttachableTTYDir + "/" + consts.KukeonContainerSupervisorFile
+
 	// AttachableMetadataDir is the in-container directory where the
 	// kukeond-rendered terminal metadata file lives. Kept under
 	// /.kukeon/kuketty/ to mirror the /.kukeon/bin/ layout of the

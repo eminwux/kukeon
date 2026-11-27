@@ -231,6 +231,16 @@ func ContainerKukettyLogPath(baseRunPath, realmName, spaceName, stackName, cellN
 	)
 }
 
+// ContainerSupervisorPath returns the host-side path of an Attachable
+// container's supervisor status document, the host-visible peer of
+// ctr.AttachableSupervisorPath. Issue #1711.
+func ContainerSupervisorPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerSupervisorFile,
+	)
+}
+
 // ContainerLogPath returns the host-side path of the per-container stdout/
 // stderr log file written by the containerd runtime shim via cio.LogFile.
 // Used for non-Attachable containers (kukeond included): the shim opens this

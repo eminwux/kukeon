@@ -20,7 +20,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -65,7 +64,7 @@ func stageContentHash(stage v1beta1.TtyStage) string {
 //
 //   - the live entry at the matching Index, when present: the just-completed
 //     run is authoritative and its Hash is restamped from the current spec
-//     so a wire payload that omits Hash (kuketty does not stamp it today)
+//     so a supervisor-document entry that omits Hash (kuketty does not stamp it)
 //     still surfaces the daemon-computed key for the next populate's merge.
 //   - otherwise, the prior persisted entry at the same Index — but only when
 //     its Hash still matches the current spec's stage Hash and its State is
@@ -102,7 +101,7 @@ func mergeStageStatuses(
 		}
 		hash := stageContentHash(toV1beta1Stage(stage))
 		// Live wins; restamp Hash from the current spec (kuketty does not
-		// stamp it on the wire today; see setupstatus.Stage doc).
+		// stamp it in the supervisor document).
 		if liveStat, ok := liveByIndex[i]; ok {
 			liveStat.Hash = hash
 			out = append(out, liveStat)
@@ -112,7 +111,7 @@ func mergeStageStatuses(
 		// the current spec's stage Hash — an edited stage drops here.
 		if priorStat, ok := priorByIndex[i]; ok &&
 			priorStat.Hash == hash &&
-			priorStat.State == setupstatus.StageDone {
+			priorStat.State == v1beta1.StageStateDone {
 			out = append(out, priorStat)
 			continue
 		}
@@ -180,7 +179,7 @@ func applyStageRenderGate(onInit []v1beta1.TtyStage, priorStages []intmodel.Stag
 	}
 	doneHashes := make(map[string]struct{}, len(priorStages))
 	for _, st := range priorStages {
-		if st.State != setupstatus.StageDone || st.Hash == "" {
+		if st.State != v1beta1.StageStateDone || st.Hash == "" {
 			continue
 		}
 		doneHashes[st.Hash] = struct{}{}

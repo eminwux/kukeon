@@ -22,7 +22,6 @@ package runner
 import (
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -122,13 +121,13 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 			name: "survives stop: live empty, prior done at matching hash carries",
 			spec: specWithTwoCreate,
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0},
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0},
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 			live: nil,
 			want: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0},
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0},
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 		},
 		{
@@ -151,13 +150,13 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 			name: "edited stage drops prior done; sibling carries",
 			spec: specWithEditedStage0,
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0}, // stale
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0}, // stale
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 			live: nil,
 			want: []intmodel.StageStatus{
 				// Index 0 absent — it will run again on the next boot.
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 		},
 		{
@@ -168,15 +167,15 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 			name: "live wins and Hash is restamped from spec",
 			spec: specWithTwoCreate,
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0},
 			},
 			live: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone}, // wire payload has no Hash
-				{Index: 2, State: setupstatus.StageFailed, Error: "boom"},
+				{Index: 0, State: v1beta1.StageStateDone}, // wire payload has no Hash
+				{Index: 2, State: v1beta1.StageStateFailed, Error: "boom"},
 			},
 			want: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0},
-				{Index: 2, State: setupstatus.StageFailed, Error: "boom", Hash: hash2},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0},
+				{Index: 2, State: v1beta1.StageStateFailed, Error: "boom", Hash: hash2},
 			},
 		},
 		{
@@ -186,13 +185,13 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 			name: "prior failed does not carry across stop",
 			spec: specWithTwoCreate,
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageFailed, Error: "boom", Hash: hash0},
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 0, State: v1beta1.StageStateFailed, Error: "boom", Hash: hash0},
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 			live: nil,
 			want: []intmodel.StageStatus{
 				// Index 0 dropped: failed never carries.
-				{Index: 2, State: setupstatus.StageDone, Hash: hash2},
+				{Index: 2, State: v1beta1.StageStateDone, Hash: hash2},
 			},
 		},
 		{
@@ -202,7 +201,7 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 			name: "nil tty yields nil",
 			spec: intmodel.ContainerSpec{Tty: nil},
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: hash0},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: hash0},
 			},
 			live: nil,
 			want: nil,
@@ -230,12 +229,12 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 // the done-set the render gate consumes. Phase C2 (#737).
 func TestPriorStagesForContainer(t *testing.T) {
 	stages := []intmodel.StageStatus{
-		{Index: 0, State: setupstatus.StageDone, Hash: "h0"},
+		{Index: 0, State: v1beta1.StageStateDone, Hash: "h0"},
 	}
 	cell := intmodel.Cell{
 		Status: intmodel.CellStatus{
 			Containers: []intmodel.ContainerStatus{
-				{ID: "other", Stages: []intmodel.StageStatus{{Index: 0, State: setupstatus.StageFailed}}},
+				{ID: "other", Stages: []intmodel.StageStatus{{Index: 0, State: v1beta1.StageStateFailed}}},
 				{ID: "target", Stages: stages},
 			},
 		},
@@ -285,14 +284,14 @@ func TestApplyStageRenderGate(t *testing.T) {
 		{
 			name:       "empty OnInit: no-op",
 			onInit:     nil,
-			prior:      []intmodel.StageStatus{{Index: 0, State: setupstatus.StageDone, Hash: doneHash}},
+			prior:      []intmodel.StageStatus{{Index: 0, State: v1beta1.StageStateDone, Hash: doneHash}},
 			wantScript: nil,
 		},
 		{
 			name:   "done-record gates matching create stage by hash",
 			onInit: []v1beta1.TtyStage{doneStage, startStage, freshStage},
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: doneHash},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: doneHash},
 			},
 			wantScript: []string{"", startStage.Script, freshStage.Script},
 		},
@@ -300,7 +299,7 @@ func TestApplyStageRenderGate(t *testing.T) {
 			name:   "failed prior record never gates",
 			onInit: []v1beta1.TtyStage{doneStage},
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageFailed, Hash: doneHash},
+				{Index: 0, State: v1beta1.StageStateFailed, Hash: doneHash},
 			},
 			wantScript: []string{doneStage.Script},
 		},
@@ -308,7 +307,7 @@ func TestApplyStageRenderGate(t *testing.T) {
 			name:   "hash-less done record never gates",
 			onInit: []v1beta1.TtyStage{doneStage},
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone},
+				{Index: 0, State: v1beta1.StageStateDone},
 			},
 			wantScript: []string{doneStage.Script},
 		},
@@ -316,7 +315,7 @@ func TestApplyStageRenderGate(t *testing.T) {
 			name:   "non-matching hash never gates",
 			onInit: []v1beta1.TtyStage{doneStage},
 			prior: []intmodel.StageStatus{
-				{Index: 0, State: setupstatus.StageDone, Hash: "deadbeef0000beef"},
+				{Index: 0, State: v1beta1.StageStateDone, Hash: "deadbeef0000beef"},
 			},
 			wantScript: []string{doneStage.Script},
 		},
@@ -349,8 +348,8 @@ func TestApplyStageRenderGate(t *testing.T) {
 
 // TestMergeStageStatuses_AnchorsOnIndexInFullOnInit guards against a regression
 // where the merge would re-index create-stages contiguously (0, 1, ...) instead
-// of using their position in the full OnInit slice. The setupstatus wire
-// protocol and cmd/kuketty's createStages both emit Index relative to
+// of using their position in the full OnInit slice. The supervisor document
+// and cmd/kuketty's createStages both emit Index relative to
 // Tty.OnInit, so a contiguous re-index would silently mis-align prior records
 // against live entries.
 func TestMergeStageStatuses_AnchorsOnIndexInFullOnInit(t *testing.T) {
@@ -365,13 +364,13 @@ func TestMergeStageStatuses_AnchorsOnIndexInFullOnInit(t *testing.T) {
 	hash1 := stageContentHash(toV1beta1Stage(createStage))
 
 	prior := []intmodel.StageStatus{
-		{Index: 1, State: setupstatus.StageDone, Hash: hash1},
+		{Index: 1, State: v1beta1.StageStateDone, Hash: hash1},
 	}
 	got := mergeStageStatuses(spec, prior, nil)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1 (got=%+v)", len(got), got)
 	}
-	if got[0].Index != 1 || got[0].Hash != hash1 || got[0].State != setupstatus.StageDone {
+	if got[0].Index != 1 || got[0].Hash != hash1 || got[0].State != v1beta1.StageStateDone {
 		t.Errorf("stage[0] = %+v, want Index=1 Hash=%q State=done", got[0], hash1)
 	}
 }

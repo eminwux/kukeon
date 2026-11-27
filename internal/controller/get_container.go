@@ -128,8 +128,9 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 
 		// GetCell populated the complete per-container status — CreatedAt
 		// (issue #605), start/finish/restart times, restart count, exit
-		// code/signal (issue #1137), and the per-repo / per-create-stage
-		// outcomes pulled over the GetSetupStatus RPC (issues #642, #689).
+		// code/signal (issue #1137), the per-repo / per-create-stage
+		// outcomes and the supervisor status read from kuketty's
+		// supervisor document, and the derived reason (issue #1711).
 		// Carry the matching observation through whole so the named
 		// Container document agrees with its parent Cell (issue #1379),
 		// overriding only identity and the freshly-queried containerd state.

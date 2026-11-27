@@ -27,7 +27,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -71,14 +70,14 @@ func makeSourceRepo(t *testing.T, fileName string) string {
 }
 
 func TestProcessRepos_EmptyIsNoOp(t *testing.T) {
-	statuses, err := processRepos(context.Background(), nil, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), nil, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("nil repos should be a no-op, got %v", err)
 	}
 	if statuses != nil {
 		t.Fatalf("nil repos should yield nil statuses, got %v", statuses)
 	}
-	statuses, err = processRepos(context.Background(), []v1beta1.ContainerRepo{}, nil, discardLogger())
+	statuses, err = processRepos(context.Background(), []v1beta1.ContainerRepo{}, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("empty repos should be a no-op, got %v", err)
 	}
@@ -94,7 +93,7 @@ func TestProcessRepos_ClonesIntoTarget(t *testing.T) {
 	repos := []v1beta1.ContainerRepo{
 		{Name: "project", Target: target, Branch: "main", URL: src, Required: true},
 	}
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("processRepos: %v", err)
 	}
@@ -105,7 +104,7 @@ func TestProcessRepos_ClonesIntoTarget(t *testing.T) {
 		t.Fatalf("want 1 status, got %d: %v", len(statuses), statuses)
 	}
 	got := statuses[0]
-	if got.Name != "project" || got.Target != target || got.State != setupstatus.StateCloned {
+	if got.Name != "project" || got.Target != target || got.State != v1beta1.RepoStateCloned {
 		t.Errorf("unexpected status: %+v", got)
 	}
 	if got.Commit == "" {
@@ -124,7 +123,7 @@ func TestProcessRepos_FetchesExistingCheckout(t *testing.T) {
 	}
 
 	// First pass clones.
-	if _, err := processRepos(context.Background(), repos, nil, discardLogger()); err != nil {
+	if _, err := processRepos(context.Background(), repos, nil, discardLogger(), nil); err != nil {
 		t.Fatalf("first processRepos (clone): %v", err)
 	}
 
@@ -135,14 +134,14 @@ func TestProcessRepos_FetchesExistingCheckout(t *testing.T) {
 	gitRun(t, src, "add", ".")
 	gitRun(t, src, "commit", "-m", "second")
 
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("second processRepos (fetch): %v", err)
 	}
 	if _, err = os.Stat(filepath.Join(target, "second.txt")); err != nil {
 		t.Errorf("fetch should have fast-forwarded the new commit: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFetched {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateFetched {
 		t.Fatalf("want a single fetched status, got %+v", statuses)
 	}
 	if statuses[0].Commit == "" {
@@ -161,14 +160,13 @@ func TestProcessRepos_RequiredFailurePropagates(t *testing.T) {
 		},
 	}
 
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if !errors.Is(err, errRequiredRepoFailed) {
 		t.Fatalf("want errRequiredRepoFailed, got %v", err)
 	}
-	// Even on the required-failure path the partial statuses are returned so
-	// callers (and tests) can see the failure detail, though kuketty exits
-	// before Serve so the RPC never reports them.
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFailed {
+	// Even on the required-failure path the statuses are returned, and the
+	// supervisor document reports them (issue #1711).
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateFailed {
 		t.Fatalf("want a single failed status, got %+v", statuses)
 	}
 	if statuses[0].Error == "" {
@@ -187,11 +185,11 @@ func TestProcessRepos_NonRequiredFailureDoesNotPropagate(t *testing.T) {
 		},
 	}
 
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("non-required failure must not propagate, got %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFailed {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateFailed {
 		t.Fatalf("a non-required failure should still be reported as a failed status, got %+v", statuses)
 	}
 }
@@ -233,11 +231,11 @@ func TestProcessRepos_RefPinsCloneAndSurvivesRestart(t *testing.T) {
 	}
 
 	// First pass: clone at the tag (detached HEAD).
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("first processRepos (clone): %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateCloned {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateCloned {
 		t.Fatalf("want a single cloned status, got %+v", statuses)
 	}
 	if statuses[0].Commit != tagSHA {
@@ -254,11 +252,11 @@ func TestProcessRepos_RefPinsCloneAndSurvivesRestart(t *testing.T) {
 
 	// Second pass: fetch path — must NOT error on detached HEAD (the
 	// pre-fix `git pull --ff-only` did), and must stay on the tag.
-	statuses, err = processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err = processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("second processRepos (fetch on detached HEAD): %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFetched {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateFetched {
 		t.Fatalf("want a single fetched status, got %+v", statuses)
 	}
 	if statuses[0].Commit != tagSHA {
@@ -286,7 +284,7 @@ func TestProcessRepos_RefPinAcceptsCommitSHA(t *testing.T) {
 	repos := []v1beta1.ContainerRepo{
 		{Name: "pinned", Target: target, Ref: firstSHA, URL: src, Required: true},
 	}
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("processRepos: %v", err)
 	}
@@ -319,7 +317,7 @@ func TestProcessRepos_RefPinAcceptsCommitOnNoBranch(t *testing.T) {
 		{Name: "pinned", Target: target, Ref: mergeSHA, URL: src, Required: true},
 	}
 	for _, pass := range []string{"clone", "restart"} {
-		statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+		statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 		if err != nil {
 			t.Fatalf("%s: processRepos: %v", pass, err)
 		}
@@ -336,7 +334,7 @@ func TestProcessRepos_RefPinAcceptsCommitOnNoBranch(t *testing.T) {
 		Name: "missing", Target: filepath.Join(t.TempDir(), "checkout"),
 		Ref: strings.Repeat("0", 39) + "1", URL: src, Required: true,
 	}}
-	statuses, err := processRepos(context.Background(), missing, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), missing, nil, discardLogger(), nil)
 	if err == nil {
 		t.Fatalf("want an error for a commit the remote does not have, got %+v", statuses)
 	}
@@ -353,7 +351,7 @@ func TestProcessRepos_RequiredFailureAfterSuccessStillPropagates(t *testing.T) {
 		{Name: "bad", Target: filepath.Join(dir, "bad"), URL: filepath.Join(dir, "nope"), Required: true},
 	}
 
-	statuses, err := processRepos(context.Background(), repos, nil, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, nil, discardLogger(), nil)
 	if !errors.Is(err, errRequiredRepoFailed) {
 		t.Fatalf("want errRequiredRepoFailed, got %v", err)
 	}
@@ -365,10 +363,10 @@ func TestProcessRepos_RequiredFailureAfterSuccessStillPropagates(t *testing.T) {
 	if len(statuses) != 2 {
 		t.Fatalf("want 2 statuses, got %d: %+v", len(statuses), statuses)
 	}
-	if statuses[0].Name != "good" || statuses[0].State != setupstatus.StateCloned {
+	if statuses[0].Name != "good" || statuses[0].State != v1beta1.RepoStateCloned {
 		t.Errorf("status[0] = %+v, want good/cloned", statuses[0])
 	}
-	if statuses[1].Name != "bad" || statuses[1].State != setupstatus.StateFailed {
+	if statuses[1].Name != "bad" || statuses[1].State != v1beta1.RepoStateFailed {
 		t.Errorf("status[1] = %+v, want bad/failed", statuses[1])
 	}
 }

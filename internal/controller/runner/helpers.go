@@ -1009,11 +1009,16 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, namespace string, 
 // Stage carry-forward (phase C1, #690): per-create-stage done records are
 // merged with the previously-persisted Stages snapshot before the overwrite,
 // so a stop -> start cycle preserves the run-once "done" set the
-// (phase C2, #737) render gate consumes — the live pull is empty while a
-// container is non-Ready and would otherwise wipe the records on every stop
+// (phase C2, #737) render gate consumes — a restarted container's supervisor
+// document starts empty and would otherwise wipe the records on every start
 // (see mergeStageStatuses for the Index + Hash gate). The merge is anchored
 // on the live cell.Spec, so an edited create stage's prior done drops on the
 // next populate.
+//
+// Supervisor status (issue #1711): for an Attachable container the
+// tty/supervisor.json document kuketty writes is read on every pass, in any
+// state, and fills Repos, Stages and Supervisor; Reason and Message are then
+// derived from it (deriveContainerReason).
 func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	if len(cell.Spec.Containers) == 0 {
 		cell.Status.Containers = []intmodel.ContainerStatus{}
@@ -1052,7 +1057,19 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	// survives every reconciliation pass. Issue #1234 (epic #1151).
 	priorRestartCount := make(map[string]int, len(cell.Status.Containers))
 	priorRestartTime := make(map[string]time.Time, len(cell.Status.Containers))
+	// Snapshot prior Repos and Supervisor: when this pass reads no valid
+	// supervisor document (missing, unsupported, invalid), the last reported
+	// values stay rather than being wiped. Issue #1711.
+	priorRepos := make(map[string][]intmodel.RepoStatus, len(cell.Status.Containers))
+	priorSupervisor := make(map[string]*v1beta1.SupervisorStatus, len(cell.Status.Containers))
+	// Snapshot prior Reason/Message: a container whose task was deleted
+	// (Stopped: wind-down, teardown, reboot) keeps the reason it ended with.
+	type reasonPair struct{ reason, message string }
+	priorReason := make(map[string]reasonPair, len(cell.Status.Containers))
 	for _, prev := range cell.Status.Containers {
+		priorRepos[prev.ID] = prev.Repos
+		priorSupervisor[prev.ID] = prev.Supervisor
+		priorReason[prev.ID] = reasonPair{reason: prev.Reason, message: prev.Message}
 		priorStages[prev.ID] = prev.Stages
 		priorCreatedAt[prev.ID] = prev.CreatedAt
 		priorStartTime[prev.ID] = prev.StartTime
@@ -1137,80 +1154,53 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			ExitCode:     exitCode,
 			ExitSignal:   exitSignalName(exitCode),
 		}
-		// Pull per-repo clone/fetch and per-create-stage outcomes over the
-		// kuketty control socket (issues #642, #689) in a single dial.
-		// Best-effort: only Attachable containers that declared repos[] or
-		// create stages and are Ready can serve the verb, and any failure leaves
-		// Repos/Stages empty rather than blocking the status read.
+		// Read the supervisor document kuketty keeps in the tty directory
+		// (issue #1711), in any state: it carries the repo and create-stage
+		// outcomes, the supervisor's phase and its exit, including after a
+		// setup failure. Without a valid document the last reported values
+		// stay.
 		var liveStages []intmodel.StageStatus
-		status.Repos, liveStages = r.setupStatuses(cell, containerSpec, obs.State)
+		var docResult supervisorDocResult
+		if containerSpec.Attachable {
+			docResult = readSupervisorDoc(fs.ContainerTTYDir(
+				r.opts.RunPath,
+				cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name,
+				containerSpec.ID,
+			))
+			if docResult.State == supervisorDocValid {
+				liveStages = applySupervisorDoc(&status, docResult.Doc)
+			} else {
+				status.Repos = priorRepos[containerSpec.ID]
+				status.Supervisor = priorSupervisor[containerSpec.ID].DeepCopy()
+				if docResult.State != supervisorDocMissing {
+					r.logger.WarnContext(r.ctx, "ignoring supervisor status document",
+						"container", containerSpec.ID,
+						"state", docResult.State.String(),
+						"reason", docResult.Detail)
+				}
+			}
+		}
 		// Merge live + prior stages against the current spec so done
 		// records survive stop/start and edited stages drop their prior
 		// done. See mergeStageStatuses for the Index + Hash contract.
 		status.Stages = mergeStageStatuses(containerSpec, priorStages[containerSpec.ID], liveStages)
+		// Reasons (issue #1711): derived when the task ended on its own
+		// (Error/Failed); kept from the previous pass once the task record
+		// is deleted (Stopped keeps its exit code too, see above), so a
+		// failure stays inspectable after wind-down or a reboot; cleared
+		// otherwise. A container stopped while running had no reason to
+		// keep.
+		if status.State == intmodel.ContainerStateStopped {
+			prior := priorReason[containerSpec.ID]
+			status.Reason, status.Message = prior.reason, prior.message
+		} else {
+			status.Reason, status.Message = deriveContainerReason(status, containerSpec.Attachable, docResult)
+		}
 		statuses = append(statuses, status)
 	}
 
 	cell.Status.Containers = statuses
 	return nil
-}
-
-// setupStatuses pulls the per-repo clone/fetch outcome and the per-create-stage
-// outcome from a container's kuketty control socket via the GetSetupStatus RPC
-// (issues #642, #689) in a single dial, mapping the wire payload into the
-// internal RepoStatus / StageStatus the controller persists in
-// ContainerStatus.Repos / .Stages. ContainerStatus is the single source of
-// truth — there is no status file in the container.
-//
-// The pull is skipped (returns nil, nil) unless the container is Attachable,
-// Ready, and declared at least one repo[] or runOn: create stage: a kuketty
-// that has not reached Serve does not yet serve the verb, one that exited on a
-// required-repo or create-stage failure never will (its outcome comes from the
-// task-failed signal + kuketty log instead — AC #5), and a container with
-// neither repos nor create stages has nothing to report. Any dial/call error is
-// logged at debug and yields nil so a wedged or still-starting kuketty never
-// stalls `kuke get`.
-func (r *Exec) setupStatuses(
-	cell *intmodel.Cell,
-	containerSpec intmodel.ContainerSpec,
-	state intmodel.ContainerState,
-) ([]intmodel.RepoStatus, []intmodel.StageStatus) {
-	if !containerSpec.Attachable || state != intmodel.ContainerStateReady {
-		return nil, nil
-	}
-	if len(containerSpec.Repos) == 0 && !hasCreateStages(containerSpec) {
-		return nil, nil
-	}
-
-	socketPath := fs.ContainerSocketSymlinkPath(
-		r.opts.RunPath,
-		cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name,
-		containerSpec.ID,
-	)
-	reply, err := pullSetupStatus(r.ctx, socketPath)
-	if err != nil {
-		r.logger.DebugContext(r.ctx, "failed to pull setup status",
-			"container", containerSpec.ID,
-			"socket", socketPath,
-			"error", err)
-		return nil, nil
-	}
-	return repoStatusToInternal(reply.Repos), stageStatusToInternal(reply.Stages)
-}
-
-// hasCreateStages reports whether the container declares at least one runOn:
-// create TtyStage — the gate (alongside repos[]) for dialing kuketty's setup
-// status verb. Mirrors cmd/kuketty's createStages selection.
-func hasCreateStages(containerSpec intmodel.ContainerSpec) bool {
-	if containerSpec.Tty == nil {
-		return false
-	}
-	for _, s := range containerSpec.Tty.OnInit {
-		if s.RunOn == v1beta1.RunOnCreate {
-			return true
-		}
-	}
-	return false
 }
 
 // PopulateAndPersistCellContainerStatuses populates container statuses from containerd

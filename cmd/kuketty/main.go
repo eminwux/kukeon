@@ -51,6 +51,7 @@ import (
 	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/api/version"
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
 	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 	"golang.org/x/sys/unix"
@@ -159,24 +160,55 @@ func main() {
 		}
 		os.Exit(askpass(file, prompt, os.Stdout))
 	}
-	if err := run(os.Args[1:]); err != nil {
-		var usageErr *usageError
-		var wlErr *workloadExitError
-		switch {
-		case errors.As(err, &usageErr):
-			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
-			os.Exit(exitCodeUsage)
-		case errors.As(err, &wlErr):
-			// The workload itself exited non-zero. Propagate its code so the
-			// daemon records the container/cell as Error with the workload's
-			// real status (#1273) — this is the workload's fate, not a kuketty
-			// failure, so it gets no "kuketty:" diagnostic.
-			os.Exit(wlErr.code)
-		default:
-			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
-			os.Exit(exitCodeInternal)
-		}
+	// The supervisor document (issue #1711) records every exit path: the
+	// code is recorded immediately before os.Exit, so kukeond can tell a
+	// setup failure from a workload exit and from a kill.
+	reporter := newSupervisorReporter(supervisorDocPath, "")
+	err := run(os.Args[1:], reporter)
+	recordRunError(reporter, err)
+	code := exitCode(err, os.Stderr)
+	reporter.exit(code)
+	os.Exit(code)
+}
+
+// exitCode maps run()'s terminating cause to kuketty's exit code, printing the
+// "kuketty: …" diagnostic for wrapper failures to stderr.
+func exitCode(err error, stderr io.Writer) int {
+	if err == nil {
+		return 0
 	}
+	var usageErr *usageError
+	var wlErr *workloadExitError
+	switch {
+	case errors.As(err, &usageErr):
+		fmt.Fprintf(stderr, "kuketty: %v\n", err)
+		return exitCodeUsage
+	case errors.As(err, &wlErr):
+		// The workload itself exited non-zero. Propagate its code so the
+		// daemon records the container/cell as Error with the workload's
+		// real status (#1273) — this is the workload's fate, not a kuketty
+		// failure, so it gets no "kuketty:" diagnostic.
+		return wlErr.code
+	default:
+		fmt.Fprintf(stderr, "kuketty: %v\n", err)
+		return exitCodeInternal
+	}
+}
+
+// recordRunError records a failure outside any repo or stage in the
+// supervisor document. A required repo or stage failure is already recorded
+// against that repo or stage, and a workload exit is the workload's, not the
+// supervisor's.
+func recordRunError(reporter *supervisorReporter, err error) {
+	var wlErr *workloadExitError
+	switch {
+	case err == nil,
+		errors.As(err, &wlErr),
+		errors.Is(err, errRequiredRepoFailed),
+		errors.Is(err, errRequiredStageFailed):
+		return
+	}
+	reporter.setError(err)
 }
 
 // usageError is the typed wrapper for malformed invocations so main() can
@@ -189,7 +221,11 @@ func (e *usageError) Error() string { return e.msg }
 // builds the sbsh TerminalSpec from kukeon's own ContainerSpec, binds the
 // control socket, and hands the listener + spec to sbsh's server facade.
 // Returns the terminating cause; main() maps the error class to an exit code.
-func run(args []string) error {
+//
+// reporter receives every phase change and repo, stage and terminal outcome
+// for the supervisor document (issue #1711); main() records the exit.
+func run(args []string, reporter *supervisorReporter) error {
+	reporter.setPhase(v1beta1.SupervisorPhaseConfig)
 	configPath, err := parseArgs(args)
 	if err != nil {
 		return err
@@ -199,6 +235,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	name := doc.Metadata.Name
+	if name == "" {
+		name = doc.Spec.ID
+	}
+	reporter.setName(name)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -233,13 +274,14 @@ func run(args []string) error {
 		return err
 	}
 	defer closeLogger()
+	reporter.setLogger(logger)
 
 	// Pre-Serve step (issue #617): clone/fetch the container's declared repos
 	// before the workload starts. A required-repo failure returns here, so
 	// kuketty exits non-zero before sbshserver.Serve and the daemon observes
-	// the task as Failed (the RPC below is never reached on that path — AC #5).
-	// An empty repos[] is a no-op. The per-repo outcomes feed the GetSetupStatus
-	// verb registered on the control server below (issue #642).
+	// the task as failed. Every repo's outcome is written to the supervisor
+	// document as it resolves, so the failure is reported (issue #1711). An
+	// empty repos[] is a no-op.
 	// Stored git credentials (issue #1472): load the plan the daemon staged,
 	// start the per-container ssh-agent for passphrase-protected keys, and
 	// export its socket so both the clones below and the workload reach it.
@@ -250,34 +292,33 @@ func run(args []string) error {
 	stopAgent := startGitAgent(ctx, gitPlan, logger)
 	defer stopAgent()
 
-	repoStatuses, err := processRepos(ctx, doc.Spec.Repos, gitPlan, logger)
-	if err != nil {
+	if err = runSetup(ctx, doc.Spec, gitPlan, logger, reporter); err != nil {
 		return err
 	}
 
-	// Pre-Serve step (issue #635): run the container's runOn: create TtyStages
-	// to completion before the workload starts. Like a required-repo failure, a
-	// failed create stage returns here so kuketty exits non-zero before
-	// sbshserver.Serve and the daemon observes the task as Failed. runOn: start
-	// (and absent) stages are not run here — they were forwarded to sbsh's
-	// Stages.OnInit at buildTerminalSpec and run in-shell every boot. The
-	// per-stage outcomes feed the GetSetupStatus verb registered below (issue
-	// #689); on the failure path stageStatuses is discarded with the error and
-	// the verb is never reached.
-	stageStatuses, err := processStages(ctx, createStages(doc.Spec.Tty), logger)
-	if err != nil {
-		return err
-	}
+	return serveTerminal(ctx, spec, listener, logger, reporter)
+}
 
-	// Register the GetSetupStatus verb on the same control socket the daemon
-	// dials for `kuke attach`, so kukeond can pull the repo + create-stage
-	// outcomes post-Serve and write ContainerStatus.Repos / .Stages (issues
-	// #642, #689). ContainerStatus is the single source of truth — there is no
-	// status file in the container.
-	srv, err := sbshserver.New(spec, logger, setupStatusOption(repoStatuses, stageStatuses)...)
+// serveTerminal starts the attached terminal on the claimed control socket
+// and serves it until it ends, keeping the supervisor document's terminal
+// entry current.
+func serveTerminal(
+	ctx context.Context, spec *sbshapi.TerminalSpec, listener net.Listener, logger *slog.Logger,
+	reporter *supervisorReporter,
+) error {
+	srv, err := sbshserver.New(spec, logger)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}
+	reporter.startTerminals()
+	// sbsh does not report terminal status changes yet (#1721), so poll its
+	// metadata while the terminal runs.
+	pollCtx, stopPoll := context.WithCancel(ctx)
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		reporter.pollTerminal(pollCtx, attachedTerminalID, srv.Metadata, terminalPollInterval)
+	}()
 	// The workload's exit is surfaced through kuketty's own exit code so the
 	// daemon's task-exit-code → container/cell-state derivation (#1267/#1269)
 	// reflects the workload's fate, not the wrapper's (issue #1273). sbsh
@@ -288,16 +329,59 @@ func run(args []string) error {
 	//     with that code);
 	//   - anything else is a genuine kuketty-internal failure → exitCodeInternal.
 	serveErr := srv.Serve(ctx, listener)
+	stopPoll()
+	<-pollDone
+	return serveResult(serveErr, reporter)
+}
+
+// serveResult maps Serve's terminating cause to run()'s result and records the
+// end of the attached terminal in the supervisor document.
+func serveResult(serveErr error, reporter *supervisorReporter) error {
+	defer reporter.terminalsExited()
 	if isCleanShutdown(serveErr) {
 		return nil
 	}
 	if code, ok := workloadExitCode(serveErr); ok {
+		reporter.setTerminalExit(code)
 		if code == 0 {
 			return nil
 		}
 		return &workloadExitError{code: code}
 	}
 	return fmt.Errorf("server.Serve: %w", serveErr)
+}
+
+// runSetup runs kuketty's pre-Serve steps: the container's repos, then its
+// runOn: create stages. It enters each phase only when there is work in it,
+// and leaves the failing repo or stage named in the supervisor document.
+func runSetup(
+	ctx context.Context, cspec v1beta1.ContainerSpec, gitPlan *gitplan.Plan, logger *slog.Logger,
+	reporter *supervisorReporter,
+) error {
+	if len(cspec.Repos) > 0 {
+		reporter.setPhase(v1beta1.SupervisorPhaseRepos)
+	}
+	repoStatuses, err := processRepos(ctx, cspec.Repos, gitPlan, logger, reporter)
+	if err != nil {
+		// processRepos resolves every repo before it fails; name the first
+		// required one that failed.
+		reporter.setCurrent(firstFailedRequiredRepo(cspec.Repos, repoStatuses))
+		return err
+	}
+
+	// Pre-Serve step (issue #635): run the container's runOn: create TtyStages
+	// to completion before the workload starts. Like a required-repo failure, a
+	// failed create stage returns here so kuketty exits non-zero before
+	// sbshserver.Serve and the daemon observes the task as failed. runOn: start
+	// (and absent) stages are not run here — they were forwarded to sbsh's
+	// Stages.OnInit at buildTerminalSpec and run in-shell every boot. Each
+	// stage's outcome is written to the supervisor document (issue #1711).
+	stages := createStages(cspec.Tty)
+	if len(stages) > 0 {
+		reporter.setPhase(v1beta1.SupervisorPhaseStages)
+	}
+	_, err = processStages(ctx, stages, logger, reporter)
+	return err
 }
 
 // parseArgs accepts a single optional `--config <path>` override. Any other
