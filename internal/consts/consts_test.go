@@ -187,6 +187,58 @@ func TestIsKukeonNamespaceRejectsForeignSuffixUnderCustom(t *testing.T) {
 	})
 }
 
+// TestUnambiguousRealmFromNamespaceMixedInstances pins issue #1718: with the
+// default and dev instances on one containerd, each suffix claims by name
+// only its own realm namespaces and their BuildKit history companions.
+func TestUnambiguousRealmFromNamespaceMixedInstances(t *testing.T) {
+	mixed := []string{
+		"kuke-system.kukeon.io",
+		"default.kukeon.io_history",
+		"kuke-system.dev.kukeon.io",
+		"default.dev.kukeon.io_history",
+		"probe.x.y.kukeon.io",
+		"moby",
+	}
+	cases := []struct {
+		suffix, cgroupRoot string
+		// want maps each realm namespace this suffix claims to its realm;
+		// wantHistory lists the claimed history companions.
+		want        map[string]string
+		wantHistory map[string]bool
+	}{
+		{
+			suffix:      "kukeon.io",
+			cgroupRoot:  "/kukeon",
+			want:        map[string]string{"kuke-system.kukeon.io": "kuke-system"},
+			wantHistory: map[string]bool{"default.kukeon.io_history": true},
+		},
+		{
+			suffix:      "dev.kukeon.io",
+			cgroupRoot:  "/kukeon-dev",
+			want:        map[string]string{"kuke-system.dev.kukeon.io": "kuke-system"},
+			wantHistory: map[string]bool{"default.dev.kukeon.io_history": true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.suffix, func(t *testing.T) {
+			withRuntime(t, tc.suffix, tc.cgroupRoot, func(t *testing.T) {
+				for _, ns := range mixed {
+					if got := consts.UnambiguousRealmFromNamespace(ns); got != tc.want[ns] {
+						t.Errorf("UnambiguousRealmFromNamespace(%q) = %q, want %q", ns, got, tc.want[ns])
+					}
+					if got, want := consts.IsUnambiguousKukeonNamespace(ns), tc.want[ns] != ""; got != want {
+						t.Errorf("IsUnambiguousKukeonNamespace(%q) = %v, want %v", ns, got, want)
+					}
+					if got := consts.IsUnambiguousBuildKitHistoryNamespace(ns); got != tc.wantHistory[ns] {
+						t.Errorf("IsUnambiguousBuildKitHistoryNamespace(%q) = %v, want %v",
+							ns, got, tc.wantHistory[ns])
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestConfigureRuntimeRejectsInvalidSuffix(t *testing.T) {
 	cases := []struct {
 		name   string

@@ -48,6 +48,13 @@ func realmNamespace(r v1beta1.RealmDoc) string {
 	return consts.RealmNamespace(r.Metadata.Name)
 }
 
+// unambiguousKukeonNamespace reports whether ns is a realm namespace or its
+// BuildKit history companion that this instance can claim from the name
+// alone, without a realm to confirm it (issue #1718).
+func unambiguousKukeonNamespace(ns string) bool {
+	return consts.IsUnambiguousKukeonNamespace(ns) || consts.IsUnambiguousBuildKitHistoryNamespace(ns)
+}
+
 // Section names — kept as constants so the renderer's section grouping and
 // the JSON `section` field are spelled the same way everywhere.
 const (
@@ -387,10 +394,17 @@ func checkStateNamespaces(ctx context.Context, rc *runCtx) Result {
 
 	if rc.daemonClient == nil {
 		// Daemon is down — we can't enumerate realms to cross-check.
-		// Report what we see without a verdict beyond the count.
-		sort.Strings(kukeonNS)
+		// Report what we see without a verdict beyond the count. With no
+		// realms to confirm them, count only namespaces this instance can
+		// claim by name (no parallel instance's, issue #1718).
+		count := 0
+		for _, ns := range kukeonNS {
+			if unambiguousKukeonNamespace(ns) {
+				count++
+			}
+		}
 		r.Status = StatusOK
-		r.Detail = fmt.Sprintf("%d kukeon namespaces (daemon down, no cross-check)", len(kukeonNS))
+		r.Detail = fmt.Sprintf("%d kukeon namespaces (daemon down, no cross-check)", count)
 		return r
 	}
 
@@ -412,16 +426,25 @@ func checkStateNamespaces(ctx context.Context, rc *runCtx) Result {
 		expectedNS[consts.BuildKitHistoryNamespace(ns)] = true
 	}
 
-	var residual []string
+	// An unclaimed namespace whose realm name has a "." is skipped rather
+	// than flagged: under the default suffix it may be a parallel
+	// `*.dev.kukeon.io` instance's (issue #1718), not residue of this one.
+	var ours, residual []string
 	for _, ns := range kukeonNS {
-		if !expectedNS[ns] {
-			residual = append(residual, ns)
+		if expectedNS[ns] {
+			ours = append(ours, ns)
+			continue
 		}
+		if !unambiguousKukeonNamespace(ns) {
+			continue
+		}
+		ours = append(ours, ns)
+		residual = append(residual, ns)
 	}
 
 	if len(residual) == 0 {
 		r.Status = StatusOK
-		r.Detail = fmt.Sprintf("%d kukeon namespaces, all claimed by a realm", len(kukeonNS))
+		r.Detail = fmt.Sprintf("%d kukeon namespaces, all claimed by a realm", len(ours))
 		return r
 	}
 

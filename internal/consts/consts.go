@@ -448,6 +448,33 @@ func RealmFromNamespace(ns string) string {
 	return ns[:len(ns)-len(RealmNamespaceSuffix)]
 }
 
+// UnambiguousRealmFromNamespace is RealmFromNamespace for callers that find
+// namespaces by name alone, with no realm metadata to confirm them: it also
+// returns the empty string when the stripped realm name contains a ".".
+//
+// The suffix test cannot tell two instances apart when one suffix ends with
+// the other. Realm names may contain "." (ValidateRealmName rejects only "_"
+// and "/"), so under the default suffix "kukeon.io" the dev instance's
+// "kuke-system.dev.kukeon.io" reads as realm "kuke-system.dev". Treating a
+// dotted remainder as not ours keeps a default-suffix `kuke uninstall`, `kuke
+// status` or `kuke health` off a parallel instance's namespaces (issue
+// #1718). The cost: a dotted realm of this instance is recognised only
+// through its metadata, never from the namespace name alone.
+func UnambiguousRealmFromNamespace(ns string) string {
+	realm := RealmFromNamespace(ns)
+	if strings.Contains(realm, ".") {
+		return ""
+	}
+	return realm
+}
+
+// IsUnambiguousKukeonNamespace reports whether ns is a kukeon namespace whose
+// realm name has no "." — one that UnambiguousRealmFromNamespace can claim
+// for this instance from the name alone.
+func IsUnambiguousKukeonNamespace(ns string) bool {
+	return UnambiguousRealmFromNamespace(ns) != ""
+}
+
 // BuildKitHistoryNamespaceSuffix is the suffix BuildKit (driven by kukebuild,
 // BuildKit-as-library) appends to a containerd namespace to form its companion
 // history-store namespace. BuildKit's solver/llbsolver/history.go derives it as
@@ -473,4 +500,15 @@ func IsBuildKitHistoryNamespace(ns string) bool {
 		return false
 	}
 	return IsKukeonNamespace(ns[:len(ns)-len(BuildKitHistoryNamespaceSuffix)])
+}
+
+// IsUnambiguousBuildKitHistoryNamespace is IsBuildKitHistoryNamespace with the
+// owning namespace held to IsUnambiguousKukeonNamespace, so the companion of
+// another instance's namespace (e.g. "default.dev.kukeon.io_history" under
+// the default suffix) is not claimed.
+func IsUnambiguousBuildKitHistoryNamespace(ns string) bool {
+	if !strings.HasSuffix(ns, BuildKitHistoryNamespaceSuffix) {
+		return false
+	}
+	return IsUnambiguousKukeonNamespace(ns[:len(ns)-len(BuildKitHistoryNamespaceSuffix)])
 }

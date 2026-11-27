@@ -1107,7 +1107,8 @@ func TestKuke_Uninstall_VerifyState(t *testing.T) {
 }
 
 // listKukeonContainerdNamespaces returns every containerd namespace whose
-// name carries the canonical `.kukeon.io` suffix. Used by the uninstall
+// name carries the canonical `.kukeon.io` suffix and a realm name with no
+// "." (consts.IsUnambiguousKukeonNamespace). Used by the uninstall
 // VerifyState test to assert no kukeon-owned namespaces survived the
 // teardown — the regression guard for #193 / #194.
 //
@@ -1140,7 +1141,9 @@ func listKukeonContainerdNamespaces(t *testing.T) []string {
 		if len(fields) == 0 || fields[0] == "NAME" {
 			continue
 		}
-		if consts.IsKukeonNamespace(fields[0]) {
+		// Unambiguous names only: a parallel `*.dev.kukeon.io` instance on
+		// the same containerd is not this uninstall's to remove (#1718).
+		if consts.IsUnambiguousKukeonNamespace(fields[0]) {
 			surviving = append(surviving, fields[0])
 		}
 	}
