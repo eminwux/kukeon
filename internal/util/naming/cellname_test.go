@@ -50,18 +50,59 @@ func TestGenerateCellName_TrimsPrefix(t *testing.T) {
 	}
 }
 
-func TestGenerateCellName_Unique(t *testing.T) {
-	const samples = 256
+// uniqueSamples and maxUniqueDuplicates bound TestGenerateCellName_Unique.
+// The suffix has only 2^24 values (DefaultCellNameSuffixBytes = 3), so a
+// correct generator hits about 256·255/2 / 2^24 ≈ 0.002 colliding pairs per
+// 256 draws: one duplicate happens in ~0.19% of runs. Tolerating up to two
+// keeps the false-failure rate near 1e-9, while a constant or low-entropy
+// generator still produces far more duplicates than that.
+const (
+	uniqueSamples       = 256
+	maxUniqueDuplicates = 2
+)
+
+// countDuplicates draws samples names from gen and returns how many repeated
+// an earlier draw.
+func countDuplicates(t *testing.T, gen func() (string, error), samples int) int {
+	t.Helper()
 	seen := make(map[string]struct{}, samples)
+	dups := 0
 	for i := 0; i < samples; i++ {
-		got, err := naming.GenerateCellName("c")
+		got, err := gen()
 		if err != nil {
-			t.Fatalf("GenerateCellName: %v", err)
+			t.Fatalf("generate name: %v", err)
 		}
 		if _, dup := seen[got]; dup {
-			t.Fatalf("GenerateCellName produced duplicate %q within %d samples", got, samples)
+			dups++
 		}
 		seen[got] = struct{}{}
+	}
+	return dups
+}
+
+func TestGenerateCellName_Unique(t *testing.T) {
+	gen := func() (string, error) { return naming.GenerateCellName("c") }
+	if dups := countDuplicates(t, gen, uniqueSamples); dups > maxUniqueDuplicates {
+		t.Fatalf("GenerateCellName produced %d duplicates within %d samples, want at most %d",
+			dups, uniqueSamples, maxUniqueDuplicates)
+	}
+}
+
+// TestGenerateCellName_UniqueCatchesWeakGenerators pins that the tolerance in
+// TestGenerateCellName_Unique still rejects broken generators.
+func TestGenerateCellName_UniqueCatchesWeakGenerators(t *testing.T) {
+	constant := func() (string, error) { return "c-000000", nil }
+	if dups := countDuplicates(t, constant, uniqueSamples); dups <= maxUniqueDuplicates {
+		t.Errorf("constant generator: %d duplicates, want more than %d", dups, maxUniqueDuplicates)
+	}
+
+	// One byte of entropy: 256 draws from 256 values repeat ~94 times.
+	oneByte := func() (string, error) {
+		s, err := naming.RandomHexSuffix(1)
+		return "c-" + s, err
+	}
+	if dups := countDuplicates(t, oneByte, uniqueSamples); dups <= maxUniqueDuplicates {
+		t.Errorf("1-byte generator: %d duplicates, want more than %d", dups, maxUniqueDuplicates)
 	}
 }
 
