@@ -79,9 +79,11 @@ Reclaim dangling image layers and orphaned leases in a realm.
 
 `kuke image prune` reclaims dangling image layers and orphaned content leases in the target realm's containerd namespace, then reports how many leases were released versus retained. It takes no positional arguments.
 
-| Flag      | Default   | Description                                          |
-| --------- | --------- | ---------------------------------------------------- |
-| `--realm` | `default` | Target realm; the prune runs in `<realm>.kukeon.io`  |
+The released leases include the ones that hold `kuke build`'s cache, so the prune also removes the realm's BuildKit cache directory, `/var/lib/kukebuild/<namespace>`, and says so in its output. Its records point at the snapshots the prune lets containerd collect; kept, they would make the next `kuke build` into the realm fail with `parent snapshot ... does not exist`. The next build into the realm runs uncached.
+
+| Flag      | Default   | Description                                         |
+| --------- | --------- | --------------------------------------------------- |
+| `--realm` | `default` | Target realm; the prune runs in `<realm>.kukeon.io` |
 
 ### Examples
 
@@ -97,6 +99,7 @@ Sample output:
 
 ```
 pruned realm "default" (namespace "default.kukeon.io"): released 3 lease(s), retained 12
+removed build cache /var/lib/kukebuild/default.kukeon.io: its records pointed at the released leases; the next `kuke build` into the realm starts uncached
 ```
 
 ## Related

@@ -1161,12 +1161,17 @@ type DeleteImageResult struct {
 }
 
 // PruneImagesResult reports the outcome of a `kuke image prune`: the realm /
-// namespace it ran against and the count of leases released vs. retained.
+// namespace it ran against, the count of leases released vs. retained, and
+// the namespace's kukebuild cache directory the prune dropped (issue #1705).
 type PruneImagesResult struct {
 	Realm          string
 	Namespace      string
 	LeasesDeleted  int
 	LeasesRetained int
+	// BuildCachePath is the kukebuild state directory of the namespace.
+	BuildCachePath string
+	// BuildCacheRemoved reports that BuildCachePath existed and was removed.
+	BuildCacheRemoved bool
 }
 
 // ---- Cgroup detail (issue #1410) ----

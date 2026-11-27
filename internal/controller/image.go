@@ -66,12 +66,17 @@ type DeleteImageResult struct {
 }
 
 // PruneImagesResult reports the outcome of a `kuke image prune`: the realm /
-// namespace it ran against and the count of leases released vs. retained.
+// namespace it ran against, the count of leases released vs. retained, and
+// what happened to the namespace's kukebuild cache directory.
 type PruneImagesResult struct {
 	Realm          string
 	Namespace      string
 	LeasesDeleted  int
 	LeasesRetained int
+	// BuildCache reports the drop of <BuildCacheBaseDir>/<namespace>. Its Err
+	// is set, and PruneImages returns an error, when the directory exists but
+	// could not be removed.
+	BuildCache BuildCachePurgeOutcome
 }
 
 // ListImages enumerates images in the realm's containerd namespace. The
@@ -242,6 +247,14 @@ func (b *Exec) PullImage(realm, ref string) (PullImageResult, error) {
 // so callers see ErrRealmNotFound before any containerd round-trip; the
 // namespace mapping mirrors DeleteImage. Tagged images and the snapshots
 // backing live cells are left untouched (see ctr.PruneImages).
+//
+// The prune releases the leases that hold BuildKit's cache snapshots, so the
+// namespace's kukebuild state directory (<BuildCacheBaseDir>/<namespace>,
+// whose cache.db points at those snapshots) is dropped too: kept, it would
+// make the next `kuke build` into the realm fail with "parent snapshot ...
+// does not exist" (issue #1705, the prune twin of #904). Prune is therefore a
+// full build-cache reset for the realm. Image commands run in-process on the
+// host (#226), which is where kukebuild keeps that directory.
 func (b *Exec) PruneImages(realm string) (PruneImagesResult, error) {
 	var res PruneImagesResult
 
@@ -270,6 +283,18 @@ func (b *Exec) PruneImages(realm string) (PruneImagesResult, error) {
 	res.Namespace = namespace
 	res.LeasesDeleted = pruned.LeasesDeleted
 	res.LeasesRetained = pruned.LeasesRetained
+
+	buildCacheBase := b.opts.BuildCacheBaseDir
+	if buildCacheBase == "" {
+		buildCacheBase = consts.KukebuildBaseDir
+	}
+	res.BuildCache = reclaimNamespaceBuildCache(buildCacheBase, namespace)
+	if res.BuildCache.Err != nil {
+		return res, fmt.Errorf(
+			"%w: remove build cache %s: %w",
+			errdefs.ErrPruneImages, res.BuildCache.Path, res.BuildCache.Err,
+		)
+	}
 	return res, nil
 }
 

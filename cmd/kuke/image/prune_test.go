@@ -59,6 +59,56 @@ func TestPruneCmd_DefaultRealmSuccess(t *testing.T) {
 	}
 }
 
+// TestPruneCmd_ReportsRemovedBuildCache: when the prune drops the realm's
+// kukebuild cache directory (#1705), the output says so; when there was none
+// to drop, it prints no cache line.
+func TestPruneCmd_ReportsRemovedBuildCache(t *testing.T) {
+	const cachePath = "/var/lib/kukebuild/kuke-system.kukeon.io"
+	for _, removed := range []bool{true, false} {
+		fake := &fakePruneClient{
+			pruneImagesFn: func(realm string) (kukeonv1.PruneImagesResult, error) {
+				return kukeonv1.PruneImagesResult{
+					Realm:             realm,
+					Namespace:         realm + ".kukeon.io",
+					LeasesDeleted:     47,
+					BuildCachePath:    cachePath,
+					BuildCacheRemoved: removed,
+				}, nil
+			},
+		}
+		out, err := runPrune(t, fake, []string{"--realm", "kuke-system"})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		hasLine := strings.Contains(out, "removed build cache "+cachePath)
+		if hasLine != removed {
+			t.Errorf("removed=%v: build cache line present=%v; output: %s", removed, hasLine, out)
+		}
+	}
+}
+
+// TestPruneCmd_BuildCacheErrorStillPrintsSummary: a cache removal failure
+// is returned, but the lease summary is printed first because the leases
+// were released.
+func TestPruneCmd_BuildCacheErrorStillPrintsSummary(t *testing.T) {
+	fake := &fakePruneClient{
+		pruneImagesFn: func(realm string) (kukeonv1.PruneImagesResult, error) {
+			return kukeonv1.PruneImagesResult{
+				Realm:         realm,
+				Namespace:     realm + ".kukeon.io",
+				LeasesDeleted: 5,
+			}, errors.New("remove build cache: permission denied")
+		},
+	}
+	out, err := runPrune(t, fake, nil)
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("expected the cache error, got %v", err)
+	}
+	if !strings.Contains(out, "released 5 lease(s)") {
+		t.Errorf("summary missing on cache error; got: %s", out)
+	}
+}
+
 func TestPruneCmd_ExplicitRealm(t *testing.T) {
 	var gotRealm string
 	fake := &fakePruneClient{

@@ -69,6 +69,10 @@ type PruneResult struct {
 // Idempotent: a second run on a clean realm finds only retained (or zero)
 // leases and deletes nothing.
 //
+// The released leases include the ones holding BuildKit's cache snapshots,
+// which kukebuild's per-namespace cache.db still points at; the controller
+// (Exec.PruneImages) drops that state directory after this call (#1705).
+//
 // Real-containerd integration of the prune lives in the dev-init smoke and
 // e2e suite; CI's `make test` target avoids needing a containerd socket, so
 // the per-package regression tests drive pruneLeases with a fake.
