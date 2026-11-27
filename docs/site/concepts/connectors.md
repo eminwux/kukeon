@@ -72,7 +72,8 @@ The one way to use the token for git is to ask for it (issue #1693): with
 identity — `basic-auth`, username `x-access-token`, `hosts: github.com` — that
 records the github identity it came from in the reserved identity key
 `kukeon.io/token-from`. Storing the github identity again with git on rotates
-that linked git identity too. The web form's **Make this the default** sets
+that linked git identity too; with git off, the linked git identity keeps the
+previous token, and the CLI and the web form warn about it. The web form's **Make this the default** sets
 both defaults. See
 [Use your GitHub token](../guides/git-credentials.md#1-use-your-github-token).
 

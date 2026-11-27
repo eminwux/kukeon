@@ -7,7 +7,7 @@ import { workspaceLink } from "./routes";
 import {
   allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, defaultTargets, emptyGitForm, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
   formatSecretReference, harnessEphemeral, identitiesFor, identityDefaultOn, identityErrors, identityFields, identityPayload, keepsLogin, linkedGitIdentity, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeAtLevel, scopeChoices, scopeLevel, scopeLevels, scopeParts, scopeQuery,
-  secretBasicAuth, secretOpaque, secretRef, secretSSHKey, secretTypeChoices, secretTypesOf, sessionScope, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf, tokenForGit, tokenGitErrors, tokenGitPayload,
+  secretBasicAuth, secretOpaque, secretRef, secretSSHKey, secretTypeChoices, secretTypesOf, sessionScope, staleGitNotice, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
@@ -296,7 +296,7 @@ export function SecretMaterialFields({ type, form, set, pending, authorOnly = fa
 // generated from the connector's secretTypes and fields. Material is
 // write-only: held only while typed, sent in the POST body, cleared on every
 // submission and never rendered back.
-type IdentityResult = { name: string; scope: Scope; action: string; git?: { name: string; scope: Scope; action: string }; defaults?: Array<{ connector: string }> };
+type IdentityResult = { name: string; scope: Scope; action: string; git?: { name: string; scope: Scope; action: string }; defaults?: Array<{ connector: string }>; staleGit?: SecretRef };
 
 // IdentityForm also offers, on a connector whose token can serve git (#1693),
 // "Also use this token for git": the server stores the same token as a git
@@ -352,7 +352,10 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
       const parts = [`${title} identity ${ref.name} ${verb(result.action)} in ${place}.`];
       if (result.git) parts.push(`Git identity ${result.git.name} ${verb(result.git.action)} for ${hosts}.`);
       if (result.defaults?.length) parts.push(result.defaults.length > 1 ? `Both are now the defaults in ${place}.` : `It is now the default in ${place}.`);
-      notify({ key: `identity:${connector.name}:${refKey(ref)}`, tone: "success", message: parts.join(" ") });
+      // With git off, a git identity linked to the token keeps the previous one (#1707).
+      const stale = staleGitNotice(result);
+      if (stale) parts.push(stale);
+      notify({ key: `identity:${connector.name}:${refKey(ref)}`, tone: stale ? "warning" : "success", message: parts.join(" ") });
       if (!existing) setForm(emptyIdentityForm(connector));
       onSaved(ref, result.action);
     } catch (caught) { setError(toFailure(caught)); }
@@ -374,7 +377,7 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
         <p className="description">{linked ? <>Rotates the linked git identity <code>{linked.name}</code> too.</> : <>Also stored as the git identity <code>{offer.name}</code>: username and token, for HTTPS on {hosts} only.</>} Signing needs an SSH key: <a href={newIdentityLink(offer.connector, scope)}>Import from this machine</a>.</p>
         <label className="schema-field"><span>Commit author</span><input value={git.gitAuthor} placeholder="Name <email>" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitAuthor: event.target.value })); setError(undefined); }} /><small>Optional. The name and email of commits made with this identity.</small></label>
         <label className="schema-field"><span>Username</span><input value={git.gitUsername} placeholder={offer.username} disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitUsername: event.target.value })); setError(undefined); }} /><small>Optional. {title} accepts any non-empty username with a personal access token; empty stores <code>{offer.username}</code>.</small></label>
-      </> : <p className="description">Git is unchanged: the token reaches cells as an API token only.</p>}
+      </> : <p className="description">Git is unchanged: the token reaches cells as an API token only.{linked && <> The linked git identity <code>{linked.name}</code> keeps the previous token: check the box to rotate it too.</>}</p>}
     </div>}
     {target && <div className="schema-fields identity-default">
       <label className="schema-check"><input type="checkbox" checked={defaultOn} disabled={pending} onChange={event => setMakeDefault(event.target.checked)} />Make this the default{where && <> in {where}</>}</label>

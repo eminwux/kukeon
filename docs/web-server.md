@@ -1441,7 +1441,9 @@ submitted material.
   `{ "name", "scope", "connector", "type", "identity", "action" }`, plus `git`
   (the git identity, same shape) and `defaults` (each default set: `connector`,
   `method`, `scope`, `level`, `identity`, `previous`, `action`): the material
-  is never echoed. A failure after the first write says what was stored and
+  is never echoed. A github identity stored without `git` also returns
+  `staleGit`, a Secret reference to the git identity linked to it, when there
+  is one: that identity was not rotated and keeps the previous token. A failure after the first write says what was stored and
   what was not.
 - `POST /api/configs/connector` picks an identity for one Config, or clears the
   pick with a `null` identity. Body `{ "config", "connector", "identity" }`. A

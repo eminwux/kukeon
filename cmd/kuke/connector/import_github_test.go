@@ -136,6 +136,55 @@ func TestImportGitHubWithoutGit(t *testing.T) {
 	if len(daemon.created) != 1 || daemon.created[0].Spec.Connector != "github" || daemon.realmGitDefault() != nil {
 		t.Fatalf("created = %+v, git default = %+v", daemon.created, daemon.realmGitDefault())
 	}
+	if strings.Contains(out, "Warning") {
+		t.Errorf("no git identity is linked, yet the import warns:\n%s", out)
+	}
+}
+
+// TestImportGitHubWithoutGitWarnsOfTheLinkedIdentity: rotating the github
+// identity without --git leaves its linked git identity on the old token, and
+// the command says so and how to rotate it (issue #1707).
+func TestImportGitHubWithoutGitWarnsOfTheLinkedIdentity(t *testing.T) {
+	daemon := newFakeDaemon()
+	if out, err := runStdin(t, daemon, ghToken, "import", "github", "--token-stdin", "--git"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err := runStdin(t, daemon, ghToken+"-2", "import", "github", "--token-stdin")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(daemon.created) != 3 || daemon.created[2].Spec.Connector != "github" {
+		t.Fatalf("created = %+v, want the github identity alone rotated", daemon.created)
+	}
+	want := "Warning: git identity github-git@default still holds the previous token: it is linked to github " +
+		"identity github-token@default and was not rotated. Rerun with --git to rotate it too."
+	if !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+}
+
+// TestImportGitHubWithoutGitStoresWhenTheLookupFails: without --git the
+// linked git identity is looked up only to warn, so a failed lookup is
+// reported and the token is stored all the same; with --git it fails the
+// command before anything is stored.
+func TestImportGitHubWithoutGitStoresWhenTheLookupFails(t *testing.T) {
+	daemon := newFakeDaemon()
+	daemon.listSecretsErr = errors.New("list refused")
+	out, err := runStdin(t, daemon, ghToken, "import", "github", "--token-stdin")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(daemon.created) != 1 ||
+		!strings.Contains(
+			out,
+			"Warning: could not look for a git identity linked to the github identity: list refused",
+		) {
+		t.Errorf("created = %+v:\n%s", daemon.created, out)
+	}
+	if _, err = runStdin(t, daemon, ghToken, "import", "github", "--token-stdin", "--git"); err == nil ||
+		!strings.Contains(err.Error(), "list refused") || len(daemon.created) != 1 {
+		t.Errorf("with --git: err = %v, created %d", err, len(daemon.created))
+	}
 }
 
 // TestImportGitHubDryRun: --dry-run prints both identities and reaches no

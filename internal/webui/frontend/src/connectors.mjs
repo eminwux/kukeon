@@ -382,6 +382,13 @@ export function linkedGitIdentity(secrets, connector, identity) {
   if (!offer || !ref) return undefined;
   return identitiesFor(secrets, offer.connector).find(item => item.identity[identityTokenFrom] === formatSecretReference(ref));
 }
+// staleGitNotice is the warning for a token stored with git off while a git
+// identity is linked to it (#1707): the server names that git identity in the
+// result's staleGit, and it still holds the previous token.
+export function staleGitNotice(result) {
+  const name = text(result?.staleGit?.name);
+  return name ? `Git identity ${name} still holds the previous token: rotate again with "Also use this token for git" checked to rotate it too.` : undefined;
+}
 // emptyGitForm is the "Also use this token for git" part of a form: on by
 // default for a new identity, and for a rotation when a git identity is
 // linked to it.

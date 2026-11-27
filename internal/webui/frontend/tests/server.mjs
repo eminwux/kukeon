@@ -386,6 +386,9 @@ export async function mockConnectorAPI(page, world) {
       const gitAction = store(gitSecret);
       result.git = { name: gitSecret.name, scope: body.scope, connector: offer.connector, type: "basic-auth", identity: gitSecret.identity, action: gitAction };
     }
+    // With git off, the git identity linked to the token is not rotated: the result names it (#1707).
+    const stale = offer && !body.git ? world.secrets.find(item => item.connector === offer.connector && item.identity?.["kukeon.io/token-from"] === link && scopePath(item) === scopePath(body.scope)) : undefined;
+    if (stale) result.staleGit = refOf(stale);
     if (body.makeDefault) {
       const fills = world.defaults[scopePath(body.scope)] ??= {};
       const method = connector.methods.find(item => item.name === body.method) ?? (connector.methods.filter(item => item.slot).length === 1 ? connector.methods.find(item => item.slot) : undefined);

@@ -5,7 +5,7 @@ import {
   groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
   harnessEphemeral, harnessPersistent, keepsLogin, loginBody, loginEmpty, loginIdentitiesFor, loginLoggedIn, loginNameError, loginStateText, loginTone, picksIdentity, sessionScope, stateText, statusIdentity,
-  emptyGitForm, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
+  emptyGitForm, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, staleGitNotice, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -505,6 +505,14 @@ test("a rotation keeps the reserved token-from key and finds the linked git iden
   assert.equal(linkedGitIdentity(secrets, example, { name: "forge-token", realm: "dev" }), undefined);
   const rotate = { ...emptyIdentityForm(repo, { name: "forge-git", type: "basic-auth", identity: secrets[0].spec.identity }), username: "x-access-token", password: "tok" };
   assert.deepEqual(identityPayload(repo, { realm: "dev" }, rotate).identity, { hosts: "forge.example.com", [identityTokenFrom]: "forge-token@dev" });
+});
+
+test("a token stored with git off warns of the git identity the server names as stale", () => {
+  assert.equal(staleGitNotice({ name: "forge-token", staleGit: { name: "forge-git", realm: "dev" } }),
+    'Git identity forge-git still holds the previous token: rotate again with "Also use this token for git" checked to rotate it too.');
+  assert.equal(staleGitNotice({ name: "forge-token" }), undefined);
+  assert.equal(staleGitNotice({ staleGit: { name: 7 } }), undefined);
+  assert.equal(staleGitNotice(undefined), undefined);
 });
 
 test("secret types are a described choice; a git-delivered connector says what each gives a cell", () => {

@@ -52,6 +52,8 @@ type fakeDaemon struct {
 	deletedCells []string
 	// createCellErr fails the start of every identity cell.
 	createCellErr error
+	// listSecretsErr fails every ListSecrets.
+	listSecretsErr error
 }
 
 func volumeKey(md v1beta1.VolumeMetadata) string {
@@ -170,6 +172,9 @@ func (f *fakeDaemon) ListRealms(context.Context) ([]v1beta1.RealmDoc, error) {
 }
 
 func (f *fakeDaemon) ListSecrets(context.Context, string, string, string, string) ([]v1beta1.SecretDoc, error) {
+	if f.listSecretsErr != nil {
+		return nil, f.listSecretsErr
+	}
 	out := make([]v1beta1.SecretDoc, 0, len(f.secrets))
 	for _, secret := range f.secrets {
 		out = append(out, secret)

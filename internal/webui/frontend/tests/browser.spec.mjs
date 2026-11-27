@@ -4064,6 +4064,16 @@ test("a token connector stores its token for git too, and makes both the default
   expect(posts()[2].body).toEqual({ scope: { realm: "dev" }, name: "forge-token", type: "opaque", value: token + "-3", git: {} });
   // The rotated git identity keeps its link and its author.
   expect(world.secrets.filter(item => item.name === "forge-git")).toEqual([expect.objectContaining({ identity: { hosts: "forge.example.com", author: "Dev <dev@example.com>", "kukeon.io/token-from": "forge-token@dev" } })]);
+
+  // Rotating it with the box unchecked leaves the linked git identity on the previous token: the form and
+  // the result say so (#1707).
+  await page.getByRole("table", { name: "Forge identities" }).getByRole("link", { name: "Rotate Forge identity forge-token — dev", exact: true }).click();
+  await rotate.getByRole("checkbox", { name: "Also use this token for git on forge.example.com" }).uncheck();
+  await expect(rotate).toContainText("The linked git identity forge-git keeps the previous token: check the box to rotate it too.");
+  await rotate.getByRole("textbox", { name: /^Token/ }).fill(token + "-4");
+  await rotate.getByRole("button", { name: "Rotate identity" }).click();
+  await expect(toasts(page).filter({ hasText: `Forge identity forge-token rotated in dev. Git identity forge-git still holds the previous token: rotate again with "Also use this token for git" checked to rotate it too.` })).toBeVisible();
+  expect(posts()[3].body).toEqual({ scope: { realm: "dev" }, name: "forge-token", type: "opaque", value: token + "-4" });
   expect(await page.content()).not.toContain(token);
 });
 

@@ -225,6 +225,9 @@ github identity keeps its name, hosts and author and gets the new token. A
 Secret of the git identity's name that is not linked to this github identity
 is never overwritten; the command fails and asks for `--git-name`. The username
 is not read back, so a rerun stores `--username`, or `x-access-token`, again.
+A rerun without `--git` rotates the github identity only: the git identity
+linked to it keeps the previous token, and the command prints a warning that
+names it and says to rerun with `--git`.
 
 When a write after the first fails — the git identity, or a default — the
 command prints what was stored and fails with an error naming what was not.
