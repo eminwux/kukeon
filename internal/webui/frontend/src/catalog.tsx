@@ -17,6 +17,7 @@ import { ScheduleDetails, cellLinker } from "./schedule";
 import { nextColumn, scheduleColumn, validTime, type Schedule, type ScheduleStatus } from "./schedule-format.mjs";
 import { configDisplayName, isTemplate, ownDisplayName } from "./cells.mjs";
 import { RenameControl, renameConfig } from "./display-name";
+import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 
 type Metadata = { name: string; realm?: string; space?: string; stack?: string; cell?: string; labels?: Record<string, string>; annotations?: Record<string, string> };
 type CatalogDoc = { metadata: Metadata; spec?: Record<string, unknown>; [key: string]: unknown };
@@ -241,14 +242,17 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
   const [confirming, setConfirming] = useState<CatalogDoc | null>(null);
   const [pending, setPending] = useState<Set<string>>(() => new Set());
   const [removed, setRemoved] = useState<Set<string>>(() => new Set());
-  const [failure, setFailure] = useState<{ target: string; message: string } | null>(null);
-  async function runDelete(scope: string[]) {
+  // The failed deletes still shown, one per target: several can run at once (#1745).
+  const [failures, setFailures] = useState<{ target: string; message: string }[]>([]);
+  // runDelete deletes one document and resolves to its outcome. quiet leaves the toast and the failure
+  // notice to a batch, which reports every row once.
+  async function runDelete(scope: string[], quiet = false): Promise<{ ok: boolean; message: string }> {
     const key = JSON.stringify(scope);
     const target = scope.join(" / ");
-    if (pending.has(key)) return;
+    if (pending.has(key)) return { ok: false, message: "A delete of it is still running." };
     setPending(old => new Set(old).add(key));
-    setFailure(null);
-    notify({ key: `catalog-delete:${kind}:${key}`, tone: "pending", title: target, message: `Deleting ${singular[kind].toLowerCase()}…` });
+    setFailures(old => old.filter(item => item.target !== target));
+    if (!quiet) notify({ key: `catalog-delete:${kind}:${key}`, tone: "pending", title: target, message: `Deleting ${singular[kind].toLowerCase()}…` });
     let message: string | null = null;
     try {
       const response = await fetch(catalogDeleteAPI(kind, scope), { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: "{}" });
@@ -259,31 +263,46 @@ function CatalogList({ kind, revision, inventory, onChanged }: { kind: string; r
     } catch (error) { message = error instanceof Error ? error.message : "Request failed"; }
     // Only a fresh read decides whether the row goes: a refusal or a lost response may still have deleted it.
     const present = await readCatalogPresence(kind, scope);
+    let outcome = { ok: true, message: "" };
     if (present === false) {
       setRemoved(old => new Set(old).add(key));
-      notify({ key: `catalog-delete:${kind}:${key}`, tone: "success", title: target, message: `${singular[kind]} deleted.` });
+      if (!quiet) notify({ key: `catalog-delete:${kind}:${key}`, tone: "success", title: target, message: `${singular[kind]} deleted.` });
     } else {
       const shown = message ?? (present === null ? "Deleted, but the follow-up read failed; refresh to confirm." : "kukeond reported success, but the resource is still listed.");
-      setFailure({ target, message: shown });
-      notify({ key: `catalog-delete:${kind}:${key}`, tone: message ? "error" : "warning", title: target, message: shown });
+      outcome = { ok: false, message: shown };
+      if (!quiet) {
+        setFailures(old => [...old.filter(item => item.target !== target), { target, message: shown }]);
+        notify({ key: `catalog-delete:${kind}:${key}`, tone: message ? "error" : "warning", title: target, message: shown });
+      }
     }
     setPending(old => { const next = new Set(old); next.delete(key); return next; });
     onChanged();
+    return outcome;
   }
   const [query, setQuery] = useState("");
   const [realm, setRealm] = useState("");
   const [page, setPage] = useState(0);
   const rows = (list.data ?? []).filter(doc => !removed.has(JSON.stringify([...scopeOf(doc.metadata), doc.metadata.name]))).filter(doc => (!realm || doc.metadata.realm === realm) && [...scopeOf(doc.metadata), doc.metadata.name].join(" / ").toLowerCase().includes(query.toLowerCase())).sort((a, b) => [...scopeOf(a.metadata), a.metadata.name].join("/").localeCompare([...scopeOf(b.metadata), b.metadata.name].join("/")));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / 25) - 1));
+  // Row selection and bulk delete (#1745). A row deleted here leaves the list, so it leaves the selection.
+  const keyOf = (doc: CatalogDoc) => JSON.stringify([...scopeOf(doc.metadata), doc.metadata.name]);
+  const listed = (list.data ?? []).filter(doc => !removed.has(keyOf(doc)));
+  const selection = useSelection(listed.map(keyOf), !!list.data);
+  const selectedRows: BulkRow[] = listed.filter(doc => selection.has(keyOf(doc))).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return { key: keyOf(doc), scope, label: scope.join(" / ") }; });
+  const noun = countNoun(singular[kind].toLowerCase());
+  const bulkDelete: BulkAction<BulkRow>[] = [{ name: "delete", verb: "Delete", danger: true, consequence: deleteConsequence[kind],
+    reasonOf: row => pending.has(row.key) ? "a delete of it is still running" : "",
+    acknowledgment: `I understand this permanently deletes every ${singular[kind].toLowerCase()} listed${kind === "volumes" ? " and its data" : ""}.` }];
   return <>
     {list.error && <ErrorNotice error={list.error} kind={catalogTitles[kind].replace(/s$/, "")} />}
     {list.error && list.data && <p className="stale">Stale {kind} list — refresh failed.</p>}
     {kind === "secrets" && <p className="description">Metadata only. Secret values are never returned by this browser.</p>}
-    {failure && <div className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>}
+    {failures.map(failure => <div key={failure.target} className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>)}
     <section className="panel" aria-label={`${catalogTitles[kind]} list`} aria-busy={list.loading}>
       <div className="list-controls"><label className="search-field">Search<input type="search" value={query} placeholder={`Search ${kind}…`} onChange={e => { setQuery(e.target.value); setPage(0); }} /></label><label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{[...new Set(list.data?.map(doc => doc.metadata.realm))].sort().map(name => <option key={name}>{name}</option>)}</select></label><span className="result-count">{rows.length} results</span>{(kind === "blueprints" || kind === "configs") && <a className="document-action" href={newConfigLink()}>New Config</a>}{kind === "secrets" && <a className="document-action" href={newSecretLink()}>New Secret</a>}</div>
       {list.loading && <p className="scope-filter" role="status">Loading {kind}…</p>}
-      <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>Scope</th>{kind === "volumes" ? <><th>Reclaim policy</th><th>Mounted by</th></> : kind === "configs" ? <><th>Schedule</th><th>Next fire</th></> : <th>Type</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && isTemplate(doc) && <> <TemplateBadge /></>}{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td>{kind === "volumes" ? <><td data-label="Reclaim policy">{doc.spec?.reclaimPolicy as string || "Delete"}</td><td data-label="Mounted by" title="Cells in the inventory that mount this Volume">{mountedBy(doc)}</td></> : kind === "configs" ? <><td className="mono-id" data-label="Schedule">{scheduleColumn(doc) || "—"}</td><td className="mono-id" data-label="Next fire">{nextColumn(doc) === "suspended" ? "suspended" : nextColumn(doc) ? <time dateTime={nextColumn(doc)} title={validTime(nextColumn(doc)) ? new Date(nextColumn(doc)).toLocaleString() : undefined}>{nextColumn(doc)}</time> : "—"}</td></> : <td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td>}<td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}{kind === "secrets" && !secretConnector(doc) && <RowAction icon="edit" href={catalogPageLink(kind, scope, { edit: true })} label={`Replace value of secret ${scope.join(" / ")}`} title="Replace value…" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
+      <BulkActions rows={selectedRows} actions={bulkDelete} noun={noun} selection={selection} run={row => runDelete(row.scope, true)} />
+      <div className="table-scroll"><table className="stackable bulk-table"><thead><tr><th className="bulk-column"><SelectAllBox selection={selection} matching={rows.map(keyOf)} label={`Select all ${noun(rows.length)} matching`} /></th><th>Name</th><th>Scope</th>{kind === "volumes" ? <><th>Reclaim policy</th><th>Mounted by</th></> : kind === "configs" ? <><th>Schedule</th><th>Next fire</th></> : <th>Type</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.slice(currentPage * 25, (currentPage + 1) * 25).map(doc => { const scope = [...scopeOf(doc.metadata), doc.metadata.name]; return <tr key={JSON.stringify(scope)}><td className="bulk-column" data-label="Select"><SelectRowBox selection={selection} rowKey={keyOf(doc)} label={`Select ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} /></td><td data-label="Name"><a className="resource-name" href={catalogLink(kind, scope)}>{doc.metadata.name}</a>{kind === "configs" && isTemplate(doc) && <> <TemplateBadge /></>}{kind === "configs" && <> <NeedsConnectorBadge config={doc} /></>}</td><td className="scope-cell" data-label="Scope"><ScopePath parts={scope.slice(0, -1)} /></td>{kind === "volumes" ? <><td data-label="Reclaim policy">{doc.spec?.reclaimPolicy as string || "Delete"}</td><td data-label="Mounted by" title="Cells in the inventory that mount this Volume">{mountedBy(doc)}</td></> : kind === "configs" ? <><td className="mono-id" data-label="Schedule">{scheduleColumn(doc) || "—"}</td><td className="mono-id" data-label="Next fire">{nextColumn(doc) === "suspended" ? "suspended" : nextColumn(doc) ? <time dateTime={nextColumn(doc)} title={validTime(nextColumn(doc)) ? new Date(nextColumn(doc)).toLocaleString() : undefined}>{nextColumn(doc)}</time> : "—"}</td></> : <td data-label="Type">{doc.kind as string || catalogTitles[kind]}</td>}<td className="row-actions"><RowActions>{kind === "configs" && <RowAction icon="create" href={newCellLink(scope)} label={`New cell from config ${scope.join(" / ")}`} title="New cell from this config" />}{kind === "blueprints" && <RowAction icon="create" href={newConfigLink(scope)} label={`New config from blueprint ${scope.join(" / ")}`} title="New config from this blueprint" />}{kind === "secrets" && !secretConnector(doc) && <RowAction icon="edit" href={catalogPageLink(kind, scope, { edit: true })} label={`Replace value of secret ${scope.join(" / ")}`} title="Replace value…" />}<DocumentRowLink href={catalogLink(kind, scope, true)} label={scope.join(" / ")} /><RowAction icon="delete" danger label={`Delete ${singular[kind].toLowerCase()} ${scope.join(" / ")}`} title="Delete…" disabled={pending.has(JSON.stringify(scope))} busy={pending.has(JSON.stringify(scope))} onClick={() => setConfirming(doc)} /></RowActions></td></tr>; })}</tbody></table></div>
       {!list.loading && !rows.length && <div className="empty-state"><h3>{list.error ? "Resources could not be loaded" : list.data?.length ? "No matching resources" : `No ${kind} found`}</h3></div>}
       <div className="pagination"><span>{rows.length ? `${currentPage * 25 + 1}–${Math.min((currentPage + 1) * 25, rows.length)} of ${rows.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * 25 >= rows.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
     </section>

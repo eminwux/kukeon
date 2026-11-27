@@ -38,7 +38,8 @@ import { useSpaceSubnets } from "./space-subnets";
 import { DaemonHealthPage, DaemonLogsPage } from "./daemon";
 import { CellLifecycleControls, CellRowActions, type LifecycleAction, type LifecycleFeedback, type PurgeOptions } from "./lifecycle";
 import { InventoryIndicator, NotificationProvider, useNotify } from "./notifications";
-import { cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
+import { availableLifecycleActions, cellRemovalConfirmed, cellsWithin, deleteOperationComplete, descendantCounts, parentActionsAllowed, purgeOperationComplete, requestedPurgeOptions } from "./lifecycle-policy.js";
+import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 import { ParentRowActions, type ParentAction } from "./scope-actions";
 import { AskMajordomo, AskProvider, MajordomoPanel, MajordomoRailButton, MajordomoSidebarEntry, MajordomoToolbarButton, cellQuestion, mobileMaxWidth, useMajordomo, useMajordomoDock, useViewportWidth } from "./majordomo";
 import { HealthPage, storedHealthSeen, type Summary } from "./health";
@@ -120,34 +121,83 @@ function SpaceCIDR({ subnet }: { subnet?: Resource<SpaceNetwork> }) {
   if (subnet?.error) return <span className="cidr-error" title={subnet.error.message}>Unavailable</span>;
   return <span className="description" aria-label="Loading subnet">…</span>;
 }
+// A row of a Realms, Spaces, Stacks or Cells table as its bulk actions see it (#1745).
+type ListRow = BulkRow & { state?: string };
+const cellNoun = countNoun("cell");
+const listNouns = [countNoun("realm"), countNoun("space"), countNoun("stack"), cellNoun];
+// The Cells table's bulk actions: each row action, one confirmation for the batch.
+function cellBulkActions(operations: Record<string, LifecycleFeedback>): BulkAction<ListRow>[] {
+  const busy = (row: ListRow) => operations[row.key]?.phase === "pending" ? "an action on it is still running" : "";
+  const running = (row: ListRow) => busy(row) || (row.state === "Ready" ? "" : `not Ready (${row.state || "no state"})`);
+  return [
+    { name: "start", verb: "Start", consequence: "Starts each cell.", reasonOf: row => busy(row) || (availableLifecycleActions(row.state).includes("start") ? "" : "already Ready") },
+    { name: "stop", verb: "Stop", danger: true, consequence: "Stops each cell; its terminal sessions end.", reasonOf: running },
+    { name: "restart", verb: "Restart", consequence: "Stops and starts each cell; its terminal sessions end.", reasonOf: running },
+    { name: "kill", verb: "Kill", danger: true, reasonOf: busy, acknowledgment: "I understand this immediately terminates the running containers of every cell listed.",
+      consequence: "Kill immediately terminates all containers in each cell and sets it to Stopped. The cells' metadata and configuration remain, but running process work may be lost." },
+    { name: "delete", verb: "Delete", danger: true, reasonOf: busy, acknowledgment: "I understand Delete removes these cells but does not perform Purge cleanup.",
+      consequence: "Delete removes each cell's containers, cgroup and metadata when kukeond validation permits. It does not perform Purge's broader cleanup." },
+    { name: "purge", verb: "Purge", danger: true, reasonOf: busy, purge: true,
+      consequence: "Purge requests the CLI's comprehensive cleanup of each cell, including CNI resources and orphaned containers. Cleanup can be partial, and Purge may not be reversible." },
+  ];
+}
+// The Realms, Spaces and Stacks tables' bulk actions: Delete and Purge, with one set of options.
+function parentBulkActions(depth: number, operations: Record<string, LifecycleFeedback>): BulkAction<ListRow>[] {
+  const kind = kinds[depth];
+  const reasonOf = (row: ListRow) => !parentActionsAllowed(row.scope) ? `this ${kind} cannot be removed here` : operations[row.key]?.phase === "pending" ? "an action on it is still running" : "";
+  return [
+    { name: "delete", verb: "Delete", danger: true, reasonOf, options: true, acknowledgment: `I understand Delete removes these ${kind === "realm" ? "realms" : `${kind}s`} but does not perform Purge cleanup.`,
+      consequence: `Delete removes each ${kind}'s metadata and cgroup when kukeond validation permits. Without --cascade or --force, kukeond refuses one that has children.` },
+    { name: "purge", verb: "Purge", danger: true, reasonOf, options: true, purge: true,
+      consequence: `Purge requests the CLI's comprehensive cleanup of each ${kind}, including daemon-managed resources such as CNI networks. Cleanup can be partial, and Purge may not be reversible.` },
+  ];
+}
 function ResourceList({ depth, inventory, parent, state: initialState, operations, onLifecycleAction, onParentAction }: {
   depth: number;
   inventory: Resource<Inventory>;
   parent: string[];
-  // The Cells table's State filter, preselected by ?state= (#1635).
+  // The State filter, preselected by ?state= (#1635).
   state?: string;
   operations: Record<string, LifecycleFeedback>;
-  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) => void;
-  onParentAction: (scope: string[], action: ParentAction, options: PurgeOptions) => void;
+  // Both resolve to the action's final feedback, so a batch can report each row (#1745); quiet leaves the
+  // per-row toast to the batch's one summary.
+  onLifecycleAction: (scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions, quiet?: boolean) => Promise<LifecycleFeedback | undefined>;
+  onParentAction: (scope: string[], action: ParentAction, options: PurgeOptions, quiet?: boolean) => Promise<LifecycleFeedback | undefined>;
 }) {
   const [search, setSearch] = useState("");
   const [realm, setRealm] = useState("");
-  const [state, setState] = useState(depth === 3 ? initialState ?? "" : "");
+  const [state, setState] = useState(initialState ?? "");
   const [page, setPage] = useState(0);
   const rows = inventory.data?.rows[depth] ?? [];
   const scoped = rows.filter(row => parent.every((name, i) => row.scope[i] === name));
-  const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && (depth !== 3 || matchesState(row.doc.status?.state, state)) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
+  // Active and Stopped or exited are the Cells table's; the other tables filter on an exact state.
+  const stateMatches = (value: string | undefined) => depth === 3 ? matchesState(value, state) : !state || (value ?? "") === state;
+  const filtered = scoped.filter(row => (!realm || row.scope[0] === realm) && stateMatches(row.doc.status?.state) && row.scope.join(" / ").toLowerCase().includes(search.toLowerCase()));
   // All states, Active, Stopped or exited, then each state present in the rows (and a preselected one).
   const states = [...new Set([...rows.map(row => row.doc.status?.state || ""), ...(state && !["active", "inactive"].includes(state) ? [state] : [])].filter(Boolean))].sort();
+  // Row selection (#1745): by row key, across pages and searches; the header box takes every matching row.
+  const keyOf = (scope: string[]) => JSON.stringify(scope);
+  const selection = useSelection(scoped.map(row => keyOf(row.scope)), !!inventory.data);
+  const matchingKeys = filtered.map(row => keyOf(row.scope));
+  const selectedRows: ListRow[] = scoped.filter(row => selection.has(keyOf(row.scope))).map(row => ({ key: keyOf(row.scope), scope: row.scope, label: row.scope.join(" / "), state: row.doc.status?.state }));
+  const noun = listNouns[depth];
+  const bulkActions = depth === 3 ? cellBulkActions(operations) : parentBulkActions(depth, operations);
+  const runBulk = async (row: ListRow, action: BulkAction<ListRow>, options: PurgeOptions) => {
+    const feedback = depth === 3
+      ? await onLifecycleAction(row.scope, action.name as LifecycleAction, row.state, action.name === "purge" ? { force: false, cascade: false } : undefined, true)
+      : await onParentAction(row.scope, action.name as ParentAction, options, true);
+    return { ok: feedback?.phase === "success", message: feedback?.message ?? "Another action on it is still running." };
+  };
   const pageSize = 25;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
   const shown = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
   // The Spaces table reads each visible Space's subnet: a Space document carries no CIDR.
   const subnets = useSpaceSubnets(depth === 1 ? shown.map(row => row.scope) : [], inventory.data?.updatedAt ?? "");
   return <section className="panel" aria-label={`${titles[depth]} list`}>
-    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}{depth === 3 && <label>State<select aria-label="Filter by state" value={state} onChange={e => { setState(e.target.value); setPage(0); }}><option value="">All states</option><option value="active">Active</option><option value="inactive">Stopped or exited</option>{states.map(value => <option key={value} value={value}>{value}</option>)}</select></label>}<span className="result-count">{filtered.length} results</span></div>
+    <div className="list-controls"><label className="search-field">Search<input type="search" placeholder={`Search ${titles[depth].toLowerCase()}…`} value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} /></label>{depth > 0 && <label>Realm<select aria-label="Filter by realm" value={realm} onChange={e => { setRealm(e.target.value); setPage(0); }}><option value="">All realms</option>{inventory.data?.rows[0].map(row => <option key={row.scope[0]}>{row.scope[0]}</option>)}</select></label>}<label>State<select aria-label="Filter by state" value={state} onChange={e => { setState(e.target.value); setPage(0); }}><option value="">All states</option>{depth === 3 && <><option value="active">Active</option><option value="inactive">Stopped or exited</option></>}{states.map(value => <option key={value} value={value}>{value}</option>)}</select></label><span className="result-count">{filtered.length} results</span></div>
     {parent.length > 0 && <p className="scope-filter">Scope: {parent.join(" / ")} <a href={listLink(depth)}>Clear scope</a></p>}
-    <div className="table-scroll"><table className="stackable"><thead><tr><th>Name</th><th>State</th>{depth === 1 && <th>CIDR</th>}{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{shown.map(row => <tr key={JSON.stringify(row.scope)}><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && scheduledRun(row.doc) && <span className="badge scheduled-badge" title={`Scheduled run of Config ${scheduledRun(row.doc)!.config}`}>Scheduled</span>}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth === 1 && <td className="space-cidr mono-id" data-label="CIDR"><SpaceCIDR subnet={subnets[JSON.stringify(row.scope)]} /></td>}{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
+    <BulkActions rows={selectedRows} actions={bulkActions} noun={noun} selection={selection} run={runBulk} />
+    <div className="table-scroll"><table className="stackable bulk-table"><thead><tr><th className="bulk-column"><SelectAllBox selection={selection} matching={matchingKeys} label={`Select all ${noun(matchingKeys.length)} matching`} /></th><th>Name</th><th>State</th>{depth === 1 && <th>CIDR</th>}{depth > 0 && <th>Scope</th>}<th><span className="sr-only">Actions</span></th></tr></thead><tbody>{shown.map(row => <tr key={JSON.stringify(row.scope)}><td className="bulk-column" data-label="Select"><SelectRowBox selection={selection} rowKey={keyOf(row.scope)} label={`Select ${kinds[depth]} ${row.scope.join(" / ")}`} /></td><td data-label="Name"><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a></td><td data-label="State"><StateBadge state={row.doc.status?.state} />{depth === 3 && <DriftBadge status={row.doc.status} />}{depth === 3 && scheduledRun(row.doc) && <span className="badge scheduled-badge" title={`Scheduled run of Config ${scheduledRun(row.doc)!.config}`}>Scheduled</span>}{depth === 3 && failureStates.includes(row.doc.status?.state ?? "") && <AskMajordomo question={cellQuestion(row.scope, row.doc.status)} subject={`cell ${row.scope.join(" / ")}`} />}</td>{depth === 1 && <td className="space-cidr mono-id" data-label="CIDR"><SpaceCIDR subnet={subnets[JSON.stringify(row.scope)]} /></td>}{depth > 0 && <td className="scope-cell" data-label="Scope"><ScopePath parts={row.scope.slice(0, -1)} /></td>}<td className="row-actions">{depth === 3 ? <CellRowActions scope={row.scope} state={row.doc.status?.state} operation={operations[JSON.stringify(row.scope)]} onAction={onLifecycleAction} /> : <ParentRowActions scope={row.scope} counts={descendantCounts(inventory.data?.rows ?? [], row.scope)} allowed={parentActionsAllowed(row.scope)} operation={operations[JSON.stringify(row.scope)]} onAction={onParentAction} />}</td></tr>)}</tbody></table></div>
     {!filtered.length && <div className="empty-state"><h3>{inventory.loading ? "Loading resources…" : inventory.error || inventory.data?.failures.length ? "Resources could not be fully loaded" : scoped.length ? "No matching resources" : `No ${titles[depth].toLowerCase()} found`}</h3><p>{search || realm || state ? "Try another search or clear the filters." : "Refresh to retrieve the latest resource state."}</p></div>}
     <div className="pagination"><span>{filtered.length ? `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, filtered.length)} of ${filtered.length}` : "0 results"}</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setPage(currentPage + 1)}>Next</button></div>
   </section>;
@@ -414,9 +464,11 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   useLayoutEffect(() => { document.documentElement.style.setProperty("--majordomo-width", `${dock.effectiveWidth}px`); }, [dock.effectiveWidth]);
   // Every majordomo cell is docked in the panel; their terminals never open in the cell screen.
   const dockedCells = major.cells.map(row => JSON.stringify(row.scope));
-  function recordOperation(scope: string[], operation: LifecycleFeedback) {
+  // quiet records the row's state and leaves the toast to a batch's one summary (#1745).
+  function recordOperation(scope: string[], operation: LifecycleFeedback, quiet = false) {
     const key = JSON.stringify(scope);
     setOperations(old => ({ ...old, [key]: operation }));
+    if (quiet) return;
     // Delete and Purge navigate away from the cell, so their results always name it.
     const named = screenCell.current !== key || operation.action === "delete" || operation.action === "purge";
     notify({ key: `lifecycle:${key}`, tone: operation.phase, title: named ? scope.join(" / ") : undefined, message: operation.message });
@@ -427,9 +479,12 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     terminals.removeCell(scope);
     if (screenCell.current === JSON.stringify(scope)) window.location.hash = homeLink;
   }
-  async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions) {
+  // Resolves to the action's final feedback, undefined when another action on the cell is still running.
+  async function runCellLifecycle(scope: string[], action: LifecycleAction, state?: string, options?: PurgeOptions, quiet = false): Promise<LifecycleFeedback | undefined> {
     const key = JSON.stringify(scope);
-    if (pendingOperations.current.has(key)) return;
+    if (pendingOperations.current.has(key)) return undefined;
+    let last: LifecycleFeedback | undefined;
+    const record = (operation: LifecycleFeedback) => { last = operation; recordOperation(scope, operation, quiet); };
     pendingOperations.current.add(key);
     terminals.holdCell(scope);
     const pendingMessage = action === "restart"
@@ -438,7 +493,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         : action === "delete" ? "Deleting cell resources…"
           : action === "purge" ? "Purging cell resources…"
             : `${action === "start" ? "Starting" : "Stopping"} cell…`;
-    recordOperation(scope, { action, phase: "pending", message: pendingMessage });
+    record({ action, phase: "pending", message: pendingMessage });
     try {
       const response = await fetch(`${apiPath(scope)}/${action}`, {
         method: "POST",
@@ -488,8 +543,8 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             : presence === true ? " A fresh daemon read confirms the cell still exists; it remains listed in the sidebar."
               : " The final state is unknown; the cell and terminal tabs were retained. Refresh before retrying."
           : "";
-        recordOperation(scope, { action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}${reconcile}` });
-        return;
+        record({ action, phase: "error", message: `${title}. ${reason}: ${failure.message ?? "The daemon rejected the request."}${reconcile}` });
+        return last;
       }
 
       // With Auto-attach terminals on (#1745) a restarted cell's terminal attaches to the new process by
@@ -503,11 +558,11 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       if (action === "kill") {
         if (body.killed) {
           terminals.interruptCell(scope, "Cell killed. The cell remains; its terminal session ended and can be reconnected when appropriate.");
-          recordOperation(scope, { action, phase: "success", message: "Cell killed. Its containers were terminated; the cell definition remains and its terminal session ended." });
+          record({ action, phase: "success", message: "Cell killed. Its containers were terminated; the cell definition remains and its terminal session ended." });
         } else {
-          recordOperation(scope, { action, phase: "error", message: "The daemon did not confirm a kill. The terminal connection was left intact; refresh the cell state." });
+          record({ action, phase: "error", message: "The daemon did not confirm a kill. The terminal connection was left intact; refresh the cell state." });
         }
-        return;
+        return last;
       }
       if (action === "delete") {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
@@ -522,8 +577,8 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         if (!complete && presence !== false) {
           terminals.interruptCell(scope, "Delete was incomplete. The cell may still exist, but its runtime resources may have changed.");
         }
-        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell deleted. ${effects}` : `Delete incomplete. ${effects} ${outcome}` });
-        return;
+        record({ action, phase: complete ? "success" : "error", message: complete ? `Cell deleted. ${effects}` : `Delete incomplete. ${effects} ${outcome}` });
+        return last;
       }
       if (action === "purge") {
         const presence = body.metadataDeleted ? false : await readCellPresence(scope);
@@ -541,15 +596,15 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         if (!complete && presence !== false) {
           terminals.interruptCell(scope, "Purge was incomplete. The cell may still exist, but its runtime resources may have changed.");
         }
-        recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects}${details}` : `Purge incomplete. ${effects}${details} ${outcome}` });
-        return;
+        record({ action, phase: complete ? "success" : "error", message: complete ? `Cell purged. ${effects}${details}` : `Purge incomplete. ${effects}${details} ${outcome}` });
+        return last;
       }
       // The interrupted sessions belong to the stopped process; dropping them lets the terminal reattach on Ready.
       if (action === "start") terminals.dropInterrupted(scope);
       const message = action === "start" ? "Cell started."
         : action === "stop" ? "Cell stopped. The previous terminal session ended."
         : settings.autoAttach ? "Cell restarted. The previous terminal session ended; the terminal attaches to the new process." : "Cell restarted. The previous terminal session ended; reconnect to attach to the new process.";
-      recordOperation(scope, { action, phase: "success", message });
+      record({ action, phase: "success", message });
     } catch (error) {
       if (action === "stop" || action === "restart") {
         terminals.interruptCell(scope, "The lifecycle request lost its connection. The terminal session may have ended; refresh the cell before reconnecting.");
@@ -572,23 +627,26 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           outcome = " The final state is unknown; the cell remains visible until a daemon refresh confirms removal.";
         }
       }
-      recordOperation(scope, { action, phase: "error", message: `${action[0].toUpperCase()}${action.slice(1)} outcome unknown. Daemon unavailable: ${message}.${outcome}` });
+      record({ action, phase: "error", message: `${action[0].toUpperCase()}${action.slice(1)} outcome unknown. Daemon unavailable: ${message}.${outcome}` });
     } finally {
       terminals.releaseCell(scope);
       pendingOperations.current.delete(key);
       setRevision(value => value + 1);
     }
+    return last;
   }
   // Delete or purge a realm, space or stack (#1495). Rows, their descendants and sidebar cells drop only
   // when the follow-up inventory read omits them; terminals close once a fresh read confirms removal.
-  async function runParentAction(scope: string[], action: ParentAction, options: PurgeOptions) {
+  async function runParentAction(scope: string[], action: ParentAction, options: PurgeOptions, quiet = false): Promise<LifecycleFeedback | undefined> {
     const key = JSON.stringify(scope);
-    if (pendingOperations.current.has(key)) return;
+    if (pendingOperations.current.has(key)) return undefined;
+    let last: LifecycleFeedback | undefined;
+    const record = (operation: LifecycleFeedback) => { last = operation; recordOperation(scope, operation, quiet); };
     pendingOperations.current.add(key);
     const kind = kinds[scope.length - 1];
     const verb = action === "delete" ? "Delete" : "Purge";
     const cells = cellsWithin(inventory.data?.rows ?? [], scope);
-    recordOperation(scope, { action, phase: "pending", message: `${action === "delete" ? "Deleting" : "Purging"} ${kind}…` });
+    record({ action, phase: "pending", message: `${action === "delete" ? "Deleting" : "Purging"} ${kind}…` });
     const confirmRemoval = async () => {
       const presence = await readCellPresence(scope);
       if (presence === false) {
@@ -613,8 +671,8 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         const failure = body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
         const message = failure.message ?? "The daemon rejected the request.";
         if (failure.code === "has_dependencies") {
-          recordOperation(scope, { action, phase: "error", message: `${verb} refused. ${message} Enable cascade to ${action} its children first.` });
-          return;
+          record({ action, phase: "error", message: `${verb} refused. ${message} Enable cascade to ${action} its children first.` });
+          return last;
         }
         const reason = failure.code === "permission_denied" ? "Permission denied"
           : failure.code === "unavailable" ? "Daemon unavailable"
@@ -623,8 +681,8 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           : failure.code === "invalid_request" ? "Invalid request"
           : "Request failed";
         const outcome = failure.code === "unavailable" || failure.code === "not_found" ? (await confirmRemoval()).text : "";
-        recordOperation(scope, { action, phase: "error", message: `${verb} failed. ${reason}: ${message}${outcome}` });
-        return;
+        record({ action, phase: "error", message: `${verb} failed. ${reason}: ${message}${outcome}` });
+        return last;
       }
       const { removed, text: outcome } = await confirmRemoval();
       const complete = removed && body.purgeSucceeded !== false && body.metadataDeleted !== false;
@@ -634,14 +692,15 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         body.purgeSucceeded === false ? "Comprehensive purge: incomplete." : "",
         `Options passed: --force ${body.force ? "enabled" : "disabled"}, --cascade ${body.cascade ? "enabled" : "disabled"}.`,
       ].filter(Boolean).join(" ");
-      recordOperation(scope, { action, phase: complete ? "success" : "error", message: complete ? `${kind[0].toUpperCase()}${kind.slice(1)} ${action}d. ${effects}${outcome}` : `${verb} incomplete. ${effects}${outcome}` });
+      record({ action, phase: complete ? "success" : "error", message: complete ? `${kind[0].toUpperCase()}${kind.slice(1)} ${action}d. ${effects}${outcome}` : `${verb} incomplete. ${effects}${outcome}` });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The request could not reach the web server.";
-      recordOperation(scope, { action, phase: "error", message: `${verb} outcome unknown. Daemon unavailable: ${message}.${(await confirmRemoval()).text}` });
+      record({ action, phase: "error", message: `${verb} outcome unknown. Daemon unavailable: ${message}.${(await confirmRemoval()).text}` });
     } finally {
       pendingOperations.current.delete(key);
       setRevision(value => value + 1);
     }
+    return last;
   }
   // After creation (#1603) the UI lands on cellTerminal only when the cell is started with a terminal attached
   // and has a workload to attach to; otherwise on cellRead, which never opens a terminal session.

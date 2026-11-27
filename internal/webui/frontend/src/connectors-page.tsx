@@ -13,6 +13,7 @@ import {
   isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
+import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 
 // The Connectors page (#1548, §7). It iterates GET /api/connectors: a
 // connector added as one connector.yaml is listed, given identities and
@@ -118,6 +119,7 @@ function ImportFromHost({ connector, inventory, initiallyOpen = false, onChanged
   </div>;
 }
 
+const identityNoun = countNoun("identity", "identities");
 // IdentitiesPanel lists a connector's identities — the Secrets tagged with it —
 // and deletes them. Creating and rotating one are pages of their own.
 function IdentitiesPanel({ connector, identities, secretsError, revision, inventory, target, onChanged }: {
@@ -132,38 +134,61 @@ function IdentitiesPanel({ connector, identities, secretsError, revision, invent
   const title = connector.title || connector.name;
   const registry = isRegistry(connector);
   const [confirming, setConfirming] = useState<Identity>();
-  const [pending, setPending] = useState("");
-  const [failure, setFailure] = useState<{ target: string; message: string }>();
+  // The identities being deleted, and the failed deletes still shown: a batch deletes several at once (#1745).
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const [failures, setFailures] = useState<{ target: string; message: string }[]>([]);
   const { notify } = useNotify();
   const fieldNames = connector.fields.map(field => field.name);
 
-  async function remove(identity: Identity) {
+  // remove deletes one identity and resolves to its outcome; quiet leaves the toast and the failure notice
+  // to a batch, which reports every row once.
+  async function remove(identity: Identity, quiet = false): Promise<{ ok: boolean; message: string }> {
     const ref = secretRef(identity)!;
     const key = refKey(ref);
-    if (pending) return;
-    setPending(key); setFailure(undefined);
+    const target = refLabel(ref);
+    if (pending.has(key)) return { ok: false, message: "A delete of it is still running." };
+    setPending(old => new Set(old).add(key));
+    setFailures(old => old.filter(item => item.target !== target));
     try {
       await sendJSON(catalogDeleteAPI("secrets", [...refScope(ref), ref.name]), "{}");
-      notify({ key: `identity-delete:${key}`, tone: "success", message: `${title} identity ${ref.name} deleted.` });
-    } catch (caught) { setFailure({ target: refLabel(ref), message: toFailure(caught).message }); }
-    finally { setPending(""); onChanged(); }
+      if (!quiet) notify({ key: `identity-delete:${key}`, tone: "success", message: `${title} identity ${ref.name} deleted.` });
+      return { ok: true, message: "" };
+    } catch (caught) {
+      const message = toFailure(caught).message;
+      if (!quiet) setFailures(old => [...old, { target, message }]);
+      return { ok: false, message };
+    } finally {
+      setPending(old => { const next = new Set(old); next.delete(key); return next; });
+      onChanged();
+    }
   }
+  // Row selection and bulk delete (#1745); Rotate stays a row action.
+  const byKey = new Map(identities.map(identity => [refKey(identity), identity]));
+  const selection = useSelection([...byKey.keys()], !secretsError);
+  type IdentityRow = BulkRow & { identity: Identity };
+  const selectedRows: IdentityRow[] = identities.filter(identity => selection.has(refKey(identity))).map(identity => ({ key: refKey(identity), scope: [...refScope(identity), identity.name], label: refLabel(identity), identity }));
+  const bulkDelete: BulkAction<IdentityRow>[] = [{ name: "delete", verb: "Delete", danger: true,
+    consequence: `Deletes each ${title} identity's Secret; a cell or team that uses one loses its credential.`,
+    reasonOf: row => pending.has(row.key) ? "a delete of it is still running" : "",
+    acknowledgment: "I understand this permanently deletes every identity listed." }];
 
   return <section className="panel connector-identities" aria-label={`${title} identities`}>
     <div className="panel-heading"><h2>Identities</h2><span className="badge">{identities.length} stored</span>{!registry && <a className="document-action" href={newIdentityLink(connector.name, target)}>New identity</a>}</div>
     <div className="panel-body">
       <p className="description">An identity is a Secret tagged <code>{connector.name}</code>. Only its name, scope, type and readable fields are shown: values are write-only and never returned to the browser.</p>
       {secretsError && <p className="stale">Identities could not be listed: {secretsError.message}</p>}
-      {failure && <div className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>}
-      {identities.length ? <div className="table-scroll"><table aria-label={`${title} identities`}><thead><tr><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Type</th><th scope="col">Identity</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
+      {failures.map(failure => <div key={failure.target} className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>)}
+      <BulkActions rows={selectedRows} actions={bulkDelete} noun={identityNoun} selection={selection} run={row => remove(row.identity, true)} />
+      {identities.length ? <div className="table-scroll"><table aria-label={`${title} identities`}><thead><tr><th scope="col" className="bulk-column"><SelectAllBox selection={selection} matching={[...byKey.keys()]} label={`Select all ${identityNoun(identities.length)}`} /></th><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Type</th><th scope="col">Identity</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
         {identities.map(identity => <tr key={refKey(identity)}>
+          <td className="bulk-column"><SelectRowBox selection={selection} rowKey={refKey(identity)} label={`Select ${title} identity ${refLabel(identity)}`} /></td>
           <td><a className="resource-name" href={identityLink(identity)}>{identity.name}</a></td>
           <td className="scope-cell">{refScope(identity).join(" / ")}</td>
           <td>{identity.type}</td>
           <td>{[...fieldNames.filter(name => name in identity.identity), ...Object.keys(identity.identity).filter(name => !fieldNames.includes(name))].map(name => <span className="badge label-badge" key={name}>{name}: {identity.identity[name]}</span>)}{!Object.keys(identity.identity).length && <span className="description">—</span>}</td>
           <td className="connector-row-actions">
             <a className="subtle-button" href={rotateIdentityLink(connector.name, identity, target)} aria-label={`Rotate ${title} identity ${refLabel(identity)}`}>Rotate</a>
-            <button type="button" className="subtle-button danger-action" aria-label={`Delete ${title} identity ${refLabel(identity)}`} disabled={!!pending} onClick={() => setConfirming(identity)}>{pending === refKey(identity) ? "Deleting…" : "Delete"}</button>
+            <button type="button" className="subtle-button danger-action" aria-label={`Delete ${title} identity ${refLabel(identity)}`} disabled={pending.has(refKey(identity))} onClick={() => setConfirming(identity)}>{pending.has(refKey(identity)) ? "Deleting…" : "Delete"}</button>
           </td>
         </tr>)}
       </tbody></table></div> : <p>No {title} identities are stored.{!registry && <> <a href={newIdentityLink(connector.name, target)}>Create one</a>.</>}</p>}
