@@ -8,10 +8,11 @@ kuke uninstall [flags]
 
 This is the global counterpart to [`kuke purge`](kuke-purge.md) (which is per-resource). It:
 
-1. Purges every realm with `--cascade` — drains spaces, stacks, cells, containers and their containerd tasks/containers, and deletes the containerd namespaces created by kukeon.
-2. Removes `/run/kukeon/` recursively.
-3. Removes the configured run path (default `/opt/kukeon`) recursively.
-4. Removes the kukeon system user and group (no-op if absent).
+1. Stops, disables, and removes the web UI unit `/etc/systemd/system/kuke-serve.service` and then the daemon unit `/etc/systemd/system/kukeond.service`, followed by one `systemctl daemon-reload`. A unit that is not installed, or a host without `systemctl`, is skipped. This runs first so a `Restart=on-failure` unit cannot respawn `kukeond` or `kuke serve` mid-uninstall.
+2. Purges every realm with `--cascade` — drains spaces, stacks, cells, containers and their containerd tasks/containers, and deletes the containerd namespaces created by kukeon.
+3. Removes `/run/kukeon/` recursively.
+4. Removes the configured run path (default `/opt/kukeon`) recursively.
+5. Removes the kukeon system user and group (no-op if absent).
 
 The `/usr/local/bin/kuke` binary and the `kukeond` symlink are **not** removed — uninstalling runtime state is not the same as uninstalling the binary.
 
@@ -39,7 +40,9 @@ The configured `containerdNamespaceSuffix` scopes the realm-enumeration loop —
 
 By default, `kuke uninstall` asks for interactive confirmation before doing anything. Pass `--yes`/`-y` to skip the prompt.
 
-If any realm fails to drop its containerd namespace, steps 2–4 are **skipped**: tearing out `/opt/kukeon` while a residual namespace is still pinning overlay mounts on disk would strand the next `kuke init` with stale containerd state. The report flags every dir/account row as `skipped (realm purge failed)` so the half-cleaned host is visible without scrolling to the trailing error.
+The report has one row per systemd unit, for example `systemd unit /etc/systemd/system/kuke-serve.service: skipped (unit file absent)` on a host installed with `KUKE_SKIP_WEB_UI=1`. A host where neither unit is installed prints no systemd rows.
+
+If any realm fails to drop its containerd namespace, steps 3–5 are **skipped**: tearing out `/opt/kukeon` while a residual namespace is still pinning overlay mounts on disk would strand the next `kuke init` with stale containerd state. The report flags every dir/account row as `skipped (realm purge failed)` so the half-cleaned host is visible without scrolling to the trailing error.
 
 Resolve the realm-purge failure (often: stop the live daemon, remove the residual containerd namespace by hand) and re-run the command.
 
