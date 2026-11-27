@@ -27,9 +27,13 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 func (r *Exec) GetRealm(realm intmodel.Realm) (intmodel.Realm, error) {
+	if err := naming.ValidateRealmName(realm.Metadata.Name); err != nil {
+		return intmodel.Realm{}, err
+	}
 	// Get realm metadata
 	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realm.Metadata.Name)
 	internalRealm, err := r.readRealmInternal(metadataFilePath)
@@ -55,6 +59,9 @@ func (r *Exec) GetSpace(space intmodel.Space) (intmodel.Space, error) {
 	spaceName := strings.TrimSpace(space.Metadata.Name)
 	if spaceName == "" {
 		return intmodel.Space{}, errdefs.ErrSpaceNameRequired
+	}
+	if err := validateScopeNames(realmName, spaceName, "", ""); err != nil {
+		return intmodel.Space{}, err
 	}
 	// Get space metadata
 	metadataFilePath := fs.SpaceMetadataPath(r.opts.RunPath, realmName, spaceName)
@@ -85,6 +92,9 @@ func (r *Exec) GetStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	stackName := strings.TrimSpace(stack.Metadata.Name)
 	if stackName == "" {
 		return intmodel.Stack{}, errdefs.ErrStackNameRequired
+	}
+	if err := validateScopeNames(realmName, spaceName, stackName, ""); err != nil {
+		return intmodel.Stack{}, err
 	}
 	// Get stack metadata
 	metadataFilePath := fs.StackMetadataPath(r.opts.RunPath, realmName, spaceName, stackName)
@@ -120,6 +130,9 @@ func (r *Exec) GetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if cellName == "" {
 		return intmodel.Cell{}, errdefs.ErrCellNameRequired
 	}
+	if err := validateScopeNames(realmName, spaceName, stackName, cellName); err != nil {
+		return intmodel.Cell{}, err
+	}
 	// Get cell metadata
 	metadataFilePath := fs.CellMetadataPath(r.opts.RunPath, realmName, spaceName, stackName, cellName)
 	internalCell, err := r.readCellInternal(metadataFilePath)
@@ -146,6 +159,9 @@ func (r *Exec) GetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 }
 
 func (r *Exec) ListSpaces(realmName string) ([]intmodel.Space, error) {
+	if err := validateScopeNames(realmName, "", "", ""); err != nil {
+		return nil, err
+	}
 	var results []intmodel.Space
 
 	// Get realm directories to search in
@@ -242,6 +258,9 @@ func (r *Exec) resolveRealmDirs(realmName string) ([]string, error) {
 }
 
 func (r *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
+	if err := validateScopeNames(realmName, spaceName, "", ""); err != nil {
+		return nil, err
+	}
 	// Get realm directories to search in
 	realmDirs, err := r.resolveRealmDirs(realmName)
 	if err != nil {
@@ -328,6 +347,9 @@ func (r *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 }
 
 func (r *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error) {
+	if err := validateScopeNames(realmName, spaceName, stackName, ""); err != nil {
+		return nil, err
+	}
 	// Get realm directories to search in
 	realmDirs, err := r.resolveRealmDirs(realmName)
 	if err != nil {
@@ -459,6 +481,9 @@ func (r *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cel
 }
 
 func (r *Exec) ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error) {
+	if err := validateScopeNames(realmName, spaceName, stackName, cellName); err != nil {
+		return nil, err
+	}
 	var cells []intmodel.Cell
 
 	if cellName != "" {

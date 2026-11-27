@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // DeleteContainer stops and deletes a specific container in a cell from containerd.
@@ -56,6 +57,12 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return errdefs.ErrStackNameRequired
+	}
+	if err := validateScopeNames(realmName, spaceName, stackName, cellName); err != nil {
+		return err
+	}
+	if err := naming.ValidateHierarchyName("container", containerID); err != nil {
+		return err
 	}
 
 	if err := r.ensureClientConnected(); err != nil {

@@ -923,7 +923,7 @@ func TestMarkCellFailed_PersistsReasonAndMessage(t *testing.T) {
 			runPath := t.TempDir()
 			r := newMetadataTestExec(t, runPath, t0)
 			cell := intmodel.Cell{
-				Metadata: intmodel.CellMetadata{Name: "c-" + tt.name},
+				Metadata: intmodel.CellMetadata{Name: "c-" + strings.ReplaceAll(tt.name, "_", "-")},
 				Spec: intmodel.CellSpec{
 					ID:         "c-" + tt.name,
 					RealmName:  "default",

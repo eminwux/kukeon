@@ -35,6 +35,7 @@ import (
 	"github.com/eminwux/kukeon/internal/health"
 	"github.com/eminwux/kukeon/internal/secretstore"
 	"github.com/eminwux/kukeon/internal/team/gitremote"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/api/version"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -519,20 +520,21 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   errors.New("metadata.name is required"),
 			}
 		}
-		if secretErr := validateSecretScope(doc.SecretDoc.Metadata); secretErr != nil {
-			return &ValidationError{
-				Index: doc.Index,
-				Kind:  doc.Kind,
-				Name:  doc.SecretDoc.Metadata.Name,
-				Err:   secretErr,
-			}
-		}
+		// The sidecar names fail the shared name rule too; report them as reserved.
 		if doc.SecretDoc.Metadata.Name == secretstore.TypesDir || doc.SecretDoc.Metadata.Name == secretstore.MetaDir {
 			return &ValidationError{
 				Index: doc.Index,
 				Kind:  doc.Kind,
 				Name:  doc.SecretDoc.Metadata.Name,
 				Err:   errdefs.ErrSecretReservedName,
+			}
+		}
+		if secretErr := validateSecretScope(doc.SecretDoc.Metadata); secretErr != nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.SecretDoc.Metadata.Name,
+				Err:   secretErr,
 			}
 		}
 		if specErr := validateSecretSpec(*doc.SecretDoc); specErr != nil {
@@ -693,17 +695,12 @@ func validateSecretSpec(doc v1beta1.SecretDoc) error {
 // Empty values are the caller's concern (a missing coordinate is legal; an
 // empty name is rejected separately), so this only guards non-empty segments.
 // Issue #673.
+//
+// Non-empty segments must satisfy the shared name rule (naming.NamePattern,
+// issue #1719), which excludes all of the above plus a leading dot, so a name
+// can never shadow the secrets sidecars (.types/, .meta/, .secret-*.tmp).
 func validateSecretSegment(value string) error {
-	if value == "" {
-		return nil
-	}
-	if value == "." || value == ".." {
-		return errdefs.ErrSecretCoordUnsafe
-	}
-	if strings.ContainsRune(value, 0) ||
-		strings.ContainsRune(value, '/') ||
-		strings.ContainsRune(value, '\\') ||
-		strings.ContainsRune(value, filepath.Separator) {
+	if !naming.IsValidSegment(value) {
 		return errdefs.ErrSecretCoordUnsafe
 	}
 	return nil
@@ -818,7 +815,9 @@ func validateBlueprintScope(md v1beta1.CellBlueprintMetadata) error {
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
 	}
-	return nil
+	// The name and every coordinate become path segments under fs.BlueprintPath
+	// (issue #1719).
+	return validateScopeSegments(errdefs.ErrBlueprintCoordUnsafe, strings.TrimSpace(md.Name), realm, space, stack)
 }
 
 // validateHealthReport checks a kind: HealthReport document with kukeond's own
@@ -919,17 +918,10 @@ func validateVolumeScope(md v1beta1.VolumeMetadata) error {
 // Empty values are the caller's concern (a missing coordinate is legal; an
 // empty name is rejected separately), so this only guards non-empty segments.
 // Mirrors validateSecretSegment (#673).
+// Non-empty segments must satisfy the shared name rule (naming.NamePattern,
+// issue #1719).
 func validateVolumeSegment(value string) error {
-	if value == "" {
-		return nil
-	}
-	if value == "." || value == ".." {
-		return errdefs.ErrVolumeCoordUnsafe
-	}
-	if strings.ContainsRune(value, 0) ||
-		strings.ContainsRune(value, '/') ||
-		strings.ContainsRune(value, '\\') ||
-		strings.ContainsRune(value, filepath.Separator) {
+	if !naming.IsValidSegment(value) {
 		return errdefs.ErrVolumeCoordUnsafe
 	}
 	return nil
@@ -1114,6 +1106,26 @@ func validateConfigScope(md v1beta1.CellConfigMetadata) error {
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigScopeIncomplete)
 	}
+	// The name and every coordinate become path segments under fs.ConfigPath
+	// (issue #1719).
+	return validateScopeSegments(errdefs.ErrConfigCoordUnsafe, strings.TrimSpace(md.Name), realm, space, stack)
+}
+
+// validateScopeSegments rejects, with sentinel, a name or scope coordinate of
+// a stack-scopable kind (CellBlueprint, CellConfig) that fails the shared name
+// rule. Empty coordinates are unset and pass; whether they are required is the
+// caller's concern.
+func validateScopeSegments(sentinel error, name, realm, space, stack string) error {
+	for _, seg := range []struct{ field, value string }{
+		{"metadata.name", name},
+		{"metadata.realm", realm},
+		{"metadata.space", space},
+		{"metadata.stack", stack},
+	} {
+		if !naming.IsValidSegment(seg.value) {
+			return fmt.Errorf("%w (%s %q)", sentinel, seg.field, seg.value)
+		}
+	}
 	return nil
 }
 
@@ -1132,6 +1144,10 @@ func validateConfigBlueprintRef(ref v1beta1.CellConfigBlueprintRef) error {
 	}
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigBlueprintRefScopeIncomplete)
+	}
+	// The reference resolves through fs.BlueprintPath (issue #1719).
+	if err := validateScopeSegments(errdefs.ErrBlueprintCoordUnsafe, name, realm, space, stack); err != nil {
+		return fmt.Errorf("spec.blueprint: %w", err)
 	}
 	return nil
 }

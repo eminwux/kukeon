@@ -19,7 +19,6 @@ package runner
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -128,7 +127,7 @@ func validatePurgeCell(cell intmodel.Cell) error {
 	if strings.TrimSpace(cell.Spec.StackName) == "" {
 		return errdefs.ErrStackNameRequired
 	}
-	return nil
+	return validateScopeNames(cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name)
 }
 
 func (r *Exec) purgeCellNamespace(cell intmodel.Cell) (string, error) {
@@ -246,7 +245,7 @@ func (r *Exec) purgeCellMetadata(cell intmodel.Cell) (bool, error) {
 		cell.Spec.StackName,
 		cell.Metadata.Name,
 	)
-	if err := os.RemoveAll(metadataRunPath); err != nil {
+	if err := r.removeCellDir(metadataRunPath); err != nil {
 		return false, fmt.Errorf("remove cell metadata directory %q: %w", metadataRunPath, err)
 	}
 	return true, nil

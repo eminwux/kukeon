@@ -56,6 +56,16 @@ func TestValidateRealmName(t *testing.T) {
 			input:   "/team",
 			wantErr: errdefs.ErrInvalidRealmName,
 		},
+		// Issue #1719: the shared name rule.
+		{name: "dot rejected", input: ".", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "dot-dot rejected", input: "..", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "leading dot rejected", input: ".x", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "upper case rejected", input: "A", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "inner space rejected", input: "a b", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "backslash rejected", input: `a\b`, wantErr: errdefs.ErrInvalidRealmName},
+		{name: "NUL rejected", input: "a\x00b", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "trailing dash rejected", input: "a-", wantErr: errdefs.ErrInvalidRealmName},
+		{name: "inner dot legal", input: "a.b", wantValid: true},
 	}
 
 	for _, tt := range tests {

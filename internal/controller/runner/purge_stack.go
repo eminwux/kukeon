@@ -41,6 +41,9 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 	if spaceName == "" {
 		return errdefs.ErrSpaceNameRequired
 	}
+	if err := validateScopeNames(realmName, spaceName, stackName, ""); err != nil {
+		return err
+	}
 
 	// First, perform standard delete
 	if err := r.DeleteStack(stack); err != nil {
@@ -118,7 +121,7 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 		stackForOps.Spec.SpaceName,
 		stackForOps.Metadata.Name,
 	)
-	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath); reclaimErr != nil {
+	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath, fs.StackDepth); reclaimErr != nil {
 		r.logger.WarnContext(r.ctx, "selective scope reclaim failed during stack purge",
 			"path", metadataRunPath, "error", reclaimErr)
 	}

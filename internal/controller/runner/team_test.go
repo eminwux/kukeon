@@ -188,7 +188,7 @@ func TestTeamStore_RealmPurgeRemovesTeams(t *testing.T) {
 				}
 			}
 
-			if err := r.reclaimScopeMetadata(realmDir); err != nil {
+			if err := r.reclaimScopeMetadata(realmDir, fs.RealmDepth); err != nil {
 				t.Fatalf("reclaimScopeMetadata error = %v", err)
 			}
 			assertGone(t, fs.TeamsDir(runPath, "default"), "teams dir")

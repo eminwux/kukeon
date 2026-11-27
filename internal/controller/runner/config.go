@@ -406,6 +406,10 @@ func (r *Exec) WriteConfigScheduleStatus(
 func (r *Exec) DeleteConfigScheduleStatus(config intmodel.CellConfig) error {
 	md := config.Metadata
 	path := fs.ConfigStatusPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	dir := fs.ConfigStatusDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
+	if err := r.guardKindRemove(dir, kindDirDepth(md.Space, md.Stack, ""), path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteConfig, err)
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%w: remove schedule status: %w", errdefs.ErrDeleteConfig, err)
 	}
@@ -421,6 +425,10 @@ func (r *Exec) DeleteConfigScheduleStatus(config intmodel.CellConfig) error {
 func (r *Exec) DeleteConfig(config intmodel.CellConfig) error {
 	md := config.Metadata
 	path := fs.ConfigPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	dir := fs.ConfigsDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
+	if err := r.guardKindRemove(dir, kindDirDepth(md.Space, md.Stack, ""), path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteConfig, err)
+	}
 
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

@@ -69,6 +69,15 @@ func TestValidateHierarchyName(t *testing.T) {
 			input:   "/",
 			wantErr: errdefs.ErrInvalidName,
 		},
+		// Issue #1719: the shared name rule.
+		{name: "dot rejected", input: ".", wantErr: errdefs.ErrInvalidName},
+		{name: "dot-dot rejected", input: "..", wantErr: errdefs.ErrInvalidName},
+		{name: "leading dot rejected", input: ".x", wantErr: errdefs.ErrInvalidName},
+		{name: "upper case rejected", input: "A", wantErr: errdefs.ErrInvalidName},
+		{name: "inner space rejected", input: "a b", wantErr: errdefs.ErrInvalidName},
+		{name: "backslash rejected", input: `a\b`, wantErr: errdefs.ErrInvalidName},
+		{name: "NUL rejected", input: "a\x00b", wantErr: errdefs.ErrInvalidName},
+		{name: "inner dot legal", input: "a.b", wantValid: true},
 	}
 
 	for _, kind := range kinds {

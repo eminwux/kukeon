@@ -39,6 +39,9 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
+	if err := validateScopeNames(realmName, spaceName, "", ""); err != nil {
+		return err
+	}
 
 	// Hold the space lock until the metadata is gone so a concurrent
 	// EnsureSpace — in this process or another sharing the RunPath —
@@ -159,7 +162,7 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		internalSpace.Spec.RealmName,
 		internalSpace.Metadata.Name,
 	)
-	_ = r.reclaimScopeMetadata(metadataRunPath)
+	_ = r.reclaimScopeMetadata(metadataRunPath, fs.SpaceDepth)
 
 	spaceGone = true
 	return nil

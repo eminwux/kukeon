@@ -24,13 +24,11 @@ import (
 )
 
 // ValidateRealmName rejects realm names that would corrupt downstream
-// resources. Two characters are blocked today:
-//
-//   - "_" collides with the containerd container-ID separator
-//     ({space}_{stack}_{cell}_{container}) and would break the parser
-//     that splits IDs back into hierarchy components.
-//   - "/" injects extra path components into the cgroup path
-//     (/kukeon/{realm}/{space}/...).
+// resources or escape the metadata tree once joined into a path. The name must
+// satisfy the shared NamePattern (issue #1719): besides path traversal ("." and
+// "..") it excludes "_", which collides with the containerd container-ID
+// separator ({space}_{stack}_{cell}_{container}), and "/", which would inject
+// extra path components into the cgroup path (/kukeon/{realm}/{space}/...).
 //
 // Empty names are also rejected for callers that want a single entrypoint;
 // callers that need a separate "required" error should keep using
@@ -40,9 +38,8 @@ func ValidateRealmName(name string) error {
 	if trimmed == "" {
 		return errdefs.ErrRealmNameRequired
 	}
-	if strings.ContainsAny(trimmed, "_/") {
-		return fmt.Errorf("%w: %q contains disallowed character (must not contain '_' or '/')",
-			errdefs.ErrInvalidRealmName, trimmed)
+	if !IsValidName(trimmed) {
+		return fmt.Errorf("%w: %q %s", errdefs.ErrInvalidRealmName, trimmed, nameRuleHint)
 	}
 	return nil
 }

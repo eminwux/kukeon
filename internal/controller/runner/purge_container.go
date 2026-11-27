@@ -36,6 +36,9 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
+	if err := validateScopeNames(realmName, "", "", ""); err != nil {
+		return err
+	}
 
 	// Get realm to access namespace
 	internalRealm, err := r.GetRealm(realm)

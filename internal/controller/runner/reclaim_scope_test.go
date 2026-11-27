@@ -100,24 +100,28 @@ func TestReclaimScopeMetadata_PreservesRetainedAtScope(t *testing.T) {
 		retained intmodel.VolumeMetadata
 		deflt    intmodel.VolumeMetadata
 		scopeDir func(runPath string) string
+		depth    int
 	}{
 		{
 			name:     "stack",
 			retained: intmodel.VolumeMetadata{Name: "keep", Realm: "r1", Space: "s1", Stack: "st1"},
 			deflt:    intmodel.VolumeMetadata{Name: "drop", Realm: "r1", Space: "s1", Stack: "st1"},
 			scopeDir: func(rp string) string { return fs.StackMetadataDir(rp, "r1", "s1", "st1") },
+			depth:    fs.StackDepth,
 		},
 		{
 			name:     "space",
 			retained: intmodel.VolumeMetadata{Name: "keep", Realm: "r1", Space: "s1"},
 			deflt:    intmodel.VolumeMetadata{Name: "drop", Realm: "r1", Space: "s1"},
 			scopeDir: func(rp string) string { return fs.SpaceMetadataDir(rp, "r1", "s1") },
+			depth:    fs.SpaceDepth,
 		},
 		{
 			name:     "realm",
 			retained: intmodel.VolumeMetadata{Name: "keep", Realm: "r1"},
 			deflt:    intmodel.VolumeMetadata{Name: "drop", Realm: "r1"},
 			scopeDir: func(rp string) string { return fs.RealmMetadataDir(rp, "r1") },
+			depth:    fs.RealmDepth,
 		},
 	}
 
@@ -136,7 +140,7 @@ func TestReclaimScopeMetadata_PreservesRetainedAtScope(t *testing.T) {
 				t.Fatalf("WriteVolume(default) error = %v", err)
 			}
 
-			if err := r.reclaimScopeMetadata(scopeDir); err != nil {
+			if err := r.reclaimScopeMetadata(scopeDir, tc.depth); err != nil {
 				t.Fatalf("reclaimScopeMetadata error = %v", err)
 			}
 
@@ -204,7 +208,7 @@ func TestReclaimScopeMetadata_PreservesDeeplyNestedRetained(t *testing.T) {
 		t.Fatalf("WriteVolume(shallow default) error = %v", err)
 	}
 
-	if err := r.reclaimScopeMetadata(realmDir); err != nil {
+	if err := r.reclaimScopeMetadata(realmDir, fs.RealmDepth); err != nil {
 		t.Fatalf("reclaimScopeMetadata(realm) error = %v", err)
 	}
 
@@ -241,7 +245,7 @@ func TestReclaimScopeMetadata_NoRetainedRemovesWholeScope(t *testing.T) {
 		t.Fatalf("WriteVolume(default) error = %v", err)
 	}
 
-	if err := r.reclaimScopeMetadata(scopeDir); err != nil {
+	if err := r.reclaimScopeMetadata(scopeDir, fs.StackDepth); err != nil {
 		t.Fatalf("reclaimScopeMetadata error = %v", err)
 	}
 	assertGone(t, scopeDir, "scope dir (no retained volume)")
@@ -265,7 +269,7 @@ func TestReclaimScopeMetadata_RetainOutsideScopeUntouched(t *testing.T) {
 		t.Fatalf("WriteVolume(other) error = %v", err)
 	}
 
-	if err := r.reclaimScopeMetadata(purged); err != nil {
+	if err := r.reclaimScopeMetadata(purged, fs.StackDepth); err != nil {
 		t.Fatalf("reclaimScopeMetadata error = %v", err)
 	}
 	assertGone(t, purged, "purged stack")

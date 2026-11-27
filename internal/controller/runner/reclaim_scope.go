@@ -26,6 +26,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	metafs "github.com/eminwux/kukeon/internal/util/fs"
 )
 
 // reclaimScopeMetadata removes a scope's on-disk metadata tree on cascade purge,
@@ -48,7 +49,16 @@ import (
 // directory presence).
 //
 // A missing scopeDir is a no-op, matching the os.RemoveAll it replaces.
-func (r *Exec) reclaimScopeMetadata(scopeDir string) error {
+//
+// depth is the scope's level below the metadata root (RealmDepth, SpaceDepth
+// or StackDepth from internal/util/fs). The containment guard refuses a
+// scopeDir at any other depth before anything is removed (issue #1719): a ".."
+// in any scope name shortens the joined path, so a space named ".." would
+// otherwise reclaim the whole metadata tree.
+func (r *Exec) reclaimScopeMetadata(scopeDir string, depth int) error {
+	if err := metafs.EnsureContained(metafs.MetadataRoot(r.opts.RunPath), scopeDir, depth); err != nil {
+		return err
+	}
 	if _, err := os.Lstat(scopeDir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

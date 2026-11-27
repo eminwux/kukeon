@@ -56,11 +56,11 @@ type DeleteSecretResult struct {
 func (b *Exec) CreateSecret(secret intmodel.Secret) (CreateSecretResult, error) {
 	var res CreateSecretResult
 
-	if err := validateSecretLookup(secret.Metadata); err != nil {
-		return res, err
-	}
 	if secret.Metadata.Name == secretstore.TypesDir || secret.Metadata.Name == secretstore.MetaDir {
 		return res, errdefs.ErrSecretReservedName
+	}
+	if err := validateSecretLookup(secret.Metadata); err != nil {
+		return res, err
 	}
 	if err := secretstore.ValidateSpec(secret.Spec); err != nil {
 		return res, err
@@ -264,7 +264,10 @@ func validateSecretLookup(md intmodel.SecretMetadata) error {
 	if strings.TrimSpace(md.Realm) == "" {
 		return errdefs.ErrSecretRealmRequired
 	}
-	return validateSecretScopeContiguity(md.Space, md.Stack, md.Cell)
+	if err := validateSecretScopeContiguity(md.Space, md.Stack, md.Cell); err != nil {
+		return err
+	}
+	return validateScopeSegments(errdefs.ErrSecretCoordUnsafe, md.Name, md.Realm, md.Space, md.Stack, md.Cell)
 }
 
 // validateSecretScopeFilter enforces the scope contract for a list filter:
@@ -275,7 +278,10 @@ func validateSecretScopeFilter(realm, space, stack, cell string) error {
 		(strings.TrimSpace(space) != "" || strings.TrimSpace(stack) != "" || strings.TrimSpace(cell) != "") {
 		return fmt.Errorf("%w (scope set without realm)", errdefs.ErrSecretScopeIncomplete)
 	}
-	return validateSecretScopeContiguity(space, stack, cell)
+	if err := validateSecretScopeContiguity(space, stack, cell); err != nil {
+		return err
+	}
+	return validateScopeSegments(errdefs.ErrSecretCoordUnsafe, "", realm, space, stack, cell)
 }
 
 // validateSecretScopeContiguity rejects a scope gap below the realm level: a

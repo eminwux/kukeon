@@ -44,6 +44,9 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	if spaceName == "" {
 		return errdefs.ErrSpaceNameRequired
 	}
+	if err := validateScopeNames(realmName, spaceName, stackName, ""); err != nil {
+		return err
+	}
 
 	// Get the stack document
 	internalStack, err := r.GetStack(stack)
@@ -157,7 +160,7 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	// reported in issue #905 can never again be silently swallowed. The
 	// reclaim honors stack-scoped volumes' reclaimPolicy (#1237): default-policy
 	// volumes go with the stack, a Retain volume survives at its coordinates.
-	if err = r.reclaimScopeMetadata(metadataRunPath); err != nil {
+	if err = r.reclaimScopeMetadata(metadataRunPath, fs.StackDepth); err != nil {
 		return fmt.Errorf("%w: failed to remove stack directory %s: %w", errdefs.ErrDeleteStack, metadataRunPath, err)
 	}
 
