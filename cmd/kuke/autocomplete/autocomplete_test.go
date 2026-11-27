@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/internal/clienttest"
 	"github.com/eminwux/kukeon/cmd/kuke"
 	"github.com/eminwux/kukeon/cmd/kuke/autocomplete"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -67,6 +68,7 @@ func TestNewAutocompleteCmd(t *testing.T) {
 }
 
 func TestAutocompleteBash(t *testing.T) {
+	clienttest.IsolateHome(t)
 	// Create root command for testing
 	rootCmd, err := kuke.NewKukeCmd()
 	if err != nil {
@@ -119,6 +121,7 @@ func TestAutocompleteBash(t *testing.T) {
 }
 
 func TestAutocompleteZsh(t *testing.T) {
+	clienttest.IsolateHome(t)
 	// Create root command for testing
 	rootCmd, err := kuke.NewKukeCmd()
 	if err != nil {
@@ -172,6 +175,7 @@ func TestAutocompleteZsh(t *testing.T) {
 }
 
 func TestAutocompleteFish(t *testing.T) {
+	clienttest.IsolateHome(t)
 	// Create root command for testing
 	rootCmd, err := kuke.NewKukeCmd()
 	if err != nil {

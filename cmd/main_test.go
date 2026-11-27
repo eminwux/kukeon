@@ -28,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/internal/clienttest"
 	"github.com/eminwux/kukeon/cmd/kuke"
 	execcmd "github.com/eminwux/kukeon/cmd/kuke/exec"
 	healthcmd "github.com/eminwux/kukeon/cmd/kuke/health"
@@ -292,6 +293,7 @@ func TestGetFactories(t *testing.T) {
 }
 
 func TestMain(t *testing.T) {
+	clienttest.IsolateHome(t)
 	// Save original values
 	originalArgs := os.Args
 

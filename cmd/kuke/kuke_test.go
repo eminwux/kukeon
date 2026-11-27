@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/internal/clienttest"
 	"github.com/eminwux/kukeon/cmd/kuke"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -88,6 +89,7 @@ func TestNewKukeCmd(t *testing.T) {
 }
 
 func TestNewKukeCmdPersistentPreRunE(t *testing.T) {
+	clienttest.IsolateHome(t)
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
@@ -405,6 +407,7 @@ func TestNewKukeCmdRun(t *testing.T) {
 }
 
 func TestPersistentPreRunELoggerContext(t *testing.T) {
+	clienttest.IsolateHome(t)
 	t.Cleanup(viper.Reset)
 
 	cmd, err := kuke.NewKukeCmd()
@@ -436,6 +439,7 @@ func TestPersistentPreRunELoggerContext(t *testing.T) {
 }
 
 func TestPersistentPreRunEConfigErrorWrapping(t *testing.T) {
+	clienttest.IsolateHome(t)
 	t.Cleanup(viper.Reset)
 
 	cmd, err := kuke.NewKukeCmd()
@@ -555,6 +559,7 @@ func TestNewKukeCmdStreams(t *testing.T) {
 // on the root since the envSet check in applyRunPathImpliesNoDaemon reads
 // os.LookupEnv directly and doesn't depend on a cobra flag instance.
 func TestRunPathImpliesNoDaemon(t *testing.T) {
+	clienttest.IsolateHome(t)
 	tests := []struct {
 		name            string
 		setFlag         bool   // --run-path on the command line
@@ -657,6 +662,7 @@ func TestRunPathImpliesNoDaemon(t *testing.T) {
 // case re-verifies the same root promotion still satisfies init's
 // pre-#570 contract (init.go no longer calls the helper itself).
 func TestRunPathImpliesKukeondSocket(t *testing.T) {
+	clienttest.IsolateHome(t)
 	tests := []struct {
 		name        string
 		leafArgs    []string
