@@ -56,7 +56,13 @@ var e2eNetwork struct {
 }
 
 func TestMain(m *testing.M) {
+	cleanupHome, err := setupE2EClientHome()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	cleanupHome()
 	if e2eNetwork.lock != nil {
 		// The pool was empty at preflight. Any remaining route/address or egress
 		// chain is a leak; never delete arbitrary links or rules here or hide a
@@ -334,6 +340,7 @@ func e2eRunEnv(env []string, args []string) []string {
 	if env == nil {
 		env = os.Environ()
 	}
+	env = isolateClientHome(env)
 	var runPath string
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--run-path" {

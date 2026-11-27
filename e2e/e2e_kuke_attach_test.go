@@ -945,6 +945,7 @@ func startKukeondDaemonWithSocketGID(t *testing.T, runPath string, socketGID int
 		"--reconcile-interval", "0",
 		"--configuration", filepath.Join(runPath, "kukeond.yaml"),
 	)
+	cmd.Env = e2eRunEnv(nil, []string{"--run-path", runPath})
 	logFile, logErr := os.CreateTemp("", "kukeond-*.log")
 	if logErr != nil {
 		cancel()

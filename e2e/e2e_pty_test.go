@@ -63,9 +63,7 @@ func startPTY(t *testing.T, env []string, command string, args ...string) *ptySe
 	}
 
 	cmd := exec.Command(bin, args...)
-	if env != nil {
-		cmd.Env = env
-	}
+	cmd.Env = e2eRunEnv(env, args)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
