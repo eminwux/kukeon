@@ -194,6 +194,64 @@ instance and only their matching instances. The hierarchy is the grouping, so
 neither list offers a Group by in this style. On narrow screens, open the sidebar with the menu button; it shows
 the sidebar of the current view, and selection closes it.
 
+### Unread terminal output
+
+A cell whose terminal produced output you have not seen is marked, like an
+unread message: in the sidebar its name is bold and an accent dot follows it;
+an agent row is marked when any of its instances is, collapsed or not; on the
+collapsed rail the cell dot, and the agent glyph, get an accent ring; on the
+grid the tile shows an **Unread** badge. The accessible name of each marked
+link gains ", unread output". The mark is a shape as well as a colour. It works
+for terminals this browser is attached to in the background and for terminals
+nobody is attached to.
+
+The unit is the cell's default terminal, the container its thumbnail shows. The
+browser keeps one read marker per cell in local storage
+(`kukeon-terminal-seen`, `{ [cellKey]: { startedAt, bytes } }`, cellKey the
+JSON scope): the terminal run and how many of its output bytes you have seen.
+Nothing is stored in kukeond, and read state is not shared across browsers.
+Against each [activity reading](#read-only-api):
+
+- A cell this browser has never observed starts as read, so the first load
+  after the upgrade marks nothing.
+- The same `startedAt`: the unread bytes are `bytesOut` minus the marker.
+- A different `startedAt` means the terminal restarted: all output of the new
+  run is unread.
+- A cell reported `unavailable` (any value) is not marked, and its marker is
+  kept.
+
+A cell is **being read** while its terminal screen is open, the session shown
+on it is attached, and the browser tab is visible; every reading of it moves
+the marker to `bytesOut`, and it is never marked. Leaving it (another page or
+cell, or hiding the tab) reads it once more and moves the marker, so output seen
+in the last seconds before leaving is not reported as unread. That reading is
+the one activity request made outside the Workbench or while the tab is hidden.
+Markers of cells no longer in the inventory are removed when a complete
+inventory loads, and other tabs of the same browser pick up marker changes at
+once.
+
+Raw bytes are not messages: an agent TUI redraws while it works, and typed
+input is echoed. So a cell is marked only once its unread output has gone
+quiet: when the terminal has produced nothing for three seconds
+(`unreadQuietMs` in `src/unread.mjs`; `0` marks on any new byte). While output
+keeps arriving the cell is not marked.
+
+The browser asks for the activity of the cells the sidebar lists, in one
+request of up to 100 cells, at once and then every five seconds, while the
+Workbench is the current view and the tab is visible; a tick is skipped while a
+request is in flight. No request is made on Manage or Settings pages.
+
+With Settings → Profile → **Show unread bytes** on, each mark also shows the
+amount of unread output (`1.2 KiB`): after the dot in a sidebar row, the sum of
+its marked instances on an agent row, and **Unread · 1.2 KiB** on a tile. The
+rail shows no number; its tooltips and accessible names carry the amount, and
+every accessible name reads ", 1.2 KiB unread output". The amount is raw PTY
+bytes since the marker, escape sequences and redraws included, so it is a size
+hint, not a character count. A cell that is not marked shows no amount.
+
+Cells started before the upgrade run a terminal without the activity counters
+and report `unsupported`: they are never marked until they are restarted.
+
 ### Manage sidebar
 
 On a Manage page the sidebar is one flat list, the **Manage navigation**:
@@ -1282,6 +1340,47 @@ not attach, and the terminal bytes never traverse kukeond.
   `screen_unavailable` (404). A missing cell returns `not_found` (404). Any
   other failure keeps its usual code, for example `unavailable` (503).
 
+`/api/terminal-activity?cell={realm}/{space}/{stack}/{cell}&cell=…` returns the
+output counters of many cells' terminals in one request, for
+[Unread terminal output](#unread-terminal-output). For each cell it picks the
+container as the screenshot route does without `?container=` and makes one sbsh
+`Activity` read; like a screenshot it never attaches, does not count against
+terminal connections, and leaves the terminal's `Attachers` and
+`LastAttachedAt` alone. The answer lists the cells in request order:
+
+```json
+{
+  "cells": [
+    {
+      "scope": ["default", "default", "default", "kukeon-dev-0"],
+      "container": "main",
+      "startedAt": "2026-11-26T10:00:00Z",
+      "bytesOut": 48213,
+      "bytesIn": 311,
+      "idleMs": 12840
+    },
+    {
+      "scope": ["default", "default", "default", "stopped-cell"],
+      "unavailable": "not_live"
+    }
+  ]
+}
+```
+
+- `startedAt` is when the terminal began counting; `bytesOut` and `bytesIn`
+  restart from zero when it changes. `idleMs` is how long the terminal has
+  produced no output, measured by the terminal (0 before any output).
+- `unavailable` is `not_found` (no such cell), `not_live` (the cases the
+  screenshot route reports as `screen_unavailable`: cell or task not running,
+  no attachable container, stale socket), `unsupported` (the terminal runs an
+  sbsh without `Activity`: every cell started before the upgrade, until it is
+  restarted) or `error` (anything else). A failing cell never fails the
+  request.
+- Cells are read at most eight at a time, each within two seconds; one that
+  takes longer is reported `error`.
+- More than 100 `cell` parameters, a scope without four non-empty segments, or
+  an unsafe segment is `invalid_request` (400).
+
 Each name is a URL-encoded path segment. Collections return daemon documents,
 except containers, whose collection returns daemon container specs. Realm
 registry passwords are blanked (see [Registry credentials](#registry-credentials))
@@ -1295,7 +1394,8 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`:
 (503), or `unavailable` (503). `daemon_outdated` means the
 running kukeond predates the request (for example the `/cgroup` route against a
 daemon built before it); redeploy kukeond with the same build as `kuke`. Requests
-time out after ten seconds. Responses are not cached.
+time out after ten seconds, except `/api/terminal-activity`, which bounds each
+cell to two seconds instead. Responses are not cached.
 
 ```sh
 kuke serve --listen 127.0.0.1:5129
@@ -1344,6 +1444,7 @@ or unreadable value reads as the default. Nothing is stored in kukeond.
 | Cell list      | Default Group by                | `kukeon.io/config` | `kukeon-default-group-by`             |
 | Sidebar        | Show cell scope in sidebar      | on                 | `kukeon-sidebar-show-scope`           |
 | Sidebar        | Show terminal status in sidebar | on                 | `kukeon-sidebar-show-terminal-status` |
+| Sidebar        | Show unread bytes               | off                | `kukeon-show-unread-bytes`            |
 | Sidebar        | Show search in sidebar          | off                | `kukeon-sidebar-show-search`          |
 | Sidebar        | Show Group by in sidebar        | off                | `kukeon-sidebar-show-group-by`        |
 | Workbench grid | Show search in grid             | on                 | `kukeon-grid-show-search`             |
@@ -1358,6 +1459,8 @@ or unreadable value reads as the default. Nothing is stored in kukeond.
   Workbench grid tiles are unaffected.
 - **Show terminal status in sidebar**: the `Terminal attached /
 connecting / disconnected / interrupted` text on sidebar cells.
+- **Show unread bytes**: the amount of unread terminal output beside each
+  unread mark; see [Unread terminal output](#unread-terminal-output).
 
 ### Catalog HTTP API
 

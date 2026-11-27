@@ -23,6 +23,7 @@ type SettingTypes = {
   defaultGroupBy: string;
   showCellScope: boolean;
   showTerminalStatus: boolean;
+  showUnreadBytes: boolean;
   showSidebarSearch: boolean;
   showSidebarGroupBy: boolean;
   showGridSearch: boolean;
@@ -70,6 +71,8 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
   },
   showCellScope: switchSetting("kukeon-sidebar-show-scope", "Show cell scope in sidebar", true),
   showTerminalStatus: switchSetting("kukeon-sidebar-show-terminal-status", "Show terminal status in sidebar", true),
+  // The amount of a cell's unread terminal output beside its unread mark (#1696).
+  showUnreadBytes: switchSetting("kukeon-show-unread-bytes", "Show unread bytes", false),
   showSidebarSearch: switchSetting("kukeon-sidebar-show-search", "Show search in sidebar", false),
   showSidebarGroupBy: switchSetting("kukeon-sidebar-show-group-by", "Show Group by in sidebar", false, defaultStyleOnly),
   showGridSearch: switchSetting("kukeon-grid-show-search", "Show search in grid", true),
@@ -86,7 +89,7 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
 // The Profile section of the Settings page: its groups and their settings, in order.
 export const profileGroups: readonly { title: string; settings: readonly Exclude<SettingName, "theme" | "getStarted">[] }[] = [
   { title: "Cell list", settings: ["cellListStyle", "defaultGroupBy"] },
-  { title: "Sidebar", settings: ["showCellScope", "showTerminalStatus", "showSidebarSearch", "showSidebarGroupBy"] },
+  { title: "Sidebar", settings: ["showCellScope", "showTerminalStatus", "showUnreadBytes", "showSidebarSearch", "showSidebarGroupBy"] },
   { title: "Workbench grid", settings: ["showGridSearch", "showGridGroupBy"] },
 ];
 

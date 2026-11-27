@@ -1,0 +1,17 @@
+export type Marker = { startedAt: string; bytes: number };
+export type Markers = Record<string, Marker>;
+export type Reading = { startedAt: string; bytesOut: number; idleMs: number; unavailable?: undefined } | { unavailable: string };
+export type Readings = Record<string, Reading>;
+export type Unread = { unreadBytes: number; marked: boolean };
+export const unreadQuietMs: number;
+export const markersKey: string;
+export function parseMarkers(raw: string | null | undefined): Markers;
+export function parseActivity(body: unknown): Readings;
+export function nextMarker(stored: Marker | undefined, reading: Reading | undefined, isBeingRead: boolean): Marker | undefined;
+export function unreadBytes(stored: Marker | undefined, reading: Reading | undefined): number;
+export function isMarked(unread: number, idleMs: number, quietMs?: number): boolean;
+export function pruneMarkers(markers: Markers, cellKeys: Iterable<string>): Markers;
+export function applyReadings(markers: Markers, readings: Readings, beingRead: Set<string>): { markers: Markers; changed: string[] };
+export function unreadState(markers: Markers, readings: Readings, beingRead: Set<string>, quietMs?: number): Record<string, Unread>;
+export function unreadLabel(bytes: number, showBytes: boolean): string;
+export function unreadAmount(bytes: number): string;

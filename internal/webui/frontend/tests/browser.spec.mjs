@@ -6215,16 +6215,20 @@ test("Default Group by groups both lists until one picks its own, and changing i
   await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
 });
 
-test("Profile shows its eight settings in three groups with their defaults; each applies at once, works from the keyboard and survives a reload", async ({ page }) => {
+test("Profile shows its nine settings in three groups with their defaults; each applies at once, works from the keyboard and survives a reload", async ({ page }) => {
   await mock(page);
   await page.goto(`${server.url}#/settings/profile`);
   const settings = settingsPage(page);
   await expect(settings).toContainText("Stored in this browser only.");
   await expect(settings.getByRole("heading", { level: 3 })).toHaveText(["Cell list", "Sidebar", "Workbench grid"]);
-  const switches = { "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
-  const keys = { "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
+  const switches = { "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show unread bytes": false, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
+  const keys = { "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show unread bytes": "kukeon-show-unread-bytes", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
   await expect(settings.getByRole("region", { name: "Cell list" }).getByRole("radio")).toHaveCount(2);
-  await expect(settings.getByRole("region", { name: "Sidebar" }).getByRole("switch")).toHaveCount(4);
+  // Show unread bytes (#1696) follows Show terminal status in sidebar.
+  const sidebarSwitches = settings.getByRole("region", { name: "Sidebar" }).getByRole("switch");
+  await expect(sidebarSwitches).toHaveCount(5);
+  await expect(sidebarSwitches.nth(1)).toHaveAccessibleName("Show terminal status in sidebar");
+  await expect(sidebarSwitches.nth(2)).toHaveAccessibleName("Show unread bytes");
   await expect(settings.getByRole("region", { name: "Workbench grid" }).getByRole("switch")).toHaveCount(2);
   await expect(settings.getByRole("radio", { name: "Agent" })).toBeChecked();
   await expect(settings.getByLabel("Default Group by")).toHaveValue("kukeon.io/config");
@@ -7416,4 +7420,291 @@ test("New agent offers Log in first while the template's login is empty, and Cre
   await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/default-agent-demo-a1b2c3-d4e5f6$/);
   expect(empty.posts("/api/agents")).toHaveLength(1);
   expect(empty.posts("/api/connectors/demo/login")).toHaveLength(0);
+});
+
+// Unread terminal output (#1696). The mocked GET /api/terminal-activity answers each cell parameter
+// from counters, keyed realm/space/stack/cell; a cell missing there is not_found. hold makes the next
+// answers wait until the promise it is given settles.
+const runOne = "2026-11-26T10:00:00Z";
+const runTwo = "2026-11-26T11:00:00Z";
+const counters = (bytesOut, idleMs = 60_000, startedAt = runOne) => ({ container: "shell", startedAt, bytesOut, bytesIn: 0, idleMs });
+const seenKey = "kukeon-terminal-seen";
+const storedMarkers = page => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "{}"), seenKey);
+const cellKey = cell => JSON.stringify(cell.split("/"));
+// The cells' one attachable container, so opening a cell attaches its terminal.
+const shellContainers = path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined;
+async function mockActivity(page, counts) {
+  const requests = [];
+  let answered = 0;
+  let held = null;
+  await page.route("**/api/terminal-activity**", async route => {
+    const asked = new URL(route.request().url()).searchParams.getAll("cell");
+    requests.push(asked);
+    if (held) await held;
+    await route.fulfill({ json: { cells: asked.map(cell => ({ scope: cell.split("/"), ...(counts[cell] ?? { unavailable: "not_found" }) })) } });
+    answered++;
+  });
+  return { requests, answered: () => answered, hold: promise => { held = promise; } };
+}
+// mockAttach answers terminal attaches; the function it returns waits for the next attach to open and
+// tells it the terminal is ready, so the session becomes attached.
+async function mockAttach(page) {
+  const sockets = [];
+  await page.routeWebSocket("**/attach", socket => { sockets.push(socket); });
+  let used = 0;
+  return async () => {
+    await expect.poll(() => sockets.length).toBeGreaterThan(used);
+    used = sockets.length;
+    sockets.at(-1).send(JSON.stringify({ type: "ready" }));
+  };
+}
+// tick advances the page clock by one poll interval and waits for the poll it starts to be answered.
+async function tick(page, activity) {
+  const count = activity.answered();
+  await page.clock.fastForward(5000);
+  await expect.poll(() => activity.answered()).toBeGreaterThan(count);
+  await page.clock.fastForward(100);
+}
+
+test("unread output marks a cell in the sidebar, rail and grid once quiet, and reading it clears the mark", async ({ page }) => {
+  await page.clock.install();
+  await mock(page, shellContainers);
+  await defaultStyle(page);
+  const dev = "dev/shared/services/api";
+  const prod = "prod/shared/services/api";
+  const counts = { [dev]: counters(100), [prod]: counters(200) };
+  const activity = await mockActivity(page, counts);
+  const sendReady = await mockAttach(page);
+  await page.goto(server.url);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const devRow = cells.getByRole("link", { name: /^Open dev \/ shared \/ services \/ api/ });
+  const prodRow = cells.getByRole("link", { name: /^Open prod \/ shared \/ services \/ api/ });
+  const devTile = grid(page).locator(`.cell-tile[data-scope='${cellKey(dev)}']`);
+  // The polled cells are the ones the sidebar lists, each a realm/space/stack/cell parameter.
+  await expect.poll(() => activity.requests[0]?.slice().sort()).toEqual([dev, prod]);
+  // A browser with no stored markers marks nothing on first load, and keeps what it saw.
+  await expect.poll(() => storedMarkers(page)).toEqual({ [cellKey(dev)]: { startedAt: runOne, bytes: 100 }, [cellKey(prod)]: { startedAt: runOne, bytes: 200 } });
+  await expect(page.locator(".has-unread")).toHaveCount(0);
+  await expect(page.locator(".cell-tile-unread")).toHaveCount(0);
+
+  // Output still arriving does not mark the cell; once quiet for three seconds it does.
+  counts[dev] = counters(1329, 1200);
+  await tick(page, activity);
+  await expect(devRow).not.toHaveClass(/has-unread/);
+  counts[dev] = counters(1329, 4000);
+  await tick(page, activity);
+  await expect(devRow).toHaveClass(/has-unread/);
+  await expect(devRow).toHaveAccessibleName("Open dev / shared / services / api, unread output");
+  await expect(devRow.locator(".unread-dot")).toBeVisible();
+  await expect(devTile.locator(".cell-tile-unread")).toHaveText("Unread");
+  await expect(devTile).toHaveAccessibleName("Open dev / shared / services / api, unread output");
+  await expect(prodRow).not.toHaveClass(/has-unread/);
+  await expect(page.locator(".cell-unread-count")).toHaveCount(0);
+  // Not colour alone: the dot is a shape and the name is bolder, in both themes.
+  const weight = locator => locator.locator(".cell-link-name").evaluate(element => Number(getComputedStyle(element).fontWeight));
+  expect(await weight(devRow)).toBeGreaterThan(await weight(prodRow));
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    const [dot, accent, ground] = await devRow.locator(".unread-dot").evaluate(element => [getComputedStyle(element).backgroundColor, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(), getComputedStyle(document.body).backgroundColor]);
+    expect(dot, colorScheme).not.toBe(ground);
+    expect(accent, colorScheme).not.toBe("");
+    await expect(devTile.locator(".cell-tile-unread")).toBeVisible();
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+
+  // The collapsed rail rings the cell's dot.
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  const rail = page.getByRole("navigation", { name: "Cell shortcuts" });
+  const devDot = rail.getByRole("link", { name: "Open dev / shared / services / api (Ready), unread output" });
+  await expect(devDot).toHaveClass(/has-unread/);
+  await expect(devDot).toHaveAttribute("title", "Open dev / shared / services / api (Ready), unread output");
+  expect(await devDot.locator(".state-dot").evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
+  await expect(rail.getByRole("link", { name: "Open prod / shared / services / api (Running)" })).not.toHaveClass(/has-unread/);
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+
+  // Opening the cell clears the mark once its terminal is attached.
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await sendReady();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).not.toHaveText("Connecting…");
+  await expect(devRow).not.toHaveClass(/has-unread/);
+  // Output read on screen moves the marker, including the last seconds before navigating away.
+  counts[dev] = counters(2000, 4000);
+  await tick(page, activity);
+  await expect.poll(async () => (await storedMarkers(page))[cellKey(dev)]).toEqual({ startedAt: runOne, bytes: 2000 });
+  counts[dev] = counters(2100, 3500);
+  const beforeLeaving = activity.requests.length;
+  await page.goto(`${server.url}#/`);
+  await expect.poll(() => activity.requests.length).toBeGreaterThan(beforeLeaving);
+  expect(activity.requests.at(-1)).toEqual([dev]);
+  await expect.poll(async () => (await storedMarkers(page))[cellKey(dev)]).toEqual({ startedAt: runOne, bytes: 2100 });
+  await tick(page, activity);
+  await expect(devRow).not.toHaveClass(/has-unread/);
+
+  // The terminal stays attached in a hidden session; new output marks the cell like an unattached one.
+  counts[dev] = counters(2300, 4000);
+  await tick(page, activity);
+  await expect(devRow).toHaveClass(/has-unread/);
+  // A restart (new startedAt): all output of the new run is unread.
+  counts[prod] = counters(10, 4000, runTwo);
+  await tick(page, activity);
+  await expect(prodRow).toHaveClass(/has-unread/);
+  // An unavailable cell is not marked, and its marker is kept.
+  counts[dev] = { unavailable: "not_live" };
+  await tick(page, activity);
+  await expect(devRow).not.toHaveClass(/has-unread/);
+  expect((await storedMarkers(page))[cellKey(dev)]).toEqual({ startedAt: runOne, bytes: 2100 });
+  // Markers survive a reload: the output past the stored marker is still unread.
+  counts[dev] = counters(2300, 4000);
+  await page.reload();
+  await expect(devRow).toHaveClass(/has-unread/);
+  await expect(prodRow).toHaveClass(/has-unread/);
+});
+
+test("activity is polled only on Workbench routes while the tab is visible, one request at a time, and markers of gone cells are pruned", async ({ page }) => {
+  await page.clock.install();
+  await seed(page, { [seenKey]: JSON.stringify({ [cellKey("dev/shared/services/gone")]: { startedAt: runOne, bytes: 5 }, [cellKey("dev/shared/services/api")]: { startedAt: runOne, bytes: 1 } }) });
+  await mock(page);
+  const activity = await mockActivity(page, { "dev/shared/services/api": counters(1), "prod/shared/services/api": counters(1) });
+  for (const route of ["#/realms", "#/settings", "#/settings/profile"]) {
+    await page.goto(`${server.url}${route}`);
+    await expect(page.locator(".page-heading h1")).toBeVisible();
+    await page.clock.fastForward(12_000);
+  }
+  expect(activity.requests).toEqual([]);
+  // The inventory loaded on Manage already pruned the marker of the cell that left it.
+  await expect.poll(() => storedMarkers(page)).toEqual({ [cellKey("dev/shared/services/api")]: { startedAt: runOne, bytes: 1 } });
+
+  let release = () => {};
+  activity.hold(new Promise(resolve => { release = resolve; }));
+  await page.goto(`${server.url}#/`);
+  await expect.poll(() => activity.requests.length).toBe(1);
+  // A tick is skipped while a request is in flight.
+  await page.clock.fastForward(15_000);
+  expect(activity.requests.length).toBe(1);
+  activity.hold(null);
+  release();
+  await tick(page, activity);
+  expect(activity.requests.length).toBe(2);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(15_000);
+  expect(activity.requests.length).toBe(2);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => activity.requests.length).toBe(3);
+  // An unreadable stored value reads as empty: nothing is marked and the next reading is stored.
+  await page.evaluate(key => localStorage.setItem(key, "{not json"), seenKey);
+  await page.reload();
+  await expect.poll(() => storedMarkers(page).catch(() => null)).toEqual({ [cellKey("dev/shared/services/api")]: { startedAt: runOne, bytes: 1 }, [cellKey("prod/shared/services/api")]: { startedAt: runOne, bytes: 1 } });
+  await expect(page.locator(".has-unread")).toHaveCount(0);
+});
+
+test("agent style rolls unread output up to agents, and Show unread bytes adds the amount", async ({ page }) => {
+  await page.clock.install();
+  await mock(page, path => shellContainers(path) ?? agentInventory(path));
+  const at = cell => `dev/shared/services/${cell}`;
+  const counts = { [at("dev-0")]: counters(100), [at("dev-1")]: counters(100), [at("pm-0")]: counters(100), [at("scratch")]: counters(100), "prod/shared/services/dev-9": counters(100) };
+  const activity = await mockActivity(page, counts);
+  const sendReady = await mockAttach(page);
+  await page.goto(server.url);
+  await expect.poll(async () => Object.keys(await storedMarkers(page)).length).toBe(5);
+  counts[at("dev-0")] = counters(1329, 4000);
+  counts[at("dev-1")] = counters(2148, 4000);
+  counts[at("pm-0")] = counters(612, 4000);
+  counts[at("scratch")] = counters(5000, 200);
+  await tick(page, activity);
+
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const claude = cells.getByRole("region", { name: /agent$/ }).nth(0);
+  const toggle = claude.getByRole("button", { name: /^claude/ });
+  const devRow = claude.getByRole("link", { name: /^Open dev \/ shared \/ services \/ dev-0/ });
+  const pm = cells.getByRole("link", { name: /open dev \/ shared \/ services \/ pm-0/ });
+  const scratch = cells.getByRole("link", { name: /^Open dev \/ shared \/ services \/ scratch/ });
+  await expect(toggle).toHaveClass(/has-unread/);
+  await expect(toggle).toHaveAccessibleName(/, unread output$/);
+  await expect(devRow).toHaveAccessibleName("Open dev / shared / services / dev-0, unread output");
+  await expect(pm).toHaveClass(/has-unread/);
+  await expect(pm).toHaveAccessibleName(/\(Ready\), unread output$/);
+  await expect(scratch).not.toHaveClass(/has-unread/);
+  await expect(page.locator(".cell-unread-count")).toHaveCount(0);
+  // A collapsed agent still shows the mark.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveClass(/has-unread/);
+  await toggle.click();
+  // The rail rings the agent glyph and the instance's dot.
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  const rail = page.getByRole("navigation", { name: "Cell shortcuts" });
+  const glyph = rail.getByRole("img", { name: /^Agent claude.*, 2 instances, unread output$/ });
+  await expect(glyph).toHaveClass(/has-unread/);
+  await expect(rail.getByRole("link", { name: /dev-0 \(Ready\), unread output$/ })).toHaveClass(/has-unread/);
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+
+  // Show unread bytes: the amount on every marked surface, its sum on the agent row.
+  await page.goto(`${server.url}#/settings/profile`);
+  const control = settingsPage(page).getByRole("switch", { name: "Show unread bytes" });
+  await expect(control).toHaveAttribute("aria-checked", "false");
+  await control.click();
+  await expect(control).toHaveAttribute("aria-checked", "true");
+  await page.goto(`${server.url}#/`);
+  await tick(page, activity);
+  await expect(devRow.locator(".cell-unread-count")).toHaveText("1.2 KiB");
+  await expect(devRow).toHaveAccessibleName("Open dev / shared / services / dev-0, 1.2 KiB unread output");
+  await expect(toggle.locator(".cell-unread-count")).toHaveText("3.2 KiB");
+  await expect(toggle).toHaveAccessibleName(/, 3\.2 KiB unread output$/);
+  await expect(pm.locator(".cell-unread-count")).toHaveText("512 B");
+  await expect(scratch.locator(".cell-unread-count")).toHaveCount(0);
+  const devTile = grid(page).locator(`.cell-tile[data-scope='${cellKey(at("dev-0"))}']`);
+  await expect(devTile.locator(".cell-tile-unread")).toHaveText("Unread · 1.2 KiB");
+  await expect(grid(page).locator(`.cell-tile[data-scope='${cellKey(at("scratch"))}'] .cell-tile-unread`)).toHaveCount(0);
+  // The rail shows no number; the tooltip and accessible name carry it.
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(rail.locator(".cell-unread-count")).toHaveCount(0);
+  const railDot = rail.getByRole("link", { name: /dev-0 \(Ready\), 1\.2 KiB unread output$/ });
+  await expect(railDot).toHaveAttribute("title", /dev-0 \(Ready\), 1\.2 KiB unread output$/);
+  await expect(rail.getByRole("img", { name: /, 3\.2 KiB unread output$/ })).toBeVisible();
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  // The count follows each poll, and the choice survives a reload.
+  counts[at("dev-0")] = counters(2353, 4000);
+  await tick(page, activity);
+  await expect(devRow.locator(".cell-unread-count")).toHaveText("2.2 KiB");
+  await page.reload();
+  await expect(devRow.locator(".cell-unread-count")).toHaveText("2.2 KiB");
+  // Reading the cell removes its count.
+  await page.goto(`${server.url}#/workspace/dev/shared/services/dev-0`);
+  await sendReady();
+  await expect(devRow.locator(".cell-unread-count")).toHaveCount(0);
+  await expect(toggle.locator(".cell-unread-count")).toHaveText("2 KiB");
+});
+
+test("an unread mark reaches every tab of the browser, and reading the cell in one tab clears it in the other", async ({ page }) => {
+  test.setTimeout(60_000);
+  await defaultStyle(page);
+  const dev = "dev/shared/services/api";
+  const counts = { [dev]: counters(100), "prod/shared/services/api": counters(100) };
+  await mock(page, shellContainers);
+  await mockActivity(page, counts);
+  const sendReady = await mockAttach(page);
+  await page.goto(server.url);
+  await expect.poll(async () => Object.keys(await storedMarkers(page)).length).toBe(2);
+  const other = await page.context().newPage();
+  await signIn(other);
+  await mock(other, shellContainers);
+  await mockActivity(other, counts);
+  await other.goto(server.url);
+  counts[dev] = counters(900, 4000);
+  const row = tab => tab.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: /^Open dev \/ shared \/ services \/ api/ });
+  await expect(row(page)).toHaveClass(/has-unread/, { timeout: 12_000 });
+  await expect(row(other)).toHaveClass(/has-unread/, { timeout: 12_000 });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await sendReady();
+  await expect(row(page)).not.toHaveClass(/has-unread/);
+  // The reading tab moves the marker on its next poll; the other tab follows through the storage event.
+  await expect(row(other)).not.toHaveClass(/has-unread/, { timeout: 12_000 });
+  await other.close();
 });
