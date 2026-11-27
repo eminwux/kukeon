@@ -175,6 +175,17 @@ export function agentGroups(rows, configs = []) {
   return { agents, others };
 }
 
+// filterAgents narrows the result of agentGroups to the rows `match` keeps, dropping agents left with no
+// rows (#1688). Group every cell first and filter after: a label-only cell joins its provenance sibling's
+// agent only when the sibling is in the grouped rows, so grouping an already searched list would move it to
+// another agent id while the user types. Ids, names and context stay what the full list gave them.
+export function filterAgents({ agents, others }, match) {
+  return {
+    agents: agents.map(agent => ({ ...agent, rows: agent.rows.filter(match) })).filter(agent => agent.rows.length),
+    others: others.filter(match),
+  };
+}
+
 // The creation time of a cell in milliseconds, or NaN when the daemon reports none (a zero time).
 function createdAt(row) {
   const value = row.doc.status?.createdAt;

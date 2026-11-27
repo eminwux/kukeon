@@ -24,5 +24,6 @@ export function displayNameError(value: string): string;
 export function configDisplayName(config: Annotated | undefined): { name: string; named: boolean };
 export type Agent = { id: string; name: string; displayName: string; named: boolean; realm: string; scope: string[]; showRealm: boolean; context: string; rows: Row[] };
 export function agentGroups(rows: Row[], configs?: Annotated[]): { agents: Agent[]; others: Row[] };
+export function filterAgents(groups: { agents: Agent[]; others: Row[] }, match: (row: Row) => boolean): { agents: Agent[]; others: Row[] };
 export function instanceLabels(rows: Row[], configs?: Annotated[]): Map<string, string>;
 export function rollupState(rows: Row[]): string | undefined;
