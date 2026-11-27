@@ -17,13 +17,17 @@
 package kuke
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
@@ -55,7 +59,7 @@ func clientConfigEnvVars() []config.Var {
 		config.KUKEON_ROOT_LOG_LEVEL,
 		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
 		config.KUKEON_ROOT_CGROUP_ROOT,
-		config.KUKEON_ROOT_POD_SUBNET_CIDR,
+		config.KUKEON_ROOT_SPACE_SUBNET_CIDR,
 	}
 }
 
@@ -113,7 +117,7 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 		LogLevel:                  "warn",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
-		PodSubnetCIDR:             "10.89.0.0/16",
+		SpaceSubnetCIDR:           "10.89.0.0/16",
 	}
 	applyClientConfiguration(cmd, spec)
 
@@ -136,8 +140,8 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
 	}
-	if got := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey); got != spec.PodSubnetCIDR {
-		t.Errorf("PodSubnetCIDR: got %q, want %q", got, spec.PodSubnetCIDR)
+	if got := viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey); got != spec.SpaceSubnetCIDR {
+		t.Errorf("SpaceSubnetCIDR: got %q, want %q", got, spec.SpaceSubnetCIDR)
 	}
 }
 
@@ -262,7 +266,7 @@ spec:
   logLevel: warn
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
-  podSubnetCIDR: 10.89.0.0/16
+  spaceSubnetCIDR: 10.89.0.0/16
 `
 	if writeErr := os.WriteFile(path, []byte(content), 0o644); writeErr != nil {
 		t.Fatalf("WriteFile: %v", writeErr)
@@ -512,5 +516,62 @@ func TestLoadClientConfigurationHonorsEnvWithUnknownHome(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey); got != host {
 		t.Fatalf("Host = %q, want %q from the KUKE_CONFIGURATION file", got, host)
+	}
+}
+
+// kuke refuses to start while the retired subnet env var is set, rather than
+// ignoring it and carving spaces from the default subnet (#1760).
+func TestLoadClientConfigurationRejectsRetiredSpaceSubnetEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
+	restoreRuntimeGlobals(t)
+	t.Setenv(configrename.RetiredSpaceSubnetEnv, "10.89.0.0/16")
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+	viper.Set(config.KUKE_CONFIGURATION.ViperKey, filepath.Join(t.TempDir(), "absent.yaml"))
+
+	err = loadClientConfiguration(cmd)
+	if !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("loadClientConfiguration() error = %v, want wrapping ErrSettingRenamed", err)
+	}
+	if !strings.Contains(err.Error(), configrename.SpaceSubnetEnv) {
+		t.Errorf("loadClientConfiguration() error = %q, want the replacement %s named",
+			err, configrename.SpaceSubnetEnv)
+	}
+}
+
+// kuke refuses to start on a client configuration that still sets the
+// retired subnet key (#1760).
+func TestLoadClientConfigurationRejectsRetiredSpaceSubnetKey(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	clearKukeEnv(t)
+	restoreRuntimeGlobals(t)
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "kuke.yaml")
+	content := "kind: ClientConfiguration\nspec:\n  " + configrename.RetiredSpaceSubnetKey + ": 10.89.0.0/16\n"
+	if writeErr := os.WriteFile(path, []byte(content), 0o644); writeErr != nil {
+		t.Fatalf("WriteFile: %v", writeErr)
+	}
+	viper.Set(config.KUKE_CONFIGURATION.ViperKey, path)
+
+	err = loadClientConfiguration(cmd)
+	if !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("loadClientConfiguration() error = %v, want wrapping ErrSettingRenamed", err)
+	}
+	if want := configrename.SpaceSubnetKey + "; update " + path; !strings.Contains(err.Error(), want) {
+		t.Errorf("loadClientConfiguration() error = %q, want it to contain %q", err, want)
+	}
+	if got := cni.NewDefaultSubnetAllocator("").ParentCIDR(); got != cni.DefaultSubnetParentCIDR {
+		t.Errorf("subnet parent CIDR = %q after a rejected configuration, want the untouched default %q",
+			got, cni.DefaultSubnetParentCIDR)
 	}
 }

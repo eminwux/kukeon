@@ -17,11 +17,15 @@
 package kukeond
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/configrename"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -57,7 +61,7 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 		ReconcileInterval:         "45s",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
-		PodSubnetCIDR:             "10.89.0.0/16",
+		SpaceSubnetCIDR:           "10.89.0.0/16",
 		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
 	}
 	applyServerConfiguration(cmd, spec)
@@ -87,8 +91,8 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
 	}
-	if got := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey); got != spec.PodSubnetCIDR {
-		t.Errorf("PodSubnetCIDR: got %q, want %q", got, spec.PodSubnetCIDR)
+	if got := viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey); got != spec.SpaceSubnetCIDR {
+		t.Errorf("SpaceSubnetCIDR: got %q, want %q", got, spec.SpaceSubnetCIDR)
 	}
 	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != spec.DefaultMemoryLimitBytes {
 		t.Errorf("DefaultMemoryLimitBytes: got %d, want %d", got, spec.DefaultMemoryLimitBytes)
@@ -340,7 +344,7 @@ func TestCurrentResolvedSpecReflectsViper(t *testing.T) {
 	viper.Set(config.KUKEOND_RECONCILE_INTERVAL.ViperKey, "45s")
 	viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, "dev.kukeon.io")
 	viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, "/kukeon-dev")
-	viper.Set(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey, "10.89.0.0/16")
+	viper.Set(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey, "10.89.0.0/16")
 	viper.Set(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey, int64(2*1024*1024*1024))
 
 	spec := currentResolvedSpec()
@@ -369,10 +373,66 @@ func TestCurrentResolvedSpecReflectsViper(t *testing.T) {
 	if spec.CgroupRoot != "/kukeon-dev" {
 		t.Errorf("CgroupRoot: got %q", spec.CgroupRoot)
 	}
-	if spec.PodSubnetCIDR != "10.89.0.0/16" {
-		t.Errorf("PodSubnetCIDR: got %q", spec.PodSubnetCIDR)
+	if spec.SpaceSubnetCIDR != "10.89.0.0/16" {
+		t.Errorf("SpaceSubnetCIDR: got %q", spec.SpaceSubnetCIDR)
 	}
 	if spec.DefaultMemoryLimitBytes != int64(2*1024*1024*1024) {
 		t.Errorf("DefaultMemoryLimitBytes: got %d", spec.DefaultMemoryLimitBytes)
+	}
+}
+
+// executeServeStub runs `kukeond serve <args>` through the real cobra
+// dispatch with the serve leaf's RunE stubbed out, so only
+// PersistentPreRunE (configuration loading) runs.
+func executeServeStub(t *testing.T, args ...string) error {
+	t.Helper()
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "serve" {
+			sub.RunE = func(*cobra.Command, []string) error { return nil }
+		}
+	}
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs(append([]string{"serve"}, args...))
+	return cmd.Execute()
+}
+
+// kukeond refuses to start while the retired subnet env var is set (#1760).
+func TestKukeondRejectsRetiredSpaceSubnetEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	t.Setenv(configrename.RetiredSpaceSubnetEnv, "10.89.0.0/16")
+
+	err := executeServeStub(t, "--configuration", filepath.Join(t.TempDir(), "absent.yaml"))
+	if !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("Execute() error = %v, want wrapping ErrSettingRenamed", err)
+	}
+	if !strings.Contains(err.Error(), configrename.SpaceSubnetEnv) {
+		t.Errorf("Execute() error = %q, want the replacement %s named", err, configrename.SpaceSubnetEnv)
+	}
+}
+
+// kukeond refuses to start on a server configuration that still sets the
+// retired subnet key (#1760).
+func TestKukeondRejectsRetiredSpaceSubnetKey(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	path := filepath.Join(t.TempDir(), "kukeond.yaml")
+	content := "kind: ServerConfiguration\nspec:\n  " + configrename.RetiredSpaceSubnetKey + ": 10.89.0.0/16\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	err := executeServeStub(t, "--configuration", path)
+	if !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("Execute() error = %v, want wrapping ErrSettingRenamed", err)
+	}
+	if want := configrename.SpaceSubnetKey + "; update " + path; !strings.Contains(err.Error(), want) {
+		t.Errorf("Execute() error = %q, want it to contain %q", err, want)
 	}
 }

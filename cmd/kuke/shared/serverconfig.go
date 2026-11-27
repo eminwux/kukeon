@@ -110,12 +110,12 @@ func LoadServerConfigurationFromFlag(cmd *cobra.Command) (v1beta1.ServerConfigur
 	if cfgErr := consts.ConfigureRuntime(suffix, cgroupRoot); cfgErr != nil {
 		return doc.Spec, path, fmt.Errorf("configure runtime: %w", cfgErr)
 	}
-	podSubnetCIDR := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey)
-	if podSubnetCIDR == "" {
-		podSubnetCIDR = config.KUKEON_ROOT_POD_SUBNET_CIDR.Default
+	spaceSubnetCIDR := viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey)
+	if spaceSubnetCIDR == "" {
+		spaceSubnetCIDR = config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Default
 	}
-	if cfgErr := cni.ConfigureSubnetParentCIDR(podSubnetCIDR); cfgErr != nil {
-		return doc.Spec, path, fmt.Errorf("configure pod subnet CIDR: %w", cfgErr)
+	if cfgErr := cni.ConfigureSubnetParentCIDR(spaceSubnetCIDR); cfgErr != nil {
+		return doc.Spec, path, fmt.Errorf("configure space subnet CIDR: %w", cfgErr)
 	}
 	return doc.Spec, path, nil
 }
@@ -130,7 +130,7 @@ func LoadServerConfigurationFromFlag(cmd *cobra.Command) (v1beta1.ServerConfigur
 //   - logLevel (KUKEON_LOG_LEVEL)
 //   - containerdNamespaceSuffix (KUKEON_NAMESPACE_SUFFIX)
 //   - cgroupRoot (KUKEON_CGROUP_ROOT)
-//   - podSubnetCIDR (KUKEON_POD_SUBNET_CIDR)
+//   - spaceSubnetCIDR (KUKEON_SPACE_SUBNET_CIDR)
 //
 // Precedence order: explicit `--flag` > env > ServerConfiguration > flag
 // default. The flag check skips fields whose `--flag` was changed; the env
@@ -165,10 +165,10 @@ func ApplyServerConfigurationCommonFields(cmd *cobra.Command, spec v1beta1.Serve
 		!envIsSet(config.KUKEON_ROOT_CGROUP_ROOT) {
 		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
-	if spec.PodSubnetCIDR != "" &&
-		!flagChangedAny(cmd, "pod-subnet-cidr") &&
-		!envIsSet(config.KUKEON_ROOT_POD_SUBNET_CIDR) {
-		viper.Set(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey, spec.PodSubnetCIDR)
+	if spec.SpaceSubnetCIDR != "" &&
+		!flagChangedAny(cmd, "space-subnet-cidr") &&
+		!envIsSet(config.KUKEON_ROOT_SPACE_SUBNET_CIDR) {
+		viper.Set(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey, spec.SpaceSubnetCIDR)
 	}
 }
 

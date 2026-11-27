@@ -1,8 +1,8 @@
 # Cell
 
-A **cell** is a pod-like unit: a group of containers that share a network namespace. Exactly one container in each cell is the **root container** — it owns the network namespace, and every other container in the cell joins it.
+A **cell** is a group of containers that share one network namespace. Exactly one container in each cell is the **root container** — it owns the network namespace, and every other container in the cell joins it.
 
-If you've worked with Kubernetes pods, the mental model is the same: a `pause`-like container holds the network namespace. By default the daemon builds that root itself, a kukepause container. You can instead mark one of your own containers as the root with `root: true`.
+The root container holds the network namespace for the whole cell. By default the daemon builds that root itself, a kukepause container. You can instead mark one of your own containers as the root with `root: true`.
 
 ## What a cell is
 

@@ -58,6 +58,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/clientconfig"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/logging"
@@ -310,6 +311,9 @@ func LoadConfig() error {
 // PersistentPreRunE so every subcommand sees the seeded defaults before
 // reading viper.
 func loadClientConfiguration(cmd *cobra.Command) error {
+	if err := configrename.CheckEnv(os.LookupEnv); err != nil {
+		return err
+	}
 	// Bind the KUKE_CONFIGURATION env var to viper before reading the path.
 	// The `--configuration` flag is bound in SetPersistentLoggingFlags, but
 	// without this env binding `viper.GetString` only ever sees the flag (and
@@ -361,12 +365,12 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 	if cfgErr := consts.ConfigureRuntime(suffix, cgroupRoot); cfgErr != nil {
 		return fmt.Errorf("configure runtime: %w", cfgErr)
 	}
-	podSubnetCIDR := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey)
-	if podSubnetCIDR == "" {
-		podSubnetCIDR = config.KUKEON_ROOT_POD_SUBNET_CIDR.Default
+	spaceSubnetCIDR := viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey)
+	if spaceSubnetCIDR == "" {
+		spaceSubnetCIDR = config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Default
 	}
-	if cfgErr := cni.ConfigureSubnetParentCIDR(podSubnetCIDR); cfgErr != nil {
-		return fmt.Errorf("configure pod subnet CIDR: %w", cfgErr)
+	if cfgErr := cni.ConfigureSubnetParentCIDR(spaceSubnetCIDR); cfgErr != nil {
+		return fmt.Errorf("configure space subnet CIDR: %w", cfgErr)
 	}
 	return nil
 }
@@ -424,10 +428,10 @@ func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurati
 		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
 		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
-	if spec.PodSubnetCIDR != "" &&
-		!flagChanged(cmd, "pod-subnet-cidr") &&
-		!envSet(config.KUKEON_ROOT_POD_SUBNET_CIDR) {
-		viper.Set(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey, spec.PodSubnetCIDR)
+	if spec.SpaceSubnetCIDR != "" &&
+		!flagChanged(cmd, "space-subnet-cidr") &&
+		!envSet(config.KUKEON_ROOT_SPACE_SUBNET_CIDR) {
+		viper.Set(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey, spec.SpaceSubnetCIDR)
 	}
 }
 

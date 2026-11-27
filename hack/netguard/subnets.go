@@ -29,6 +29,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/clientconfig"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -61,7 +62,7 @@ type resolution struct {
 // resolveConfig mirrors cmd/kuke/shared.LoadServerConfigurationFromFlag and
 // the client loader: an explicit path beats its env var, which beats the
 // default file; the run path is flag > env > server runPath > client runPath >
-// default; KUKEON_POD_SUBNET_CIDR beats the file's podSubnetCIDR, which
+// default; KUKEON_SPACE_SUBNET_CIDR beats the file's spaceSubnetCIDR, which
 // beats the compiled-in default.
 //
 // Every value one of the processes can end up with is a candidate, because
@@ -75,6 +76,9 @@ func resolveConfig(lookupEnv func(string) (string, bool), serverPath, runPath st
 		return strings.TrimSpace(v)
 	}
 	var res resolution
+	if err := configrename.CheckEnv(lookupEnv); err != nil {
+		return res, err
+	}
 	res.ServerConfig = serverPath
 	if res.ServerConfig == "" {
 		res.ServerConfig = env(config.KUKEOND_CONFIGURATION.Key)
@@ -87,16 +91,16 @@ func resolveConfig(lookupEnv func(string) (string, bool), serverPath, runPath st
 		return res, err
 	}
 
-	if v := env(config.KUKEON_ROOT_POD_SUBNET_CIDR.Key); v != "" {
-		if err = res.add(v, config.KUKEON_ROOT_POD_SUBNET_CIDR.Key+" environment variable"); err != nil {
+	if v := env(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Key); v != "" {
+		if err = res.add(v, config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Key+" environment variable"); err != nil {
 			return res, err
 		}
 	}
-	if v := strings.TrimSpace(server.Spec.PodSubnetCIDR); v != "" {
-		err = res.add(v, "podSubnetCIDR in "+res.ServerConfig)
+	if v := strings.TrimSpace(server.Spec.SpaceSubnetCIDR); v != "" {
+		err = res.add(v, "spaceSubnetCIDR in "+res.ServerConfig)
 	} else {
-		err = res.add(config.KUKEON_ROOT_POD_SUBNET_CIDR.Default,
-			"compiled-in default; no podSubnetCIDR in "+res.ServerConfig)
+		err = res.add(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Default,
+			"compiled-in default; no spaceSubnetCIDR in "+res.ServerConfig)
 	}
 	if err != nil {
 		return res, err
@@ -117,8 +121,8 @@ func resolveConfig(lookupEnv func(string) (string, bool), serverPath, runPath st
 			return res, loadErr
 		}
 		clientRunPath = strings.TrimSpace(client.Spec.RunPath)
-		if v := strings.TrimSpace(client.Spec.PodSubnetCIDR); v != "" {
-			if err = res.add(v, "podSubnetCIDR in "+clientPath); err != nil {
+		if v := strings.TrimSpace(client.Spec.SpaceSubnetCIDR); v != "" {
+			if err = res.add(v, "spaceSubnetCIDR in "+clientPath); err != nil {
 				return res, err
 			}
 		}

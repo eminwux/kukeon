@@ -16,17 +16,17 @@ Each layer maps to a concrete Linux primitive. There are no hidden layers and no
 | [Realm](realm.md)         | containerd namespace                           | Tenant boundary                 |
 | [Space](space.md)         | CNI network + cgroup subtree                   | Network and resource isolation  |
 | [Stack](stack.md)         | cgroup subtree                                 | Logical grouping within a space |
-| [Cell](cell.md)           | Network namespace (one root container owns it) | Pod-like co-location            |
+| [Cell](cell.md)           | Network namespace (one root container owns it) | Co-located containers           |
 | [Container](container.md) | OCI container via containerd                   | The actual workload             |
 
 ## Why five layers?
 
-Docker has one layer (the container). Kubernetes has many (namespaces, workloads, services, ingress, nodes, pods). Kukeon sits between: enough layers to carve real isolation boundaries on a single host, but few enough that each one has a single, clear job.
+Docker has one layer (the container). Kubernetes has many (namespaces, workloads, services, ingress, nodes). Kukeon sits between: enough layers to carve real isolation boundaries on a single host, but few enough that each one has a single, clear job.
 
 - **Realm** answers _whose containers are these?_ — one realm per tenant, environment, or user.
 - **Space** answers _what can they talk to?_ — each space is one CNI bridge, one IP range, one cgroup subtree for quotas.
 - **Stack** answers _which cells are part of the same deployment?_ — groups related cells together for lifecycle operations.
-- **Cell** answers _which containers share a network namespace?_ — like a Kubernetes pod, one unit of co-located containers.
+- **Cell** answers _which containers share a network namespace?_ — one unit of co-located containers.
 - **Container** answers _what is actually running?_ — a plain OCI container.
 
 ## A worked example
@@ -72,6 +72,6 @@ Everything is idempotent. Re-running `init` reports `already existed` for the pa
 - [Realm](realm.md) — tenant boundary
 - [Space](space.md) — network + cgroup isolation
 - [Stack](stack.md) — logical grouping
-- [Cell](cell.md) — pod-like unit
+- [Cell](cell.md) — containers sharing a network namespace
 - [Container](container.md) — OCI workload
 - [Client and daemon](client-and-daemon.md) — how `kuke` and `kukeond` cooperate

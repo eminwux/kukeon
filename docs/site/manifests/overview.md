@@ -34,7 +34,7 @@ If you're moving from v0.3.0 or v0.4.0, the per-kind pages below are the source 
 - [Realm](realm.md) — tenant boundary
 - [Space](space.md) — CNI network + cgroup
 - [Stack](stack.md) — logical group of cells
-- [Cell](cell.md) — pod-like group of containers
+- [Cell](cell.md) — group of containers sharing a network namespace
 - [Container](container.md) — OCI container
 - [Secret](secret.md) — named, scoped, daemon-managed credential
 - [CellBlueprint](blueprint.md) — daemon-stored parametrized cell template

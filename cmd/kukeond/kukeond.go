@@ -25,6 +25,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -40,6 +41,9 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := configrename.CheckEnv(os.LookupEnv); err != nil {
+				return err
+			}
 			path := viper.GetString(config.KUKEOND_CONFIGURATION.ViperKey)
 			if path == "" {
 				path = config.DefaultServerConfigurationFile()
@@ -62,9 +66,9 @@ func NewKukeondCmd() (*cobra.Command, error) {
 				return fmt.Errorf("configure runtime: %w", cfgErr)
 			}
 			if cfgErr := cni.ConfigureSubnetParentCIDR(
-				viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey),
+				viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey),
 			); cfgErr != nil {
-				return fmt.Errorf("configure pod subnet CIDR: %w", cfgErr)
+				return fmt.Errorf("configure space subnet CIDR: %w", cfgErr)
 			}
 			return nil
 		},
@@ -173,14 +177,14 @@ func NewKukeondCmd() (*cobra.Command, error) {
 	}
 
 	cmd.PersistentFlags().String(
-		"pod-subnet-cidr", config.KUKEON_ROOT_POD_SUBNET_CIDR.Default,
+		"space-subnet-cidr", config.KUKEON_ROOT_SPACE_SUBNET_CIDR.Default,
 		"Parent CIDR the per-space CNI subnet allocator subdivides into /24s. "+
 			"Set to a non-overlapping block (e.g. 10.89.0.0/16) for a parallel "+
 			"or nested kukeon instance. (issue #1079)",
 	)
 	if err := viper.BindPFlag(
-		config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey,
-		cmd.PersistentFlags().Lookup("pod-subnet-cidr"),
+		config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey,
+		cmd.PersistentFlags().Lookup("space-subnet-cidr"),
 	); err != nil {
 		return nil, err
 	}
@@ -258,7 +262,7 @@ func bindEnvVars() {
 		config.KUKEON_ROOT_LOG_LEVEL,
 		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
 		config.KUKEON_ROOT_CGROUP_ROOT,
-		config.KUKEON_ROOT_POD_SUBNET_CIDR,
+		config.KUKEON_ROOT_SPACE_SUBNET_CIDR,
 		config.KUKEOND_SOCKET,
 		config.KUKEOND_SOCKET_GID,
 		config.KUKEOND_RECONCILE_INTERVAL,
@@ -310,10 +314,10 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
 		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
-	if spec.PodSubnetCIDR != "" &&
-		!flagChanged(cmd, "pod-subnet-cidr") &&
-		!envSet(config.KUKEON_ROOT_POD_SUBNET_CIDR) {
-		viper.Set(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey, spec.PodSubnetCIDR)
+	if spec.SpaceSubnetCIDR != "" &&
+		!flagChanged(cmd, "space-subnet-cidr") &&
+		!envSet(config.KUKEON_ROOT_SPACE_SUBNET_CIDR) {
+		viper.Set(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey, spec.SpaceSubnetCIDR)
 	}
 	if spec.DefaultMemoryLimitBytes > 0 &&
 		!flagChanged(cmd, "default-memory-limit-bytes") &&
@@ -396,7 +400,7 @@ func currentResolvedSpec() v1beta1.ServerConfigurationSpec {
 		ReconcileInterval:         viper.GetString(config.KUKEOND_RECONCILE_INTERVAL.ViperKey),
 		ContainerdNamespaceSuffix: viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
 		CgroupRoot:                viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
-		PodSubnetCIDR:             viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey),
+		SpaceSubnetCIDR:           viper.GetString(config.KUKEON_ROOT_SPACE_SUBNET_CIDR.ViperKey),
 		DefaultMemoryLimitBytes:   viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey),
 		KukettyLogLevel:           viper.GetString(config.KUKEOND_KUKETTY_LOG_LEVEL.ViperKey),
 	}

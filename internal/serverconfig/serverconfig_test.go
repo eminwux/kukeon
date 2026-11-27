@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -160,6 +161,27 @@ spec:
 	}
 }
 
+// A file that still sets the retired subnet key fails to load instead of
+// silently falling back to the default subnet (#1760).
+func TestLoadRetiredSpaceSubnetKeyRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kukeond.yaml")
+	content := "apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  " +
+		configrename.RetiredSpaceSubnetKey + ": 10.89.0.0/16\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Load(path)
+	if !errors.Is(err, errdefs.ErrServerConfigurationInvalid) || !errors.Is(err, errdefs.ErrSettingRenamed) {
+		t.Fatalf("Load() error = %v, want wrapping ErrServerConfigurationInvalid and ErrSettingRenamed", err)
+	}
+	want := configrename.RetiredSpaceSubnetKey + " was renamed to " + configrename.SpaceSubnetKey + "; update " + path
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("Load() error = %q, want it to contain %q", err, want)
+	}
+}
+
 func TestLoadMalformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kukeond.yaml")
@@ -217,7 +239,7 @@ func canonicalDefaultsSpec() v1beta1.ServerConfigurationSpec {
 		KukeondImage:              "",
 		ContainerdNamespaceSuffix: "kukeon.io",
 		CgroupRoot:                "/kukeon",
-		PodSubnetCIDR:             "10.88.0.0/16",
+		SpaceSubnetCIDR:           "10.88.0.0/16",
 		DefaultMemoryLimitBytes:   0,
 	}
 }
@@ -276,8 +298,8 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.CgroupRoot != "/kukeon" {
 		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, "/kukeon")
 	}
-	if doc.Spec.PodSubnetCIDR != "10.88.0.0/16" {
-		t.Errorf("Spec.PodSubnetCIDR: got %q, want %q", doc.Spec.PodSubnetCIDR, "10.88.0.0/16")
+	if doc.Spec.SpaceSubnetCIDR != "10.88.0.0/16" {
+		t.Errorf("Spec.SpaceSubnetCIDR: got %q, want %q", doc.Spec.SpaceSubnetCIDR, "10.88.0.0/16")
 	}
 
 	// AC: "Header comment explains each field's purpose and default."
@@ -354,7 +376,7 @@ func TestWriteDefaultRendersResolvedSpec(t *testing.T) {
 		KukeondImage:              "docker.io/library/kukeon:test",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
-		PodSubnetCIDR:             "10.89.0.0/16",
+		SpaceSubnetCIDR:           "10.89.0.0/16",
 		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
 	}
 
@@ -401,8 +423,8 @@ func TestWriteDefaultRendersResolvedSpec(t *testing.T) {
 	if doc.Spec.CgroupRoot != spec.CgroupRoot {
 		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, spec.CgroupRoot)
 	}
-	if doc.Spec.PodSubnetCIDR != spec.PodSubnetCIDR {
-		t.Errorf("Spec.PodSubnetCIDR: got %q, want %q", doc.Spec.PodSubnetCIDR, spec.PodSubnetCIDR)
+	if doc.Spec.SpaceSubnetCIDR != spec.SpaceSubnetCIDR {
+		t.Errorf("Spec.SpaceSubnetCIDR: got %q, want %q", doc.Spec.SpaceSubnetCIDR, spec.SpaceSubnetCIDR)
 	}
 	if doc.Spec.DefaultMemoryLimitBytes != spec.DefaultMemoryLimitBytes {
 		t.Errorf("Spec.DefaultMemoryLimitBytes: got %d, want %d",

@@ -129,8 +129,8 @@ func NewSubnetAllocator(runPath, parentCIDR string, prefixLen int) (*SubnetAlloc
 // configuredSubnetParentCIDR is the parent block NewDefaultSubnetAllocator
 // subdivides. It defaults to DefaultSubnetParentCIDR (10.88.0.0/16) and is
 // overridden once at process start by ConfigureSubnetParentCIDR when the
-// operator configures a non-default pod CIDR. The canonical use is nested
-// `make dev-init` (running inside a kukeon-dev-root cell): the nested kukeon
+// operator configures a non-default space subnet CIDR. The canonical use is
+// nested `make dev-init` (running inside a kukeon-dev-root cell): the nested kukeon
 // must not reuse the parent host's 10.88.0.0/16 + .1 gateway, which is the
 // cell's own default gateway — claiming .1 inside the cell shadows the
 // gateway and blackholes the cell's egress (issue #1079). Process-global,

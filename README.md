@@ -156,7 +156,7 @@ flowchart LR
 - **Realm**: High-level environment mapped to a containerd namespace
 - **Space**: CNI network and cgroup subtree that define isolation
 - **Stack**: Logical grouping of related cells
-- **Cell**: A pod-like group. One root container owns the network namespace
+- **Cell**: A group of containers sharing one network namespace, which one root container owns
 - **Container**: An OCI container running inside the cell
 
 Each layer is a real Linux primitive, not an invented abstraction. This structure avoids Docker's ambiguity and Kubernetes-level complexity.

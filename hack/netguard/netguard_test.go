@@ -19,6 +19,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -28,6 +30,8 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/configrename"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/hostnet"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
@@ -83,7 +87,7 @@ func writeFile(t *testing.T, path, body string) string {
 func serverYAML(subnet string) string {
 	body := "apiVersion: v1beta1\nkind: ServerConfiguration\nspec:\n  cgroupRoot: /kukeon-dev\n"
 	if subnet != "" {
-		body += "  podSubnetCIDR: " + subnet + "\n"
+		body += "  spaceSubnetCIDR: " + subnet + "\n"
 	}
 	return body
 }
@@ -103,7 +107,7 @@ func TestResolveConfigOverrides(t *testing.T) {
 	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
 	bare := writeFile(t, filepath.Join(dir, "bare.yaml"), serverYAML(""))
 	client := writeFile(t, filepath.Join(dir, "kuke-dev.yaml"),
-		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.90.0.0/16\n")
+		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  spaceSubnetCIDR: 10.90.0.0/16\n")
 	missing := filepath.Join(dir, "absent.yaml")
 	defaultClient := filepath.Join(home, ".kuke", "kuke.yaml")
 
@@ -115,37 +119,37 @@ func TestResolveConfigOverrides(t *testing.T) {
 		want       []string
 	}{
 		{
-			name:       "flag path with podSubnetCIDR",
+			name:       "flag path with spaceSubnetCIDR",
 			serverFlag: dev,
-			want:       []string{"10.89.0.0/16 podSubnetCIDR in " + dev},
+			want:       []string{"10.89.0.0/16 spaceSubnetCIDR in " + dev},
 		},
 		{
 			name: "env path when no flag",
 			env:  map[string]string{"KUKEOND_CONFIGURATION": dev},
-			want: []string{"10.89.0.0/16 podSubnetCIDR in " + dev},
+			want: []string{"10.89.0.0/16 spaceSubnetCIDR in " + dev},
 		},
 		{
 			name:       "flag beats env path",
 			env:        map[string]string{"KUKEOND_CONFIGURATION": dev},
 			serverFlag: missing,
-			want:       []string{"10.88.0.0/16 compiled-in default; no podSubnetCIDR in " + missing},
+			want:       []string{"10.88.0.0/16 compiled-in default; no spaceSubnetCIDR in " + missing},
 		},
 		{
 			// KUKEON_PROFILE=dev alone is no proof: an existing file without
-			// podSubnetCIDR leaves the default in effect.
-			name:       "generated file without podSubnetCIDR",
+			// spaceSubnetCIDR leaves the default in effect.
+			name:       "generated file without spaceSubnetCIDR",
 			serverFlag: bare,
-			want:       []string{"10.88.0.0/16 compiled-in default; no podSubnetCIDR in " + bare},
+			want:       []string{"10.88.0.0/16 compiled-in default; no spaceSubnetCIDR in " + bare},
 		},
 		{
 			// kuke init reads the env var; the kukeond it starts reads the
 			// file only, so both are in effect.
 			name:       "env subnet does not hide the file subnet",
-			env:        map[string]string{"KUKEON_POD_SUBNET_CIDR": "10.91.0.0/16"},
+			env:        map[string]string{"KUKEON_SPACE_SUBNET_CIDR": "10.91.0.0/16"},
 			serverFlag: dev,
 			want: []string{
-				"10.91.0.0/16 KUKEON_POD_SUBNET_CIDR environment variable",
-				"10.89.0.0/16 podSubnetCIDR in " + dev,
+				"10.91.0.0/16 KUKEON_SPACE_SUBNET_CIDR environment variable",
+				"10.89.0.0/16 spaceSubnetCIDR in " + dev,
 			},
 		},
 		{
@@ -153,29 +157,29 @@ func TestResolveConfigOverrides(t *testing.T) {
 			env:        map[string]string{"KUKE_CONFIGURATION": client},
 			serverFlag: dev,
 			want: []string{
-				"10.89.0.0/16 podSubnetCIDR in " + dev,
-				"10.90.0.0/16 podSubnetCIDR in " + client,
+				"10.89.0.0/16 spaceSubnetCIDR in " + dev,
+				"10.90.0.0/16 spaceSubnetCIDR in " + client,
 			},
 		},
 		{
 			// kuke init falls back to ~/.kuke/kuke.yaml without
-			// KUKE_CONFIGURATION and applies its podSubnetCIDR.
+			// KUKE_CONFIGURATION and applies its spaceSubnetCIDR.
 			name:       "default client configuration",
 			serverFlag: dev,
-			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n",
+			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  spaceSubnetCIDR: 10.92.0.0/16\n",
 			want: []string{
-				"10.89.0.0/16 podSubnetCIDR in " + dev,
-				"10.92.0.0/16 podSubnetCIDR in " + defaultClient,
+				"10.89.0.0/16 spaceSubnetCIDR in " + dev,
+				"10.92.0.0/16 spaceSubnetCIDR in " + defaultClient,
 			},
 		},
 		{
 			name:       "KUKE_CONFIGURATION beats the default client configuration",
 			env:        map[string]string{"KUKE_CONFIGURATION": client},
 			serverFlag: dev,
-			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n",
+			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  spaceSubnetCIDR: 10.92.0.0/16\n",
 			want: []string{
-				"10.89.0.0/16 podSubnetCIDR in " + dev,
-				"10.90.0.0/16 podSubnetCIDR in " + client,
+				"10.89.0.0/16 spaceSubnetCIDR in " + dev,
+				"10.90.0.0/16 spaceSubnetCIDR in " + client,
 			},
 		},
 	}
@@ -197,8 +201,58 @@ func TestResolveConfigOverrides(t *testing.T) {
 		})
 	}
 
-	if _, err := resolveConfig(envMap(map[string]string{"KUKEON_POD_SUBNET_CIDR": "fd00::/64"}), dev, runPath); err == nil {
+	if _, err := resolveConfig(envMap(map[string]string{"KUKEON_SPACE_SUBNET_CIDR": "fd00::/64"}), dev, runPath); err == nil {
 		t.Fatal("an IPv6 override must fail the check, not be ignored")
+	}
+}
+
+// The guard rejects the retired subnet spellings the way kuke and kukeond do,
+// instead of checking the compiled-in default the processes would never use
+// (#1760).
+func TestResolveConfigRejectsRetiredSpaceSubnet(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	runPath := filepath.Join(dir, "run")
+	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
+	retired := "apiVersion: v1beta1\nkind: %sConfiguration\nspec:\n  " +
+		configrename.RetiredSpaceSubnetKey + ": 10.89.0.0/16\n"
+	oldServer := writeFile(t, filepath.Join(dir, "old-kukeond.yaml"), fmt.Sprintf(retired, "Server"))
+	oldClient := writeFile(t, filepath.Join(dir, "old-kuke.yaml"), fmt.Sprintf(retired, "Client"))
+
+	cases := []struct {
+		name       string
+		env        map[string]string
+		serverFlag string
+		want       string
+	}{
+		{
+			name:       "retired env var",
+			env:        map[string]string{configrename.RetiredSpaceSubnetEnv: "10.89.0.0/16"},
+			serverFlag: dev,
+			want:       configrename.SpaceSubnetEnv,
+		},
+		{
+			name:       "retired key in the server configuration",
+			serverFlag: oldServer,
+			want:       configrename.SpaceSubnetKey + "; update " + oldServer,
+		},
+		{
+			name:       "retired key in the client configuration",
+			env:        map[string]string{"KUKE_CONFIGURATION": oldClient},
+			serverFlag: dev,
+			want:       configrename.SpaceSubnetKey + "; update " + oldClient,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolveConfig(envMap(tt.env), tt.serverFlag, runPath)
+			if !errors.Is(err, errdefs.ErrSettingRenamed) {
+				t.Fatalf("resolveConfig() error = %v, want wrapping ErrSettingRenamed", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("resolveConfig() error = %q, want it to contain %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -227,7 +281,7 @@ func TestResolveConfigPersistedSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"10.89.0.0/16 podSubnetCIDR in " + dev,
+		"10.89.0.0/16 spaceSubnetCIDR in " + dev,
 		"10.89.0.0/24 persisted subnet of space default/default",
 		"10.88.3.0/24 persisted subnet of space old/space",
 	}
@@ -254,12 +308,12 @@ func TestResolveConfigDefaultClientWithoutHome(t *testing.T) {
 	dir := t.TempDir()
 	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
 	writeFile(t, filepath.Join(cwd, "tmp", ".kuke", "kuke.yaml"),
-		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n")
+		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  spaceSubnetCIDR: 10.92.0.0/16\n")
 	res, err := resolveConfig(envMap(nil), dev, filepath.Join(dir, "run"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"10.89.0.0/16 podSubnetCIDR in " + dev}
+	want := []string{"10.89.0.0/16 spaceSubnetCIDR in " + dev}
 	if got := candidates(res); !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidates = %q, want %q", got, want)
 	}
@@ -339,7 +393,7 @@ func TestResolveConfigRunPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"10.89.0.0/16 podSubnetCIDR in " + dev,
+		"10.89.0.0/16 spaceSubnetCIDR in " + dev,
 		"10.89.0.0/24 persisted subnet of space default/default",
 	}
 	if got := candidates(res); !reflect.DeepEqual(got, want) {

@@ -54,7 +54,7 @@ So Kukeon is, at its base, a containerd-native runtime. It defines an explicit h
 Realm → Space → Stack → Cell → Container
 ```
 
-A **Realm** is a containerd namespace. A **Space** is one CNI network plus one cgroup subtree — this is where default-deny networking lives. A **Stack** groups related cells. A **Cell** is pod-like: one root container owns the network namespace, others join it. A **Container** is just an OCI container inside the cell.
+A **Realm** is a containerd namespace. A **Space** is one CNI network plus one cgroup subtree — this is where default-deny networking lives. A **Stack** groups related cells. A **Cell** is a group of containers sharing one network namespace: one root container owns it, others join it. A **Container** is just an OCI container inside the cell.
 
 Why the insistence on real primitives? Because the entire value proposition is that you can _trust_ the isolation, and you can only trust what you can inspect. Every layer corresponds to something you can examine with tools you already know — `ctr` for the namespace, `ip link` for the network, `ls /sys/fs/cgroup` for the cgroups. There's no proprietary control plane you have to take on faith. The daemon (`kukeond`) is a thin layer over containerd, CNI, and cgroups; `kuke` is the CLI. You declare resources in YAML and the daemon reconciles them.
 

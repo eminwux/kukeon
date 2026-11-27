@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/configrename"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/api/version"
@@ -54,6 +55,9 @@ func Load(path string) (*v1beta1.ClientConfigurationDoc, error) {
 			"parse client configuration %q: %w: %w",
 			path, errdefs.ErrClientConfigurationInvalid, unmarshalErr,
 		)
+	}
+	if renameErr := configrename.CheckSpec(raw, path); renameErr != nil {
+		return nil, fmt.Errorf("%w: %w", renameErr, errdefs.ErrClientConfigurationInvalid)
 	}
 	if doc.Kind != "" && doc.Kind != v1beta1.KindClientConfiguration {
 		return nil, fmt.Errorf(
@@ -127,7 +131,7 @@ spec:
   # subnet (e.g. "10.89.0.0/16" for a nested dev instance avoiding the parent
   # host's 10.88.0.0/16).
   # Default: 10.88.0.0/16
-  podSubnetCIDR: 10.88.0.0/16
+  spaceSubnetCIDR: 10.88.0.0/16
 `
 
 // WriteDefault writes the commented default ClientConfiguration to path when
