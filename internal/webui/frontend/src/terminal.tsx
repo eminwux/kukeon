@@ -166,7 +166,7 @@ type Manager = TerminalManager;
 
 // useReattach opens a session again by itself while auto-attach is on (#1745): an interrupted session
 // marked reattach at once, and a dropped connection after each of reattachDelays, then no more until
-// the session stays attached for reattachResetMs. `enabled` carries the caller's guards; reset forgets a
+// the session stays attached for reattachResetMs or the cell restarts. `enabled` carries the caller's guards; reset forgets a
 // session's retries when the user reconnects.
 export function useReattach(current: Session | undefined, enabled: boolean, attach: (session: Session) => void) {
   const tries = useRef<Record<string, { count: number; attachedAt?: number }>>({});
@@ -181,6 +181,8 @@ export function useReattach(current: Session | undefined, enabled: boolean, atta
       if (Date.now() - entry.attachedAt >= reattachResetMs) entry.count = 0;
       entry.attachedAt = undefined;
     }
+    // A restart's interruption reattaches to a new process, so the dropped-connection retries start over.
+    if (current.state === "interrupted" && current.reattach) entry.count = 0;
     if (!enabled || (current.state === "interrupted" && !current.reattach) || entry.count >= reattachDelays.length) return;
     const session = current;
     const timer = window.setTimeout(() => { entry.count += 1; attachNow.current(session); }, current.state === "interrupted" ? 0 : reattachDelays[entry.count]);
