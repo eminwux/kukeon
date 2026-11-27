@@ -125,7 +125,11 @@ func (r *Exec) DeleteTeam(team intmodel.Team) error {
 	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
 		return unsafeTeamRef(md)
 	}
-	if err := os.Remove(fs.TeamPath(r.opts.RunPath, md.Realm, md.Name)); err != nil {
+	path := fs.TeamPath(r.opts.RunPath, md.Realm, md.Name)
+	if err := r.guardKindRemove(fs.TeamsDir(r.opts.RunPath, md.Realm), fs.RealmDepth+1, path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteTeam, err)
+	}
+	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errdefs.ErrTeamNotFound
 		}
@@ -270,7 +274,11 @@ func (r *Exec) DeleteSource(source intmodel.Source) error {
 	if !filepath.IsLocal(md.Realm) || !filepath.IsLocal(md.Name) || !teamPathSafe(md.Realm) || !teamPathSafe(md.Name) {
 		return unsafeSourceRef(md)
 	}
-	if err := os.Remove(fs.SourcePath(r.opts.RunPath, md.Realm, md.Name)); err != nil {
+	path := fs.SourcePath(r.opts.RunPath, md.Realm, md.Name)
+	if err := r.guardKindRemove(fs.SourcesDir(r.opts.RunPath, md.Realm), fs.RealmDepth+1, path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteSource, err)
+	}
+	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errdefs.ErrSourceNotFound
 		}

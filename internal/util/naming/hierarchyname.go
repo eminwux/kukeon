@@ -25,14 +25,16 @@ import (
 )
 
 // ValidateHierarchyName rejects space, stack, cell, and container names that
-// would corrupt downstream resources, the same way ValidateRealmName guards
-// realm names. Two characters are blocked:
+// would corrupt downstream resources or escape the metadata tree, the same way
+// ValidateRealmName guards realm names. The name must satisfy the shared
+// NamePattern (issue #1719). Among other things that blocks:
 //
-//   - "_" collides with the containerd container-ID separator
+//   - "." and "..", which filepath.Join resolves out of the scope directory.
+//   - "_", which collides with the containerd container-ID separator
 //     ({space}_{stack}_{cell}_{container}) built by BuildContainerdID. A name
 //     containing "_" produces an ambiguous ID that the inverse parser cannot
 //     round-trip back to its hierarchy components.
-//   - "/" injects extra path components into the cgroup path
+//   - "/", which injects extra path components into the cgroup path
 //     (/kukeon/{realm}/{space}/{stack}/{cell}/...).
 //
 // Empty / whitespace-only names are also rejected so callers have a single
@@ -49,9 +51,8 @@ func ValidateHierarchyName(kind, name string) error {
 	if trimmed == "" {
 		return fmt.Errorf("%w: %s name is required", errdefs.ErrInvalidName, kind)
 	}
-	if strings.ContainsAny(trimmed, "_/") {
-		return fmt.Errorf("%w: %s name %q contains disallowed character (must not contain '_' or '/')",
-			errdefs.ErrInvalidName, kind, trimmed)
+	if !IsValidName(trimmed) {
+		return fmt.Errorf("%w: %s name %q %s", errdefs.ErrInvalidName, kind, trimmed, nameRuleHint)
 	}
 	return nil
 }

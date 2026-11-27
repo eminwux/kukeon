@@ -420,6 +420,10 @@ func (r *Exec) collectVolumesInScope(out *[]intmodel.Volume, realm, space, stack
 func (r *Exec) DeleteVolume(volume intmodel.Volume) error {
 	md := volume.Metadata
 	path := fs.VolumePath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	dir := fs.VolumesDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
+	if err := r.guardKindRemove(dir, kindDirDepth(md.Space, md.Stack, ""), path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteVolume, err)
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {

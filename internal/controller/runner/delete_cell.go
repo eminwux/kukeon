@@ -19,7 +19,6 @@ package runner
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -55,6 +54,9 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return errdefs.ErrStackNameRequired
+	}
+	if err := validateScopeNames(realmName, spaceName, stackName, cellName); err != nil {
+		return err
 	}
 
 	// Get the cell document to access all containers
@@ -209,7 +211,7 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 		cellStackName,
 		internalCell.Metadata.Name,
 	)
-	if err = os.RemoveAll(metadataRunPath); err != nil {
+	if err = r.removeCellDir(metadataRunPath); err != nil {
 		return fmt.Errorf("%w: failed to remove cell directory %s: %w", errdefs.ErrDeleteCell, metadataRunPath, err)
 	}
 

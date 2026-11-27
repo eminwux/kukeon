@@ -101,7 +101,7 @@ func TestSourceStore_RealmPurgeRemovesSources(t *testing.T) {
 	if _, err := r.WriteSource(testSource("default", "agents", "s")); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.reclaimScopeMetadata(realmDir); err != nil {
+	if err := r.reclaimScopeMetadata(realmDir, fs.RealmDepth); err != nil {
 		t.Fatalf("reclaimScopeMetadata error = %v", err)
 	}
 	assertGone(t, fs.SourcesDir(runPath, "default"), "sources dir")

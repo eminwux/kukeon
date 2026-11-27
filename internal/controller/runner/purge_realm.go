@@ -45,6 +45,9 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	if realmName == "" {
 		return false, errdefs.ErrRealmNameRequired
 	}
+	if err := validateScopeNames(realmName, "", "", ""); err != nil {
+		return false, err
+	}
 
 	// Get realm via internal model to ensure metadata accuracy (if available)
 	// Note: DeleteRealm is handled at the controller level, this function focuses on comprehensive cleanup
@@ -182,7 +185,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	// reclaimPolicy: Retain volume in the realm subtree (step 3, #1237). With no
 	// retained volume this is the same blunt RemoveAll as before.
 	metadataRunPath := fs.RealmMetadataDir(r.opts.RunPath, realmForOps.Metadata.Name)
-	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath); reclaimErr != nil {
+	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath, fs.RealmDepth); reclaimErr != nil {
 		r.logger.WarnContext(r.ctx, "selective scope reclaim failed during realm purge",
 			"path", metadataRunPath, "error", reclaimErr)
 	}

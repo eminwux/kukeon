@@ -120,7 +120,7 @@ func validateBlueprintLookup(md intmodel.CellBlueprintMetadata) error {
 	if strings.TrimSpace(md.Stack) != "" && strings.TrimSpace(md.Space) == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
 	}
-	return nil
+	return validateScopeSegments(errdefs.ErrBlueprintCoordUnsafe, md.Name, md.Realm, md.Space, md.Stack)
 }
 
 // validateBlueprintScopeFilter enforces the scope contract for a list filter:
@@ -138,5 +138,5 @@ func validateBlueprintScopeFilter(realm, space, stack string) error {
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
 	}
-	return nil
+	return validateScopeSegments(errdefs.ErrBlueprintCoordUnsafe, "", realm, space, stack)
 }

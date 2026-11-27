@@ -242,6 +242,10 @@ func (r *Exec) readLabelsFromDoc(path string) map[string]string {
 func (r *Exec) DeleteBlueprint(blueprint intmodel.CellBlueprint) error {
 	md := blueprint.Metadata
 	path := fs.BlueprintPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+	dir := fs.BlueprintsDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
+	if err := r.guardKindRemove(dir, kindDirDepth(md.Space, md.Stack, ""), path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteBlueprint, err)
+	}
 
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

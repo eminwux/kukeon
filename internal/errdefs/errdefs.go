@@ -114,8 +114,12 @@ var (
 	// instead of silently honouring one and dropping the other. Shared so
 	// future selector-aware verbs (`kuke describe`, `kuke delete`) reuse
 	// the same surface text and errors.Is identity.
-	ErrSelectorWithName        = errors.New("--selector cannot be combined with a resource name")
-	ErrInvalidName             = errors.New("name is invalid")
+	ErrSelectorWithName = errors.New("--selector cannot be combined with a resource name")
+	ErrInvalidName      = errors.New("name is invalid")
+	// ErrPathEscapesScope is the containment guard's refusal (issue #1719): a
+	// destructive helper was handed a target that, after filepath.Clean, is not
+	// strictly inside the directory it is meant to remove from.
+	ErrPathEscapesScope        = errors.New("path is outside its expected parent directory")
 	ErrInvalidImage            = errors.New("invalid image reference")
 	ErrDeleteRealm             = errors.New("failed to delete realm")
 	ErrDeleteSpace             = errors.New("failed to delete space")
@@ -534,8 +538,9 @@ var (
 	// a "." or ".." element, or a NUL byte would let filepath.Join escape the
 	// secrets tree (issue #673). Shared by both validateSecretRef and
 	// validateSecretScope so the whole secret subsystem is covered.
+	// Since issue #1719 the check is the shared name rule (naming.NamePattern).
 	ErrSecretCoordUnsafe = errors.New(
-		"secret name and scope coordinates must not contain path separators or '.'/'..' elements",
+		"secret name and scope coordinates must be lower-case letters and digits, with '.' or '-' only between them",
 	)
 
 	// ContainerSecret.secretRef source errors (issue #623).
@@ -613,6 +618,10 @@ var (
 	ErrBlueprintScopeIncomplete = errors.New(
 		"blueprint scope is incomplete: a deeper scope coordinate requires all shallower ones (and a Blueprint may not be cell-scoped)",
 	)
+	// ErrBlueprintCoordUnsafe rejects a blueprint name or scope coordinate that
+	// fails the shared name rule (naming.NamePattern), so filepath.Join can never
+	// resolve fs.BlueprintPath outside the blueprints tree (issue #1719).
+	ErrBlueprintCoordUnsafe   = errors.New("blueprint name or scope coordinate is invalid")
 	ErrBlueprintScopeNotFound = errors.New("blueprint scope does not exist")
 	ErrBlueprintCellRequired  = errors.New("blueprint spec.cell.containers is required and cannot be empty")
 	ErrWriteBlueprint         = errors.New("failed to write blueprint document")
@@ -744,6 +753,10 @@ var (
 	ErrConfigScopeIncomplete = errors.New(
 		"config scope is incomplete: a deeper scope coordinate requires all shallower ones (and a Config may not be cell-scoped)",
 	)
+	// ErrConfigCoordUnsafe rejects a config name or scope coordinate that fails
+	// the shared name rule (naming.NamePattern), so filepath.Join can never
+	// resolve fs.ConfigPath outside the configs tree (issue #1719).
+	ErrConfigCoordUnsafe = errors.New("config name or scope coordinate is invalid")
 	// ErrConfigBlueprintRefRequired fires when spec.blueprint omits the
 	// referenced blueprint's name or realm — both are required to resolve it.
 	ErrConfigBlueprintRefRequired = errors.New("config spec.blueprint requires name and realm")

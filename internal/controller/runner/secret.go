@@ -303,6 +303,10 @@ func (r *Exec) collectSecretsInScope(out *[]intmodel.Secret, realm, space, stack
 func (r *Exec) DeleteSecret(secret intmodel.Secret) error {
 	md := secret.Metadata
 	path := fs.SecretPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Cell, md.Name)
+	dir := fs.SecretsDir(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Cell)
+	if err := r.guardKindRemove(dir, kindDirDepth(md.Space, md.Stack, md.Cell), path); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteSecret, err)
+	}
 
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

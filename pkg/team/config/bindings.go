@@ -22,12 +22,16 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // ValidName reports whether a name can safely identify a resource and appear in
 // copied launch templates. Shell metacharacters and path traversal are excluded.
+// It is kukeon's one name rule for every path segment under the metadata tree
+// (naming.NamePattern, issue #1719).
 func ValidName(value string) bool {
-	return regexp.MustCompile(`^[a-z0-9]+([a-z0-9.-]*[a-z0-9])?$`).MatchString(value)
+	return naming.IsValidName(value)
 }
 
 // SafePath permits absolute Unix paths suitable for unquoted template paths.

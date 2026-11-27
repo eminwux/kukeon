@@ -35,6 +35,9 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
+	if err := validateScopeNames(realmName, "", "", ""); err != nil {
+		return err
+	}
 
 	internalRealm, err := r.GetRealm(realm)
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // GetContainerResult reports the current state of a container.
@@ -55,6 +56,12 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
+	}
+	// The scope coordinates are checked by the runner's GetCell; the
+	// container name is checked here so a get never accepts a name no
+	// create could have written (issue #1719).
+	if err := naming.ValidateHierarchyName("container", name); err != nil {
+		return res, err
 	}
 
 	// Build lookup cell for GetCell

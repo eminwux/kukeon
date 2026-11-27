@@ -48,6 +48,8 @@ If you're moving from v0.3.0 or v0.4.0, the per-kind pages below are the source 
 
 Required, string. Unique within its parent. The name is also what you use as `realmId`, `spaceId`, `stackId`, or `cellId` in child resources.
 
+Every name kukeon stores — realm, space, stack, cell, container, Secret, CellBlueprint, CellConfig, Volume, Team and Source — uses lowercase letters and digits, with dots or hyphens allowed only between them (`^[a-z0-9]+([a-z0-9.-]*[a-z0-9])?$`). Upper case, `_`, `/`, `\`, whitespace, `.`, `..` and a leading dot are refused on create, get and delete, and so are scope coordinates that break the rule.
+
 ### `metadata.labels`
 
 Optional, map of string to string. Arbitrary key-value metadata. Not used by any Kukeon logic today; labels are preserved on round-trip.

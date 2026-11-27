@@ -38,6 +38,9 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
+	if err := validateScopeNames(realmName, spaceName, "", ""); err != nil {
+		return err
+	}
 
 	// First, perform standard delete
 	if err := r.DeleteSpace(space); err != nil {
@@ -113,7 +116,7 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		spaceForOps.Spec.RealmName,
 		spaceForOps.Metadata.Name,
 	)
-	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath); reclaimErr != nil {
+	if reclaimErr := r.reclaimScopeMetadata(metadataRunPath, fs.SpaceDepth); reclaimErr != nil {
 		r.logger.WarnContext(r.ctx, "selective scope reclaim failed during space purge",
 			"path", metadataRunPath, "error", reclaimErr)
 	}

@@ -272,7 +272,7 @@ func validateConfigLookup(md intmodel.CellConfigMetadata) error {
 	if strings.TrimSpace(md.Stack) != "" && strings.TrimSpace(md.Space) == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigScopeIncomplete)
 	}
-	return nil
+	return validateScopeSegments(errdefs.ErrConfigCoordUnsafe, md.Name, md.Realm, md.Space, md.Stack)
 }
 
 // validateConfigScopeFilter enforces the scope contract for a list filter:
@@ -290,5 +290,5 @@ func validateConfigScopeFilter(realm, space, stack string) error {
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigScopeIncomplete)
 	}
-	return nil
+	return validateScopeSegments(errdefs.ErrConfigCoordUnsafe, "", realm, space, stack)
 }

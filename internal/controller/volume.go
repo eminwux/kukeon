@@ -19,13 +19,13 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/connector"
 	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateVolumeResult reports the outcome of provisioning a Volume's directory.
@@ -205,17 +205,11 @@ func validateVolumeLookup(md intmodel.VolumeMetadata) error {
 	return nil
 }
 
+// validateVolumeSegment rejects a set volume name or scope coordinate that
+// fails the shared name rule (naming.NamePattern, issue #1719); an empty value
+// is an unset coordinate and passes.
 func validateVolumeSegment(value string) error {
-	if value == "" {
-		return nil
-	}
-	if value == "." || value == ".." {
-		return errdefs.ErrVolumeCoordUnsafe
-	}
-	if strings.ContainsRune(value, 0) ||
-		strings.ContainsRune(value, '/') ||
-		strings.ContainsRune(value, '\\') ||
-		strings.ContainsRune(value, filepath.Separator) {
+	if !naming.IsValidSegment(value) {
 		return errdefs.ErrVolumeCoordUnsafe
 	}
 	return nil
