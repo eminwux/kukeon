@@ -7,7 +7,7 @@ Build, test, and smoke-test conventions for anyone — human or agent — workin
 - **License header:** Apache 2.0 + SPDX copyright header on every new Go file.
 - **Shared error sentinels:** defined in `internal/errdefs/`. Don't declare new `errors.New` in package code when the concept is reusable — add it to `errdefs` instead.
 - **Tests colocated with source:** `foo.go` + `foo_test.go`.
-- **Vocabulary — kukeon has no pods.** Co-located containers form a **cell**; networks belong to **spaces** (one /24 per space, carved from the subnet parent CIDR); spaces live in **realms** and cells group into **stacks**. Don't write "pod" in new prose, log or error messages, identifiers, test names, issues or PR bodies. That includes config keys, env vars, flags and commands: the subnet setting is `spaceSubnetCIDR` / `KUKEON_SPACE_SUBNET_CIDR` / `--space-subnet-cidr` (renamed in #1760). The old pod spellings may appear only in the startup check that rejects them.
+- **Vocabulary — kukeon has no pods.** Co-located containers form a **cell**; networks belong to **spaces** (one /24 each). Never write "pod": not in prose, messages, identifiers, config/env/flag names, issues or PRs. Only the retired-name checks (`internal/configrename/`, `scripts/dev-init.sh`) may spell it.
 - **Finishing an issue:** if your agent harness provides a `/reflect` skill, run it before ending the task to file any bug or lesson the work surfaced.
 
 ## The two default realms
