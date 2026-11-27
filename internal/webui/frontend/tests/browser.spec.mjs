@@ -7062,3 +7062,348 @@ test("New agent says when no template exists, and names the step that failed aft
   expect(claude.posts).toEqual([{ harness: "claude" }]);
   await expect(page).toHaveURL(/#\/agents\/new$/);
 });
+
+// ---------------------------------------------------------------------------
+// First-run onboarding (#1694). One mutable host, fresh by default: no team, no Config, no Blueprint.
+// `initialize()` is what POST /api/teams/init stores — the kuke and default teams, the majordomo Config
+// and the agent template of the test-only `demo` harness, their Blueprint, and the two state volumes the
+// Configs log in through. Every connector here is test-only: nothing in the UI names one.
+function onboardingHost({ initialized = false } = {}) {
+  const scope = { realm: "default", space: "default", stack: "default" };
+  const team = (name, configs) => ({ name, realm: "default", roles: [], rolesInherited: false, harnesses: ["demo"], harnessesInherited: false, configs, system: true });
+  const login = (name, config, state = "empty") => ({ connector: "demo", method: "login", volume: { name, ...scope }, exists: false, tagged: false, login: { state }, usedBy: [{ name: config, ...scope }] });
+  const loginStatus = volume => [{ connector: "demo", title: "Demo", component: "demo-login", method: "login", delivery: "stateVolume", state: "resolved", volume, volumeRef: { name: volume, ...scope }, login: { state: "empty" } }];
+  const host = {
+    scope, teams: [], configs: [], blueprints: [], secrets: [], logins: [], cells: [], requests: [],
+    templates: [{ harness: "demo", name: "default-agent-demo", ...scope, exists: false }],
+    connectors: [...structuredClone(connectorWorld().connectors), structuredClone(testTokenConnector)],
+    // How POST /api/teams/init answers: "ok", "git" (no git on the host) or "conflict" (already stored).
+    init: "ok",
+    // When set, the init reply waits for it: the test reads the progress text first.
+    gate: undefined,
+    initialize() {
+      host.teams = [team("default", ["default-agent-demo"]), team("kuke", ["kuke-majordomo-demo"])];
+      host.blueprints = [{ apiVersion: "v1beta1", kind: "CellBlueprint", metadata: { name: "demo-host", realm: "default" }, spec: {} }];
+      host.configs = [
+        { apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "kuke-majordomo-demo", ...scope, labels: { "kukeon.io/team": "kuke", "kukeon.io/role": "majordomo", "kukeon.io/harness": "demo" } }, spec: { blueprint: { name: "demo-host", realm: "default" } }, status: { connectors: loginStatus("kuke-majordomo-demo-state") } },
+        { apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "default-agent-demo", ...scope, labels: { "kukeon.io/team": "default", "kukeon.io/role": "agent", "kukeon.io/harness": "demo", "kukeon.io/template": "true" } }, spec: { blueprint: { name: "demo-host", realm: "default" } }, status: { connectors: loginStatus("default-agent-demo-state") } },
+      ];
+      host.logins = [login("default-agent-demo-state", "default-agent-demo"), login("kuke-majordomo-demo-state", "kuke-majordomo-demo")];
+      host.templates = host.templates.map(template => ({ ...template, exists: true }));
+    },
+    // The agent New agent stores: a copy of the template and its first cell.
+    launchAgent() {
+      const config = { apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "default-agent-demo-a1b2c3", ...scope, labels: { "kukeon.io/role": "agent", "kukeon.io/harness": "demo" }, annotations: { "kukeon.io/agent-template": "default-agent-demo" } }, spec: { blueprint: { name: "demo-host", realm: "default" } } };
+      host.configs.push(config);
+      const cell = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: `${config.metadata.name}-d4e5f6`, labels: { "kukeon.io/config": config.metadata.name } }, spec: { realmId: "default", spaceId: "default", stackId: "default", containers: [{ id: "agent", attachable: true }], provenance: { bindingKind: "config", bindingRef: { name: config.metadata.name, ...scope } } }, status: { state: "Ready", createdAt: "2026-11-26T10:00:00Z" } };
+      host.cells.push(cell);
+      return { config, cell };
+    },
+    // The identity cell of a login session ends: the volume holds a login and the cell is gone.
+    endLogin(volume) {
+      const item = host.logins.find(entry => entry.volume.name === volume);
+      delete item.session;
+      Object.assign(item, { exists: true, tagged: true, login: { state: "logged in", since: "2026-11-26T10:05:00Z" } });
+      host.cells = host.cells.filter(cell => cell.metadata.name !== `login-${volume}`);
+      for (const config of host.configs) for (const status of config.status?.connectors ?? []) if (status.volume === volume) status.login = { state: "logged in" };
+    },
+    posts: path => host.requests.filter(request => request.method === "POST" && request.path === path),
+  };
+  if (initialized) host.initialize();
+  host.install = async page => {
+    const named = name => host.cells.find(cell => cell.metadata.name === name);
+    const ready = name => ({ metadata: { name }, status: { state: "Ready" } });
+    await page.route("**/api/realms**", route => {
+      const parts = new URL(route.request().url()).pathname.split("/").filter(Boolean).slice(1);
+      if (parts.length === 1 || parts.length === 3 || parts.length === 5) return route.fulfill({ json: [ready("default")] });
+      if (parts.length === 7) return route.fulfill({ json: host.cells });
+      if (parts.length === 8) { const found = named(decodeURIComponent(parts[7])); return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "cell not found" } } }); }
+      if (parts.at(-1) === "screenshot") return route.fulfill(noScreen);
+      if (parts.at(-1) === "containers") return route.fulfill({ json: [{ id: "agent", attachable: true }] });
+      return route.fulfill({ json: ready(parts.at(-1)) });
+    });
+    await page.route(url => url.pathname.startsWith("/api/catalog/"), route => {
+      const [, , , kind, name] = new URL(route.request().url()).pathname.split("/");
+      const list = { configs: host.configs, blueprints: host.blueprints, secrets: host.secrets, volumes: [] }[kind] ?? [];
+      if (!name) return route.fulfill({ json: list });
+      const found = list.find(item => item.metadata.name === decodeURIComponent(name));
+      return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: { code: "not_found", message: "not found" } } });
+    });
+    await page.route(url => url.pathname === "/api/teams" || url.pathname.startsWith("/api/teams/"), async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      host.requests.push({ method: request.method(), path, contentType: request.headers()["content-type"], body: request.method() === "POST" ? request.postData() : undefined });
+      if (request.method() === "GET" && path === "/api/teams") return route.fulfill({ json: { teams: host.teams } });
+      if (path === "/api/teams/init") {
+        await host.gate;
+        if (host.init === "git") return route.fulfill({ status: 422, json: { error: { code: "git_missing", message: "git is not installed: install git on the host running kuke serve, then initialize again" } } });
+        if (host.init === "conflict" || host.teams.some(item => item.name === "kuke")) return route.fulfill({ status: 409, json: { error: { code: "already_initialized", message: "already initialized: the kuke team is stored; reapply it to recompose it from its stored declaration" } } });
+        host.initialize();
+        return route.fulfill({ json: { teams: [{ team: "kuke", resources: 5, configs: ["kuke-majordomo-demo"], blueprints: ["demo-host"], missingSecrets: [], notes: [] }, { team: "default", resources: 2, configs: ["default-agent-demo"], blueprints: ["demo-host"], missingSecrets: [], notes: [] }], notes: [] } });
+      }
+      if (path === "/api/teams/kuke/reapply") { if (!host.teams.length) host.initialize(); return route.fulfill({ json: { plan: { command: "kuke team apply kuke", origin: { kind: "stored" }, sources: [], pairs: [], create: [], rerender: [], prune: [], missingSecrets: [], createSecrets: [], notes: [], declaration: "" }, result: { team: "kuke", resources: 5, pruned: [], missingSecrets: [], notes: [] } } }); }
+      return route.fulfill({ status: 404, json: { error: { code: "not_found", message: path } } });
+    });
+    await page.route(url => url.pathname === "/api/sources", route => route.fulfill({ json: { sources: [], defaultRoles: [], defaultHarnesses: [] } }));
+    await page.route(url => url.pathname === "/api/agents/templates", route => route.fulfill({ json: { templates: host.templates } }));
+    await page.route(url => url.pathname === "/api/agents", route => {
+      host.requests.push({ method: "POST", path: "/api/agents", body: route.request().postData() });
+      const { config, cell } = host.launchAgent();
+      return route.fulfill({ json: { config: config.metadata, cell: { name: cell.metadata.name, ...scope } } });
+    });
+    await page.route(url => url.pathname === "/api/health/reports", route => route.fulfill({ json: [] }));
+    await page.route(url => url.pathname === "/api/connectors" || url.pathname.startsWith("/api/connectors/"), route => {
+      const request = route.request();
+      const parts = new URL(request.url()).pathname.split("/").filter(Boolean);
+      if (request.method() === "GET") {
+        if (parts.length === 2) return route.fulfill({ json: host.connectors });
+        if (parts[2] === "logins") return route.fulfill({ json: host.logins });
+        if (parts[2] === "status") return route.fulfill({ json: host.connectors.map(connector => ({ connector: connector.name, configs: 0, missing: [] })) });
+        return route.fulfill({ json: [] });
+      }
+      const body = request.postDataJSON();
+      host.requests.push({ method: "POST", path: `/${parts.join("/")}`, body: request.postData() });
+      // "Log in": the identity cell of the named Volume starts, and the reply locates it.
+      if (parts[3] === "login") {
+        const item = host.logins.find(entry => entry.connector === parts[2] && entry.volume.name === body.name);
+        if (!item) return route.fulfill({ status: 400, json: { error: { code: "invalid_request", message: `no login identity ${body.name}` } } });
+        const cell = `login-${body.name}`;
+        item.session = { ...scope, cell, container: "login" };
+        if (!named(cell)) host.cells.push({ apiVersion: "v1beta1", kind: "Cell", metadata: { name: cell }, spec: { realmId: "default", spaceId: "default", stackId: "default", containers: [{ id: "login", attachable: true }], tty: { default: "login" } }, status: { state: "Ready" } });
+        return route.fulfill({ json: { identity: item, created: false } });
+      }
+      return route.fulfill({ status: 404, json: { error: { code: "not_found", message: parts.join("/") } } });
+    });
+    await page.routeWebSocket("**/attach", socket => { socket.send(JSON.stringify({ type: "ready" })); });
+  };
+  return host;
+}
+const getStarted = page => content(page).getByRole("region", { name: "Get started" });
+const startedStep = (page, id) => getStarted(page).locator(`[data-step="${id}"]`);
+const steps = page => getStarted(page).getByRole("listitem");
+// Each step is named "<title>: <state>".
+const stepNames = page => steps(page).evaluateAll(items => items.map(item => item.getAttribute("aria-label")));
+// The page was not reloaded: a mark set on window before an action is still there after it.
+const markPage = page => page.evaluate(() => { window.onboardingMark = true; });
+const pageMarked = page => page.evaluate(() => window.onboardingMark === true);
+
+test("Initialize replaces the kuke team init empty states and stores the system teams without a reload", async ({ page }) => {
+  const host = onboardingHost();
+  await host.install(page);
+  // New Config and Sources name the button first and keep the command as secondary text.
+  await page.goto(`${server.url}#/new-config`);
+  await expect(content(page).getByRole("note")).toContainText("No Blueprints are available.");
+  await expect(content(page).getByRole("button", { name: "Initialize" })).toBeVisible();
+  await expect(content(page).locator(".initialize-cli")).toHaveText("Or run kuke team init on the host.");
+  await page.goto(`${server.url}#/sources`);
+  await expect(content(page).getByRole("region", { name: "Sources list" }).getByRole("button", { name: "Initialize" })).toBeVisible();
+  await page.goto(`${server.url}#/agents/new`);
+  await expect(page.getByRole("region", { name: "New agent" }).getByRole("note").getByRole("button", { name: "Initialize" })).toBeVisible();
+
+  await page.goto(`${server.url}#/teams`);
+  const list = content(page).getByRole("region", { name: "Teams list" });
+  await expect(list.getByRole("heading", { name: "No team is stored" })).toBeVisible();
+  const initialize = list.getByRole("button", { name: "Initialize" });
+  await expect(initialize).toBeEnabled();
+  await expect(list.locator(".initialize-cli")).toContainText("kuke team init");
+  // The kuke-team note would repeat the prompt of the empty list.
+  await expect(content(page).getByRole("button", { name: "Initialize" })).toHaveCount(1);
+  await markPage(page);
+  let release;
+  host.gate = new Promise(resolve => { release = resolve; });
+  await initialize.click();
+  // While the server fetches the kukeon source every prompt on screen says so, the sidebar's included.
+  await expect(list.getByRole("status")).toHaveText("Initializing… fetching kukeon source");
+  await expect(initialize).toBeDisabled();
+  await expect(page.getByRole("region", { name: "Majordomo", exact: true }).getByRole("button", { name: "Initialize", exact: true })).toBeDisabled();
+  release();
+  await expect(list.getByRole("row").filter({ hasText: "kuke" }).getByRole("link", { name: "kuke", exact: true })).toHaveAttribute("href", "#/teams/kuke");
+  await expect(list.getByRole("link", { name: "default", exact: true })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Initialize" })).toHaveCount(0);
+  await expect(toasts(page).filter({ hasText: "Initialized." })).toContainText("Stored teams kuke and default: 2 Configs, 1 Blueprint.");
+  expect(await pageMarked(page)).toBe(true);
+  expect(host.posts("/api/teams/init")).toEqual([{ method: "POST", path: "/api/teams/init", contentType: "application/json", body: "{}" }]);
+  // The catalog was re-read too: New Config now offers the Blueprint, and the sidebar's majordomo is ready to enable.
+  await expect(page.getByRole("region", { name: "Majordomo", exact: true })).toContainText("Not enabled");
+  await page.goto(`${server.url}#/new-config`);
+  await expect(content(page).getByRole("combobox", { name: "Blueprint" }).locator("option")).toContainText(["Select a Blueprint…", "demo-host — default"]);
+  await expect(content(page).getByRole("button", { name: "Initialize" })).toHaveCount(0);
+});
+
+test("a second Initialize is answered with a reapply offer, and a host without git says to install it", async ({ page }) => {
+  const host = onboardingHost();
+  host.init = "git";
+  await host.install(page);
+  await page.goto(`${server.url}#/teams`);
+  const list = content(page).getByRole("region", { name: "Teams list" });
+  await list.getByRole("button", { name: "Initialize" }).click();
+  const alert = list.getByRole("alert");
+  await expect(alert).toContainText("git is not installed");
+  await expect(alert).toContainText("install git on the host running kuke serve");
+  // Nothing was stored, and the button is there to try again.
+  await expect(list.getByRole("heading", { name: "No team is stored" })).toBeVisible();
+  await expect(list.getByRole("button", { name: "Initialize" })).toBeEnabled();
+
+  // Another session initialized the host meanwhile: the 409 becomes the reapply offer.
+  host.init = "conflict";
+  await list.getByRole("button", { name: "Initialize" }).click();
+  const offer = list.getByRole("group", { name: "Already initialized" });
+  await expect(offer).toContainText("The kuke team is stored; reapply recomposes it from its stored declaration.");
+  await expect(list.getByRole("alert")).toHaveCount(0);
+  await expect(list.getByRole("button", { name: "Initialize" })).toHaveCount(0);
+  await expect(list.locator(".initialize-cli")).toContainText("kuke team init --reapply");
+  await offer.getByRole("button", { name: "Reapply" }).click();
+  await expect(toasts(page).filter({ hasText: "Team kuke reapplied." })).toBeVisible();
+  expect(host.posts("/api/teams/kuke/reapply")).toHaveLength(1);
+  expect(host.posts("/api/teams/init")).toHaveLength(2);
+  await expect(list.getByRole("link", { name: "kuke", exact: true })).toBeVisible();
+});
+
+test("the Workbench shows Get started with five steps whose actions reach their targets and complete in place", async ({ page }) => {
+  const host = onboardingHost();
+  await host.install(page);
+  await page.goto(server.url);
+  const card = getStarted(page);
+  await expect(card.getByRole("heading", { name: "Get started" })).toBeVisible();
+  // Titles come from the connector catalog: the harness connector, the git connector and the one whose token serves git.
+  await expect.poll(() => stepNames(page)).toEqual(["Initialize: To do", "Log in to Demo: To do", "Set up Repo and Forge: Recommended", "Enable majordomo: Optional", "Launch your first agent: To do"]);
+  await expect(card.locator(".panel-heading .badge")).toHaveText("0 of 3 done");
+  await expect(startedStep(page, "login")).toContainText("after Initialize");
+  await markPage(page);
+
+  // Initialize, in place.
+  await startedStep(page, "initialize").getByRole("button", { name: "Initialize" }).click();
+  await expect(startedStep(page, "initialize")).toHaveAccessibleName("Initialize: Done");
+  await expect(card.locator(".panel-heading .badge")).toHaveText("1 of 3 done");
+  await expect(startedStep(page, "initialize").getByRole("button")).toHaveCount(0);
+
+  // Recommended and optional steps link to their targets.
+  await expect(startedStep(page, "git-identity").getByRole("link", { name: "New Repo identity" })).toHaveAttribute("href", "#/connectors/repo/new-identity");
+  await expect(startedStep(page, "agent").getByRole("link", { name: "New agent" })).toHaveAttribute("href", "#/agents/new");
+  await startedStep(page, "majordomo").getByRole("button", { name: "Enable majordomo" }).click();
+  const panel = page.getByRole("complementary", { name: "Majordomo panel" });
+  await expect(panel.getByRole("button", { name: "Enable majordomo" })).toBeVisible();
+  await panel.getByRole("button", { name: "Collapse majordomo panel" }).click();
+
+  // Log in reaches the identity cell of the login the agent template uses; Use a token the connector page.
+  const demo = startedStep(page, "login").getByRole("group", { name: "Demo" });
+  await expect(demo.getByRole("link", { name: "Use a token for Demo" })).toHaveAttribute("href", "#/connectors/demo");
+  await demo.getByRole("button", { name: "Log in: Demo identity default-agent-demo-state — default / default / default" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/login-default-agent-demo-state$/);
+  expect(JSON.parse(host.posts("/api/connectors/demo/login")[0].body)).toEqual({ name: "default-agent-demo-state", scope: { realm: "default", space: "default", stack: "default" }, method: "login" });
+  // While the session runs the step offers to open it again; when it ends the step is done without a refresh.
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await expect(demo.getByRole("button", { name: /^Open login session/ })).toBeVisible();
+  host.endLogin("default-agent-demo-state");
+  await expect(startedStep(page, "login")).toHaveAccessibleName("Log in to Demo: Done", { timeout: 10000 });
+  await expect(card.locator(".panel-heading .badge")).toHaveText("2 of 3 done");
+
+  // The first agent completes the required steps: the card goes away for good.
+  await startedStep(page, "agent").getByRole("link", { name: "New agent" }).click();
+  await page.getByRole("region", { name: "New agent" }).getByRole("button", { name: "Create" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/default-agent-demo-a1b2c3-d4e5f6$/);
+  await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
+  await expect(content(page).getByRole("region", { name: "Cell terminals" })).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("kukeon-get-started"))).toBe("hidden");
+  expect(await pageMarked(page)).toBe(true);
+
+  // The user menu reopens it: required steps done, the others still recommended until set up.
+  await userButton(page).click();
+  await page.getByRole("menuitem", { name: "Get started" }).click();
+  await expect.poll(() => stepNames(page)).toEqual(["Initialize: Done", "Log in to Demo: Done", "Set up Repo and Forge: Recommended", "Enable majordomo: Optional", "Launch your first agent: Done"]);
+  await expect(card.locator(".panel-heading .badge")).toHaveText("3 of 3 done");
+  await expect(card.getByRole("status")).toContainText("You are set up.");
+  // A stored git identity sets the recommended step up.
+  host.secrets.push({ metadata: { name: "repo-key", realm: "default" }, spec: { connector: "repo", type: "ssh-key" } });
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(startedStep(page, "git-identity")).toHaveAccessibleName("Set up Repo and Forge: Done");
+});
+
+test("Get started can be dismissed, stays dismissed across a reload and reopens from the user menu", async ({ page }) => {
+  const host = onboardingHost();
+  await host.install(page);
+  await page.goto(server.url);
+  await expect(getStarted(page)).toBeVisible();
+  // The card sits above the grid's own empty state.
+  await expect(content(page).getByRole("heading", { name: "No active cells" })).toBeVisible();
+  await getStarted(page).getByRole("button", { name: "Dismiss" }).click();
+  await expect(getStarted(page)).toHaveCount(0);
+  await page.reload();
+  await expect(content(page).getByRole("heading", { name: "No active cells" })).toBeVisible();
+  await expect(getStarted(page)).toHaveCount(0);
+  // A dismissed card reads nothing.
+  const teamReads = host.requests.filter(request => request.path === "/api/teams").length;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByRole("button", { name: "Refresh" })).not.toHaveAttribute("aria-busy", "true");
+  expect(host.requests.filter(request => request.path === "/api/teams").length).toBe(teamReads);
+  // From another page the menu item goes to the Workbench and shows the card.
+  await page.goto(`${server.url}#/teams`);
+  await userButton(page).click();
+  await page.getByRole("menuitem", { name: "Get started" }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(steps(page)).toHaveCount(5);
+  // A token stored for the harness completes Log in too.
+  host.initialize();
+  host.secrets.push({ metadata: { name: "demo-key", realm: "default" }, spec: { connector: "demo", type: "opaque" } });
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(startedStep(page, "login")).toHaveAccessibleName("Log in to Demo: Done");
+  await expect(startedStep(page, "initialize")).toHaveAccessibleName("Initialize: Done");
+});
+
+test("a connector without identities says Not set up, recommended for what its description says", async ({ page }) => {
+  const host = onboardingHost({ initialized: true });
+  host.secrets.push({ metadata: { name: "repo-key", realm: "default" }, spec: { connector: "repo", type: "ssh-key", identity: { hosts: "example.com" } } });
+  await host.install(page);
+  await page.goto(`${server.url}#/connectors`);
+  const row = title => content(page).getByRole("region", { name: "Connectors list" }).getByRole("row").filter({ has: page.getByRole("link", { name: title, exact: true }) });
+  // Forge has no identity; Demo only a state volume nobody logged in to; Repo has a key.
+  await expect(row("Forge").getByRole("cell").nth(2)).toHaveText("0 Not set up — recommended");
+  await expect(row("Demo").getByRole("cell").nth(2)).toHaveText("2 Not set up — recommended");
+  await expect(row("Repo").getByRole("cell").nth(2)).toHaveText("1");
+  await row("Forge").getByRole("link", { name: "Forge", exact: true }).click();
+  await expect(content(page).getByRole("region", { name: "Forge connector" }).getByRole("note")).toHaveText("Not set up — recommended for a test-only API connector whose token can also serve git.");
+  await page.goto(`${server.url}#/connectors/demo`);
+  const demo = content(page).getByRole("region", { name: "Demo connector" });
+  await expect(demo.getByRole("note")).toHaveText("Not set up — recommended for how a demo harness authenticates.");
+  // Logging in sets it up.
+  host.endLogin("default-agent-demo-state");
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(demo.getByRole("note")).toHaveCount(0);
+  await page.goto(`${server.url}#/connectors/repo`);
+  await expect(content(page).getByRole("region", { name: "Repo connector" })).toBeVisible();
+  await expect(content(page).getByRole("region", { name: "Repo connector" }).getByRole("note")).toHaveCount(0);
+});
+
+test("New agent offers Log in first while the template's login is empty, and Create still works", async ({ page }) => {
+  const host = onboardingHost({ initialized: true });
+  await host.install(page);
+  await page.goto(`${server.url}#/agents/new`);
+  const form = page.getByRole("region", { name: "New agent" });
+  await expect(form.getByRole("radio", { name: /demo/ })).toBeChecked();
+  const logIn = form.getByRole("button", { name: "Log in first: Demo identity default-agent-demo-state — default / default / default" });
+  await expect(logIn).toBeVisible();
+  await expect(form.getByRole("note")).toContainText("Demo is not logged in for agents yet.");
+  await expect(form.getByRole("button", { name: "Create" })).toBeEnabled();
+  // Log in first opens the identity cell of the template's state volume.
+  await logIn.click();
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/login-default-agent-demo-state$/);
+  // Back on the page while the session runs, the button reopens it; once logged in it is gone.
+  await page.goto(`${server.url}#/agents/new`);
+  await expect(form.getByRole("button", { name: /^Open login session: Demo identity/ })).toBeVisible();
+  host.endLogin("default-agent-demo-state");
+  await expect(form.getByRole("button", { name: /Demo identity/ })).toHaveCount(0, { timeout: 10000 });
+  await expect(form.getByRole("note")).toHaveCount(0);
+
+  // With an empty login Create is not held back.
+  const empty = onboardingHost({ initialized: true });
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await signIn(page);
+  await empty.install(page);
+  await page.reload();
+  await expect(form.getByRole("button", { name: /^Log in first/ })).toBeVisible();
+  await form.getByRole("button", { name: "Create" }).click();
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/default-agent-demo-a1b2c3-d4e5f6$/);
+  expect(empty.posts("/api/agents")).toHaveLength(1);
+  expect(empty.posts("/api/connectors/demo/login")).toHaveLength(0);
+});

@@ -267,10 +267,32 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      - name: Run the installer on the edge channel (skip init)
+      # The installer runs in full (issue #1694): `kuke init`, `kuke team
+      # init`, kukeond.service and kuke-serve.service. Its prerequisites are
+      # the e2e job's: the standalone containerd, and the CNI plugins at
+      # /opt/cni/bin for the in-process bootstrap.
+      - name: Ensure standalone containerd is running
+        run: |
+          sudo systemctl start containerd
+          test -S /run/containerd/containerd.sock
+
+      - name: Install CNI plugins to /opt/cni/bin
+        env:
+          CNI_VERSION: v1.4.1
+        run: |
+          sudo mkdir -p /opt/cni/bin
+          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" \
+            | sudo tar -C /opt/cni/bin -xz
+          test -x /opt/cni/bin/bridge
+          test -x /opt/cni/bin/host-local
+          test -x /opt/cni/bin/loopback
+          test -x /opt/cni/bin/portmap
+
+      # A failed team init exits 3, so a zero status already says the kuke
+      # team was stored; the next step checks it against the daemon.
+      - name: Run the installer on the edge channel
         env:
           KUKE_CHANNEL: edge
-          KUKE_SKIP_INIT: "1"
         run: bash scripts/install.sh
 
       - name: Installed client reports the published version
@@ -281,6 +303,71 @@ jobs:
             echo "::error::expected 'Client: ${VERSION}'"
             exit 1
           fi
+
+      # sudo: the runner's kukeon group membership is not active in this
+      # session.
+      - name: kuke team init stored the kuke and default teams
+        run: |
+          out="$(sudo /usr/local/bin/kuke get teams)"
+          echo "$out"
+          for team in kuke default; do
+            if ! printf '%s\n' "$out" | awk '{print $1}' | grep -qxF "$team"; then
+              echo "::error::team ${team} is not stored after the install"
+              exit 1
+            fi
+          done
+
+      # The web UI is up without anyone running `kuke serve`, and it asks for
+      # the login: an API request without one is a 401.
+      - name: kuke-serve.service is active and the web UI requires the login
+        run: |
+          if ! systemctl is-active --quiet kuke-serve.service; then
+            systemctl status kuke-serve.service --no-pager || true
+            echo "::error::kuke-serve.service is not active after the install"
+            exit 1
+          fi
+          code=""
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5129/api/realms || true)"
+            [ "$code" = "401" ] && break
+            sleep 1
+          done
+          echo "GET /api/realms: ${code}"
+          if [ "$code" != "401" ]; then
+            sudo journalctl -u kuke-serve.service -n 50 --no-pager || true
+            echo "::error::expected 401 from the web UI on localhost:5129, got '${code}'"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+
+      - name: Install frontend dependencies and the browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: |
+          cd internal/webui/frontend
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      # `make web-ui-smoke` without its `kuke` prerequisite: the binary under
+      # test is the installed one (KUKE_WEB_BINARY), not a build of this
+      # checkout, so the recipe's command runs directly. daemon.spec.mjs
+      # starts its own `kuke serve` on a free port against the installed
+      # daemon. sudo for the same reason as above.
+      - name: Web UI smoke against the installed daemon
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: |
+          cd internal/webui/frontend
+          sudo env "PATH=$PATH" "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" CI=1 \
+            KUKE_WEB_SMOKE_HOST=unix:///run/kukeon/kukeond.sock \
+            KUKE_WEB_BINARY=/usr/local/bin/kuke \
+            npm run test:smoke
 
       - name: The immutable image lists both platforms
         run: |

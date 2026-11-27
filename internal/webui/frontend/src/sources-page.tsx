@@ -3,6 +3,7 @@ import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { sendJSON, toFailure } from "./connector-ui";
 import { GitIdentitySelect, RefFields } from "./team-plan";
+import { InitializePrompt } from "./initialize";
 import { defaultsAPI, inheritingNote, isDefault, refLabel, sourceErrors, sourceItems, sourcePayload, sourcesAPI, sourcesLink, sourceTeams, taskLabel, teamsLink, toggledDefaults, usesLabel } from "./teams.mjs";
 import type { DefaultsChange, SourceChange, SourceContents, SourceForm, Sources, StoredSource } from "./teams.mjs";
 
@@ -49,7 +50,7 @@ function NewSource({ onCreated }: { onCreated: (change: SourceChange) => void })
   </section>;
 }
 
-function SourceList({ sources }: { sources: StoredSource[] }) {
+function SourceList({ sources, onChanged }: { sources: StoredSource[]; onChanged: () => void }) {
   return <section className="panel" aria-label="Sources list">
     <div className="panel-heading"><h2>Sources</h2><span className="badge">{sources.length} stored</span></div>
     <div className="table-scroll"><table><thead><tr><th>Source</th><th>Address</th><th>Ref</th><th>Git identity</th><th>Used by</th></tr></thead><tbody>
@@ -59,7 +60,7 @@ function SourceList({ sources }: { sources: StoredSource[] }) {
         <td>{sourceTeams(source).map((team, i) => <span key={team}>{i > 0 && ", "}<a href={teamsLink(team)}>{team}</a></span>)}{source.usedBy.some(use => !use.team) && <>{sourceTeams(source).length ? ", " : ""}<span className="description">the defaults</span></>}{!source.usedBy.length && <span className="description">nothing</span>}</td>
       </tr>)}
     </tbody></table></div>
-    {!sources.length && <div className="empty-state"><h3>No Source is stored</h3><p>Store one below, or run <code>kuke team init</code> for the kukeon Source.</p></div>}
+    {!sources.length && <div className="empty-state"><h3>No Source is stored</h3><p>Store one below, or initialize for the kukeon Source.</p><InitializePrompt onChanged={onChanged} subject="the kukeon Source with the kuke and default teams" /></div>}
   </section>;
 }
 
@@ -122,7 +123,7 @@ export function SourcesPage({ name, revision, onChanged }: { name?: string; revi
   if (!sources.data) return <p role="status">Loading sources…</p>;
   if (name) return <SourceDetail key={name} name={name} sources={sources.data} onChanged={refresh} />;
   return <>
-    <SourceList sources={sources.data.sources} />
+    <SourceList sources={sources.data.sources} onChanged={refresh} />
     {created && <div className="health-sweep-started" role="status"><p>Source <a href={sourcesLink(created.source.name)}>{created.source.name}</a> {created.action}: {created.source.url}, {refLabel(created.source)}; offers {created.discovered?.roles.length ?? 0} roles and {created.discovered?.harnesses.length ?? 0} harnesses.</p></div>}
     <NewSource onCreated={change => { setCreated(change); refresh(); }} />
   </>;

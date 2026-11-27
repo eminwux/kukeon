@@ -7,6 +7,7 @@ import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
 import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorsLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
 import { Disclosure } from "./disclosure";
+import { connectorSetUp, notSetUpText } from "./onboarding.mjs";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
   isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
@@ -52,7 +53,7 @@ function ConnectorList({ connectors, usage, secrets, logins }: { connectors: Con
         return <tr key={connector.name}>
           <td><a className="resource-name" href={connectorsLink(connector.name)}>{connector.title || connector.name}</a> <span className="badge">{connector.name}</span>{connector.description && <p className="description">{connector.description}</p>}</td>
           <td>{connector.methods.length ? connector.methods.map(method => <div key={method.name}><code>{method.name}</code> — {deliveryText(method)}</div>) : deliveryText({ delivery: connector.delivery ?? "" })}</td>
-          <td>{secrets ? identitiesFor(secrets, connector.name).length + loginIdentitiesFor(logins, connector.name).length : "—"}</td>
+          <td>{secrets ? identitiesFor(secrets, connector.name).length + loginIdentitiesFor(logins, connector.name).length : "—"}{secrets && logins && !connectorSetUp(connector, secrets, logins) && <> <span className="badge not-set-up" title={notSetUpText(connector)}>Not set up — recommended</span></>}</td>
           <td>{usage ? configs : "—"}</td>
           <td>{!usage ? "—" : missing.length ? <><strong>{missing.length}</strong> <span className="badge needs-connector">Needs a default</span> <a className="document-action" href={connectorsLink(connector.name, targetScope(missing[0].config))} aria-label={`Set a default for ${connector.title || connector.name}`}>Set a default</a></> : "0"}</td>
         </tr>;
@@ -419,6 +420,7 @@ function ConnectorDetail({ connector, connectors, usage, secrets, logins, logins
       <div className="panel-heading"><h2>{title}</h2>{missing.length ? <span className="badge needs-connector">Needs a default</span> : <span className="badge">{connector.name}</span>}</div>
       <div className="panel-body">
         {connector.description && <p>{connector.description}</p>}
+        {!registry && secrets && logins && !connectorSetUp(connector, secrets, logins) && <p className="connector-not-set-up" role="note">{notSetUpText(connector)}</p>}
         <dl className="details-grid">
           <dt>Name</dt><dd><code>{connector.name}</code></dd>
           <dt>Delivered as</dt><dd>{connector.methods.length ? <ul className="connector-methods">{connector.methods.map(method => <li key={method.name}><code>{method.name}</code>{method.default && <> <span className="badge">default method</span></>} — {deliveryText(method)}{method.description && <span className="description"> {method.description}</span>}</li>)}</ul> : deliveryText({ delivery: connector.delivery ?? "" })}</dd>

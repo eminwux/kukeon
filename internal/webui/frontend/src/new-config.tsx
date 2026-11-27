@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import type { InventoryResource } from "./inventory";
 import { ErrorNotice, useResource } from "./request";
 import { Disclosure } from "./disclosure";
+import { InitializePrompt } from "./initialize";
 import { newCellLink } from "./routes";
 import { MergedValues } from "./merged-values";
 import { catalogAPI } from "./catalog-url.mjs";
@@ -385,7 +386,7 @@ export function NewConfigPage({ revision, inventory, blueprintScope, onCreated }
       {blueprints.loading && <p role="status">Loading Blueprints…</p>}{blueprints.error && <ErrorNotice error={blueprints.error} kind="Blueprint" />}{blueprints.error && blueprints.data && <p className="stale">Showing stale Blueprints.</p>}
       <label>Search Blueprints<input type="search" value={query} placeholder="Name or full scope" onChange={event => setQuery(event.target.value)} /></label>
       <label>Blueprint<select value={selected} onChange={event => setSelected(event.target.value)}><option value="">Select a Blueprint…</option>{filtered.map(row => <option key={JSON.stringify(row.scope)} value={JSON.stringify(row.scope)}>{row.doc.metadata.name} — {row.scope.slice(0, -1).join(" / ")}</option>)}{selected && !rows.some(row => JSON.stringify(row.scope) === selected) && <option value={selected}>{scope.at(-1)} — {scope.slice(0, -1).join(" / ")}</option>}</select></label>
-      {!blueprints.loading && !blueprints.error && !rows.length && <p className="description">No Blueprints are available. Apply one with <code>kuke apply</code> or run <code>kuke team init</code>.</p>}
+      {!blueprints.loading && !blueprints.error && !rows.length && <div className="initialize-empty" role="note"><p className="description">No Blueprints are available. Initialize stores the ones kukeon ships, or apply one with <code>kuke apply</code>.</p><InitializePrompt onChanged={onCreated} subject="the Blueprints and Configs of the kuke and default teams" /></div>}
       {scope.length >= 2 && detail.loading && !detail.data && <p role="status">Loading the Blueprint's form…</p>}
       {detail.error && <ErrorNotice error={detail.error} kind="Blueprint" />}
       {detail.data && <p className="description">Form of <a className="resource-name" href={catalogLink("blueprints", scope)}>{detail.data.metadata.name}</a>{form && <>: {form.parameters.length} parameters, {form.components.length} components, {form.repoSlots.length} repository slots.</>}</p>}

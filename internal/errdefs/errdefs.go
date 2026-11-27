@@ -839,6 +839,13 @@ var (
 	// ErrDefaultTeamInit is returned by kuke team init when the kuke team
 	// was applied and the system default team then failed (issue #1692).
 	ErrDefaultTeamInit = errors.New("team kuke applied; team default failed")
+	// ErrTeamInitialized is returned by kuke team init, and by the web UI's
+	// Initialize, when the kuke team is already stored (issue #1694). The
+	// caller's message says how to go on: --force or --reapply.
+	ErrTeamInitialized = errors.New("already initialized")
+	// ErrGitNotFound is returned when a team operation needs git and the
+	// host running it has none on PATH (issue #1694).
+	ErrGitNotFound = errors.New("git is not installed on this host")
 	// ErrTeamScopeNotFound fires when a Team's or TeamDefaults' realm does
 	// not exist.
 	ErrTeamScopeNotFound = errors.New("team realm does not exist")

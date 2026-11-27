@@ -66,11 +66,7 @@ func (b *Exec) gitFetchRoot() string {
 	if b.opts.GitFetchDir != "" {
 		return b.opts.GitFetchDir
 	}
-	runDir := filepath.Dir(ctr.DefaultSecretsStagingDir)
-	if b.opts.KukeondSocket != "" {
-		runDir = filepath.Dir(b.opts.KukeondSocket)
-	}
-	return filepath.Join(runDir, consts.KukeonGitFetchSubdir)
+	return filepath.Join(filepath.Dir(ctr.SecretsStagingDir(b.opts.KukeondSocket)), consts.KukeonGitFetchSubdir)
 }
 
 // StageGitFetch stages the stored credential a fetch kuke makes on the host

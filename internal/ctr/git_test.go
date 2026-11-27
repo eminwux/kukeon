@@ -87,14 +87,64 @@ func TestResolveSecrets_RejectsTypedSecretRef(t *testing.T) {
 func TestContainerGitStagingDir(t *testing.T) {
 	t.Parallel()
 
-	got := ContainerGitStagingDir(intmodel.ContainerSpec{ID: "work", ContainerdID: "s_st_c_work"})
+	got := ContainerGitStagingDir(intmodel.ContainerSpec{ID: "work", ContainerdID: "s_st_c_work"}, "")
 	if want := filepath.Join(DefaultSecretsStagingDir, "s_st_c_work", "git"); got != want {
 		t.Errorf("ContainerGitStagingDir = %q, want %q", got, want)
 	}
 	// Falls back to the container ID when no containerd ID is assigned yet.
-	got = ContainerGitStagingDir(intmodel.ContainerSpec{ID: "work"})
+	got = ContainerGitStagingDir(intmodel.ContainerSpec{ID: "work"}, "")
 	if want := filepath.Join(DefaultSecretsStagingDir, "work", "git"); got != want {
 		t.Errorf("ContainerGitStagingDir (no containerd id) = %q, want %q", got, want)
+	}
+	// A daemon on another socket stages beside that socket.
+	root := SecretsStagingDir("/run/kukeon-dev/kukeond.sock")
+	got = ContainerGitStagingDir(intmodel.ContainerSpec{ID: "work", ContainerdID: "s_st_c_work"}, root)
+	if want := "/run/kukeon-dev/secrets/s_st_c_work/git"; got != want {
+		t.Errorf("ContainerGitStagingDir (staging root %q) = %q, want %q", root, got, want)
+	}
+}
+
+func TestSecretsStagingDir(t *testing.T) {
+	t.Parallel()
+
+	for socket, want := range map[string]string{
+		"":                             DefaultSecretsStagingDir,
+		"  ":                           DefaultSecretsStagingDir,
+		"/run/kukeon/kukeond.sock":     DefaultSecretsStagingDir,
+		"/run/kukeon-dev/kukeond.sock": "/run/kukeon-dev/secrets",
+		"/tmp/e2e/run/kukeond.sock":    "/tmp/e2e/run/secrets",
+	} {
+		if got := SecretsStagingDir(socket); got != want {
+			t.Errorf("SecretsStagingDir(%q) = %q, want %q", socket, got, want)
+		}
+	}
+}
+
+// A git block is staged under the staging root the caller names, and the bind
+// mount it returns points there: the directory beside the daemon's socket,
+// which is the one the daemon's cell shares with the host.
+func TestStageContainerGit_StagingRoot(t *testing.T) {
+	t.Parallel()
+
+	runPath := t.TempDir()
+	root := filepath.Join(t.TempDir(), "secrets")
+	spec := intmodel.ContainerSpec{
+		ID:           "work",
+		ContainerdID: "s_st_c_work",
+		Git:          &intmodel.ContainerGit{Author: &intmodel.GitIdentity{Name: "Dev", Email: "dev@example.com"}},
+	}
+	mount, err := StageContainerGit(spec, runPath, root)
+	if err != nil {
+		t.Fatalf("StageContainerGit: %v", err)
+	}
+	if mount == nil {
+		t.Fatal("StageContainerGit returned no mount for a git block")
+	}
+	if want := filepath.Join(root, "s_st_c_work", "git"); mount.Source != want {
+		t.Errorf("mount source = %q, want %q", mount.Source, want)
+	}
+	if _, statErr := os.Stat(mount.Source); statErr != nil {
+		t.Errorf("staging directory: %v", statErr)
 	}
 }
 
@@ -108,14 +158,14 @@ func TestStageContainerGit_NoGitNoMount(t *testing.T) {
 		ContainerdID: uniqueContainerdID(t),
 		Repos:        []intmodel.ContainerRepo{{Name: "src", URL: "https://example.com/o/r.git"}},
 	}
-	mount, err := StageContainerGit(spec, t.TempDir())
+	mount, err := StageContainerGit(spec, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("StageContainerGit: %v", err)
 	}
 	if mount != nil {
 		t.Errorf("mount = %+v, want nil for a container with no git block", mount)
 	}
-	if _, statErr := os.Stat(ContainerGitStagingDir(spec)); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(ContainerGitStagingDir(spec, "")); !os.IsNotExist(statErr) {
 		t.Errorf("staging dir exists for a container with no git block (err=%v)", statErr)
 	}
 }
@@ -133,14 +183,14 @@ func TestStageContainerGit_MissingSecretStagesNothing(t *testing.T) {
 			SecretRef: &intmodel.ContainerSecretRef{Name: "absent", Realm: "default"},
 		}}},
 	}
-	mount, err := StageContainerGit(spec, t.TempDir())
+	mount, err := StageContainerGit(spec, t.TempDir(), "")
 	if !errors.Is(err, errdefs.ErrSecretRefNotFound) {
 		t.Fatalf("err = %v, want ErrSecretRefNotFound", err)
 	}
 	if mount != nil {
 		t.Errorf("mount = %+v, want nil on error", mount)
 	}
-	if _, statErr := os.Stat(ContainerGitStagingDir(spec)); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(ContainerGitStagingDir(spec, "")); !os.IsNotExist(statErr) {
 		t.Errorf("staging dir exists after a failed render (err=%v)", statErr)
 	}
 }
@@ -174,7 +224,7 @@ func TestStageContainerGit_StagesBundle(t *testing.T) {
 			}},
 		},
 	}
-	dir := ContainerGitStagingDir(spec)
+	dir := ContainerGitStagingDir(spec, "")
 	t.Cleanup(func() {
 		_ = os.RemoveAll(filepath.Dir(dir))
 		if !rootExisted {
@@ -183,7 +233,7 @@ func TestStageContainerGit_StagesBundle(t *testing.T) {
 		}
 	})
 
-	mount, err := StageContainerGit(spec, runPath)
+	mount, err := StageContainerGit(spec, runPath, "")
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSecretStagingFailed) {
 			t.Skipf("staging root not writable here: %v", err)
@@ -242,7 +292,7 @@ func TestStageContainerGit_StagesBundle(t *testing.T) {
 	if err = os.WriteFile(stray, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = StageContainerGit(spec, runPath); err != nil {
+	if _, err = StageContainerGit(spec, runPath, ""); err != nil {
 		t.Fatalf("re-stage: %v", err)
 	}
 	if _, statErr = os.Stat(stray); !os.IsNotExist(statErr) {

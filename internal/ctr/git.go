@@ -26,23 +26,28 @@ import (
 // ContainerGitStagingDir returns the host directory a container's rendered git
 // bundle is staged in. It sits under the secrets staging root — a tmpfs on a
 // standard host — so key material never reaches persistent storage outside the
-// daemon's own secrets tree.
-func ContainerGitStagingDir(spec intmodel.ContainerSpec) string {
+// daemon's own secrets tree. stagingRoot is that root (SecretsStagingDir);
+// empty means DefaultSecretsStagingDir.
+func ContainerGitStagingDir(spec intmodel.ContainerSpec, stagingRoot string) string {
 	containerdID := spec.ContainerdID
 	if containerdID == "" {
 		containerdID = spec.ID
 	}
-	return gitcred.StagingDir(DefaultSecretsStagingDir, containerdID)
+	if stagingRoot == "" {
+		stagingRoot = DefaultSecretsStagingDir
+	}
+	return gitcred.StagingDir(stagingRoot, containerdID)
 }
 
 // StageContainerGit renders the container's git block (identity, stored
 // credentials, signing, per-source overrides) into its staging directory and
 // returns the read-only bind mount that exposes it at gitplan.MountPath, or nil
 // when the container declares no git config. Secrets are read from the
-// daemon's secrets tree under runPath. Staging is idempotent: the directory's
-// contents are replaced on every call, which is what lets a start re-create
-// them after a reboot wiped the tmpfs.
-func StageContainerGit(spec intmodel.ContainerSpec, runPath string) (*intmodel.VolumeMount, error) {
+// daemon's secrets tree under runPath and staged under stagingRoot (see
+// ContainerGitStagingDir). Staging is idempotent: the directory's contents are
+// replaced on every call, which is what lets a start re-create them after a
+// reboot wiped the tmpfs.
+func StageContainerGit(spec intmodel.ContainerSpec, runPath, stagingRoot string) (*intmodel.VolumeMount, error) {
 	if !gitcred.Needed(spec) {
 		return nil, nil //nolint:nilnil // no git block, no mount: the documented no-op.
 	}
@@ -52,7 +57,7 @@ func StageContainerGit(spec intmodel.ContainerSpec, runPath string) (*intmodel.V
 	if err != nil {
 		return nil, err
 	}
-	dir := ContainerGitStagingDir(spec)
+	dir := ContainerGitStagingDir(spec, stagingRoot)
 	if err = gitcred.Stage(dir, bundle); err != nil {
 		return nil, err
 	}

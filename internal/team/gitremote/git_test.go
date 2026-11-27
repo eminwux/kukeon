@@ -18,11 +18,14 @@ package gitremote
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 func TestRemoteURLForms(t *testing.T) {
@@ -69,6 +72,29 @@ func TestGitCancellationDoesNotWaitForTransport(t *testing.T) {
 	_, err := Run(ctx, "ls-remote", "--symref", "--", "https://example.test/repo", "HEAD")
 	if err == nil || time.Since(start) > 3*time.Second {
 		t.Fatal("Git/transport ignored cancellation")
+	}
+}
+
+// TestRunWithoutGit: a host with no git on PATH is told so with
+// errdefs.ErrGitNotFound, with or without GIT_SSH_COMMAND set; any other
+// failure keeps the guidance (issue #1694).
+func TestRunWithoutGit(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, ssh := range []string{"", "ssh"} {
+		t.Setenv("GIT_SSH_COMMAND", ssh)
+		_, err := Run(t.Context(), "ls-remote", "--", "https://example.test/repo", "HEAD")
+		if !errors.Is(err, errdefs.ErrGitNotFound) {
+			t.Fatalf("GIT_SSH_COMMAND=%q: err = %v, want ErrGitNotFound", ssh, err)
+		}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 128\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	_, err := Run(t.Context(), "ls-remote", "--", "https://example.test/repo", "HEAD")
+	if err == nil || errors.Is(err, errdefs.ErrGitNotFound) || !strings.Contains(err.Error(), "Git output withheld") {
+		t.Fatalf("failing git: err = %v, want the guidance", err)
 	}
 }
 

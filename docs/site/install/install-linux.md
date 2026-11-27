@@ -16,8 +16,10 @@ The installer:
 2. Verifies cgroups v2 is mounted and `/run/containerd/containerd.sock` is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.
 3. Resolves the version of its channel — **edge** by default, the newest build of `main` read from the `VERSION` asset of the rolling [`edge` prerelease](https://github.com/eminwux/kukeon/releases/tag/edge); **stable** with `KUKE_CHANNEL=stable`, the latest release tag. It downloads `kuke`, `kukebuild` and `kukepause` for the platform, verifies each `.sha256` checksum, and on edge checks that the downloaded `kuke` reports the version it read (a merge that lands mid-download fails the install before anything is placed: run it again). It then installs the binaries to `/usr/local/bin` and hard-links `kukeond` to `kuke`.
 4. Runs `sudo kuke init` on a fresh host, which creates the daemon from the image matching the binaries: `ghcr.io/eminwux/kukeon:sha-<short>` on edge, `ghcr.io/eminwux/kukeon:vX.Y.Z` on stable. On a host that already has a `kukeond` listening on `/run/kukeon/kukeond.sock`, init is skipped and the installer compares the running daemon's version with the binaries it just installed: a version-matched daemon is left alone; a **different** daemon is recreated with `kuke daemon recreate --kukeond-image <that image>` (only the `kuke-system` kukeond cell is cycled; workload cells are untouched), and the installer checks that `kuke version` then reports the same `Client:` and `Daemon:`. When the recreate fails it prints the command, leaves the skew, and exits non-zero. Set `KUKE_SKIP_DAEMON_UPGRADE=1` to keep an intentionally pinned older daemon.
-5. Stores the `kuke` team (the majordomo role): `sudo kuke team init` on a fresh host, `sudo kuke team init --upgrade` on a live one (only when the installed `kuke` has `--upgrade`), so the team is pinned to the revision of the installed binaries. Team init fetches `github.com/eminwux/kukeon`, so it needs `git`: without it, or when the step fails, the installer prints a warning naming the command to run later and still succeeds. `KUKE_SKIP_TEAM_INIT=1` (or `KUKE_SKIP_INIT=1`) skips the step.
+5. Stores the `kuke` team (the majordomo role) and the `default` team (the agent templates): `sudo kuke team init` on a fresh host, `sudo kuke team init --upgrade` on a live one (only when the installed `kuke` has `--upgrade`), so the teams are pinned to the revision of the installed binaries. Team init fetches `github.com/eminwux/kukeon`, so it needs `git`. Without it, or when the step fails, the rest of the install still runs; the summary then has a `✗ kuke team init failed: <reason>` line with the command to retry, and the installer [exits 3](#exit-status). `KUKE_SKIP_TEAM_INIT=1` (or `KUKE_SKIP_INIT=1`) skips the step and exits 0.
 6. Installs `/etc/systemd/system/kukeond.service` and runs `systemctl enable --now kukeond.service` so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with `sudo kuke daemon start` after each reboot in that case.
+7. Installs `/etc/systemd/system/kuke-serve.service`, the [web UI](#web-ui-service) on `http://localhost:5129`, and starts it. Skipped with a notice on systemd-less hosts and with `KUKE_SKIP_WEB_UI=1`; run `kuke serve` by hand in that case.
+8. Prints the summary: the web UI's address and login first, then that the next step is its **Get started** checklist (see [Getting Started](../getting-started.md)), then the CLI commands to try.
 
 Pass `--check` to run the prereq checks only without touching the system:
 
@@ -35,9 +37,19 @@ Environment overrides the installer honors:
 | `KUKE_INSTALL_PREFIX`        | Install dir (default: `/usr/local/bin`).                                                                                                              |
 | `KUKE_SKIP_INIT=1`           | Skip the post-install `kuke init` step (and the team step).                                                                                           |
 | `KUKE_SKIP_TEAM_INIT=1`      | Skip `kuke team init` (fresh host) or `kuke team init --upgrade` (live host).                                                                         |
+| `KUKE_SKIP_WEB_UI=1`         | Do not install the `kuke-serve.service` unit; run `kuke serve` by hand instead.                                                                       |
 | `KUKE_SKIP_CHECKSUM=1`       | Skip `.sha256` verification (not recommended).                                                                                                        |
 | `KUKE_SKIP_KUKEBUILD=1`      | Skip downloading and installing `kukebuild` (disables `kuke build`; for release tags predating its asset).                                            |
 | `KUKE_SKIP_DAEMON_UPGRADE=1` | On a live host, skip the running-daemon version check and the recreate, and keep an intentionally pinned older daemon (the team step is skipped too). |
+
+### Exit status
+
+| Status | Meaning                                                                                                                                                                                                                                      |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | Installed. A skipped step (`KUKE_SKIP_INIT`, `KUKE_SKIP_TEAM_INIT`, `KUKE_SKIP_WEB_UI`, no systemd) and a web UI unit that did not start are reported in the output and do not change the status.                                            |
+| `1`    | A prerequisite check, a download, the checksum verification, the install or the daemon upgrade failed.                                                                                                                                       |
+| `2`    | A bad argument, an unknown `KUKE_CHANNEL`, or `KUKE_VERSION` combined with `KUKE_CHANNEL=edge`. Nothing was touched.                                                                                                                         |
+| `3`    | Everything was installed and the runtime is up, but the teams are not stored: `git` is missing, or `kuke team init` failed. The summary's `✗` line gives the reason. Retry with `sudo kuke team init`, or with **Initialize** in the web UI. |
 
 ## Manual install (fallback)
 
@@ -57,7 +69,13 @@ sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
 
 # Bring up the daemon
 sudo kuke init
+
+# Store the kuke and default teams (needs git), then serve the web UI
+sudo kuke team init
+kuke serve
 ```
+
+`kuke serve` runs in the foreground; the one-line installer runs it as a [systemd service](#web-ui-service) instead.
 
 The hard link is required: `main.go` dispatches to `kuke` or `kukeond` by looking at `argv[0]` (see [Architecture → Process Model](../architecture/process-model.md)). Running `kuke kukeond …` does **not** enter the daemon tree.
 
@@ -108,6 +126,25 @@ If your host has no systemd (some minimal container images, dev sandboxes), the 
 sudo kuke daemon start
 ```
 
+## Web UI service
+
+On systemd hosts the installer drops `/etc/systemd/system/kuke-serve.service` and runs `systemctl enable` and `systemctl restart` on it, so the [web UI](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md) is up when the installer ends and after every reboot:
+
+```ini
+[Service]
+User=<the user who ran the installer through sudo, or root>
+SupplementaryGroups=kukeon
+ExecStart=/usr/local/bin/kuke serve --listen localhost:5129
+Restart=on-failure
+```
+
+- **`User=`** is `$SUDO_USER`, the account whose git configuration the web UI fetches team sources with, or `root` when the installer was not run through `sudo`.
+- **`SupplementaryGroups=kukeon`** gives the service access to the daemon socket without waiting for that user's next login.
+- **The login** is the `web-ui-admin` Secret `kuke init` created; the installer prints it, and `kuke get secret web-ui-admin --realm kuke-system -o yaml` prints it again. Without a login an API request answers 401.
+- **The address** is localhost only. To serve another address, edit `ExecStart` (see the `kuke serve` [options](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#options-and-permissions)) and run `sudo systemctl daemon-reload && sudo systemctl restart kuke-serve.service`. Re-running the installer writes the unit again.
+
+A unit that does not start, for example because port 5129 is taken by a `kuke serve` started by hand, is a warning in the installer's output; inspect it with `sudo journalctl -u kuke-serve.service`. `KUKE_SKIP_WEB_UI=1` installs no unit.
+
 ## Upgrade
 
 Update a host with:
@@ -126,7 +163,7 @@ The channel is read from the installed version and is never stored:
 
 | Flow           | Commands                                                                                   | Result                                                                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install        | `curl -fsSL https://kukeon.io/install.sh \| bash`                                          | Newest edge binaries; daemon runs `ghcr.io/eminwux/kukeon:sha-<short>`; the `kuke` team (majordomo) is stored                                |
+| Install        | `curl -fsSL https://kukeon.io/install.sh \| bash`                                          | Newest edge binaries; daemon runs `ghcr.io/eminwux/kukeon:sha-<short>`; the `kuke` and `default` teams are stored; the web UI is served      |
 | Update         | `sudo kuke update`                                                                         | Newest edge build, daemon recreated, previous kukeond image removed, `kuke` team and `TeamDefaults` pinned to the new build; cells untouched |
 | Stay on stable | install with `KUKE_CHANNEL=stable`; after the next release, `sudo kuke update`             | The new release's binaries and `ghcr.io/eminwux/kukeon:vX.Y.Z`; never offered an edge build                                                  |
 | Stable to edge | `sudo kuke update --channel edge`                                                          | Newest edge build; later plain `kuke update` stays on edge                                                                                   |
@@ -143,12 +180,20 @@ Harness images (the `kuke` team's claude, codex and opencode images) are not bui
 
 ```bash
 sudo kuke uninstall -y
-sudo rm -f /usr/local/bin/kuke /usr/local/bin/kukeond
+sudo rm -f /usr/local/bin/kuke /usr/local/bin/kukeond /usr/local/bin/kukebuild /usr/local/bin/kukepause
+```
+
+`kuke uninstall` removes `kukeond.service` but not the web UI's unit. Remove `kuke-serve.service` yourself, before the binaries, so it does not restart a `kuke serve` that has no daemon to talk to:
+
+```bash
+sudo systemctl disable --now kuke-serve.service
+sudo rm -f /etc/systemd/system/kuke-serve.service
+sudo systemctl daemon-reload
 ```
 
 `uninstall` only touches CNI conflists Kukeon itself generated; other files under `/etc/cni/net.d` are left alone. If you want to remove the `kukeon` system group too, finish with `sudo groupdel kukeon`.
 
 ## Next
 
-- [Getting Started](../getting-started.md) — bring up a hello-world cell
+- [Getting Started](../getting-started.md) — open the web UI and launch your first agent
 - [Build from source](build-from-source.md) — compile `kuke` / `kukeond` from a local checkout

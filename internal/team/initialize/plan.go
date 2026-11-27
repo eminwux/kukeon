@@ -113,6 +113,19 @@ type Plan struct {
 	superseded []supersededCopy
 }
 
+// Blueprints names the shared blueprints the plan's Configs reference, in
+// first-use order. After a commit they are the names the daemon stored.
+func (p *Plan) Blueprints() []string {
+	if p == nil || p.composed == nil {
+		return nil
+	}
+	names := make([]string, 0, len(p.composed.Blueprints))
+	for _, bp := range p.composed.Blueprints {
+		names = append(names, bp.Metadata.Name)
+	}
+	return names
+}
+
 // Result reports a committed application.
 type Result struct {
 	Team      string

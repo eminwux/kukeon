@@ -7,6 +7,7 @@ import { stateResolved } from "./connectors.mjs";
 import { ScheduleDetails, when } from "./schedule";
 import { OutcomeNotice, PlanView } from "./team-plan";
 import { TeamWizard } from "./team-wizard";
+import { InitializePrompt } from "./initialize";
 import { configLink, deleteSummary, exportAPI, listOrigin, newTeamLink, sourcesLink, systemTeam, taskLabel, teamsAPI, teamsLink } from "./teams.mjs";
 import type { DeleteResult, RoleConnectorView, TeamDetail, TeamOutcome, TeamSummary, TeamView, ViewSource } from "./teams.mjs";
 
@@ -35,7 +36,7 @@ function RoleConnectors({ rows, configs }: { rows: RoleConnectorView[]; configs:
   </tbody></table></div>;
 }
 
-function TeamList({ teams }: { teams: TeamSummary[] }) {
+function TeamList({ teams, onChanged }: { teams: TeamSummary[]; onChanged: () => void }) {
   return <section className="panel" aria-label="Teams list">
     <div className="panel-heading"><h2>Teams</h2><a className="document-action" href={newTeamLink}>New team</a></div>
     <div className="table-scroll"><table><thead><tr><th>Team</th><th>Project</th><th>Roles</th><th>Harnesses</th><th>Configs</th></tr></thead><tbody>
@@ -47,7 +48,7 @@ function TeamList({ teams }: { teams: TeamSummary[] }) {
         <td>{team.configs.length}</td>
       </tr>)}
     </tbody></table></div>
-    {!teams.length && <div className="empty-state"><h3>No team is stored</h3><p>Run <code>kuke team init</code> for the kuke team, or add one with New team.</p></div>}
+    {!teams.length && <div className="empty-state"><h3>No team is stored</h3><p>Initialize stores the kuke team and the default team, or add one with New team.</p><InitializePrompt onChanged={onChanged} /></div>}
   </section>;
 }
 
@@ -249,8 +250,8 @@ export function TeamsPage({ name, section, revision, onChanged }: { name?: strin
   return <>
     {teams.error && <ErrorNotice error={teams.error} kind="Teams" />}
     {teams.loading && !teams.data && <p role="status">Loading teams…</p>}
-    {teams.data && <TeamList teams={teams.data.teams} />}
-    {teams.data && !teams.data.teams.some(team => team.name === systemTeam) && <p className="description" role="note">The kuke team is not stored. Run <code>kuke team init</code> on the host to create it and the initial defaults.</p>}
+    {teams.data && <TeamList teams={teams.data.teams} onChanged={refresh} />}
+    {teams.data && teams.data.teams.length > 0 && !teams.data.teams.some(team => team.name === systemTeam) && <div className="initialize-empty" role="note"><p className="description">The kuke team is not stored. Initialize creates it, the default team and the initial defaults.</p><InitializePrompt onChanged={refresh} /></div>}
     <p className="description">Where roles and harnesses come from is on the <a href={sourcesLink()}>Sources</a> page.</p>
   </>;
 }

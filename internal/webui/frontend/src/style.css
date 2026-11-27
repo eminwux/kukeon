@@ -929,3 +929,41 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .new-agent-form > label { display: grid; gap: 4px; max-width: 26em; font-weight: 600; }
 .new-agent-form input { font-weight: 400; }
 .new-agent-missing { padding: 40px 24px; }
+/* First-run onboarding (#1694): the Initialize prompt, the Get started card and the login prompts. */
+.initialize-prompt { display: grid; justify-items: start; gap: 8px; }
+.initialize-prompt p { margin: 0; }
+.empty-state .initialize-prompt { justify-items: center; margin-top: 12px; }
+.empty-state .initialize-prompt .error { text-align: left; }
+.initialize-prompt.is-compact { gap: 6px; margin-top: 8px; font-size: var(--font-sm); }
+.initialize-prompt.is-compact .initialize-button { width: 100%; }
+.initialize-status { color: var(--muted); font-size: var(--font-sm); }
+.initialize-conflict { display: grid; justify-items: inherit; gap: 8px; }
+.initialize-notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: var(--font-sm); text-align: left; }
+.initialize-cli { font-size: var(--font-sm); }
+.initialize-empty { display: grid; gap: 10px; }
+.get-started { margin-bottom: 20px; }
+.get-started > .panel-heading { justify-content: flex-start; gap: 10px; }
+.get-started > .panel-heading > button { margin-left: auto; }
+.get-started-complete { margin: 0 0 12px; color: var(--muted); }
+.get-started-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.get-started-step { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto; align-items: start; gap: 6px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.get-started-step:first-child { border-top: 0; padding-top: 0; }
+.get-started-step:last-child { padding-bottom: 0; }
+.get-started-state { justify-self: start; }
+.get-started-text strong { font-size: var(--font-md); }
+.get-started-text .description { margin: 2px 0 0; }
+.get-started-step.is-done .get-started-text strong { color: var(--muted); font-weight: 500; }
+.get-started-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; max-width: 30em; }
+.get-started-actions .initialize-prompt { justify-items: end; text-align: right; }
+.get-started-harness { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.get-started-harness-name { font-weight: 600; font-size: var(--font-sm); }
+@media (max-width: 760px) { .get-started-step { grid-template-columns: minmax(0, 1fr); } .get-started-actions { justify-content: flex-start; max-width: none; } .get-started-actions .initialize-prompt { justify-items: start; text-align: left; } }
+.badge.not-set-up { color: var(--status-warning); background: var(--status-warning-bg); border-color: var(--status-warning-line); white-space: nowrap; }
+.connector-not-set-up { color: var(--status-warning); }
+.majordomo-login { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: var(--font-sm); }
+.majordomo-login p { margin: 0; }
+.majordomo-login .tone-ok { color: var(--status-ok); }
+.majordomo-login .tone-stopped { color: var(--status-stopped); }
+.majordomo-login .majordomo-login-ask, .majordomo-login .error { flex-basis: 100%; }
+.majordomo-login.is-asking { background: var(--status-warning-bg); }
+.new-agent-login { margin: 0; }

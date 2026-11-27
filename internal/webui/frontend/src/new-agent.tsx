@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { LoginButton } from "./connector-ui";
+import { loginEmpty, type Connector } from "./connectors.mjs";
+import { configLogin, harnessConnector } from "./onboarding.mjs";
 import { displayNameError } from "./cells.mjs";
 import { ErrorNotice, useResource } from "./request";
 import { catalogPageLink } from "./routes";
 import { teamsLink } from "./teams.mjs";
+import { InitializePrompt } from "./initialize";
 
 // The New agent page (#1692): pick Claude or Codex, optionally name the agent, and kukeon copies that
 // harness's template Config (default-agent-<harness>, from the default team) into a new Config and
@@ -18,7 +22,7 @@ const titleOf = (harness: string) => harnessTitles[harness] ?? harness;
 const scopeOf = (c: Coordinates) => [c.realm, c.space, c.stack, c.name].filter((part): part is string => !!part);
 const stepText: Record<string, string> = { "create-cell": "creating its first cell", "start-cell": "starting its first cell" };
 
-export function NewAgentPage({ revision, onCreated }: { revision: number; onCreated: (agent: CreatedAgent) => void }) {
+export function NewAgentPage({ revision, onCreated, onChanged }: { revision: number; onCreated: (agent: CreatedAgent) => void; onChanged: () => void }) {
   const templates = useResource<{ templates: AgentTemplate[] }>("/api/agents/templates", revision);
   const list = templates.data?.templates ?? [];
   const available = list.filter(template => template.exists);
@@ -27,6 +31,20 @@ export function NewAgentPage({ revision, onCreated }: { revision: number; onCrea
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<AgentFailure>();
   const harness = available.some(template => template.harness === picked) ? picked : available[0]?.harness ?? "";
+  // The login the chosen harness's template logs in through (#1694): while it is empty, Log in first is
+  // offered next to Create. The list is re-read while a login session runs.
+  const catalog = useResource<Connector[]>("/api/connectors", revision);
+  const [tick, setTick] = useState(0);
+  const logins = useResource<unknown[]>("/api/connectors/logins", revision + tick);
+  const loginRunning = (logins.data ?? []).some(item => !!(item as { session?: unknown } | null)?.session);
+  useEffect(() => {
+    if (!loginRunning) return undefined;
+    const timer = window.setInterval(() => setTick(value => value + 1), 3000);
+    return () => window.clearInterval(timer);
+  }, [loginRunning]);
+  const connector = harnessConnector(catalog.data, harness);
+  const login = configLogin(logins.data, connector, available.find(template => template.harness === harness));
+  const loginFirst = connector && login && (login.state === loginEmpty || login.session) ? login : undefined;
   const nameError = displayNameError(name);
   async function create() {
     if (!harness || pending || nameError) return;
@@ -46,7 +64,7 @@ export function NewAgentPage({ revision, onCreated }: { revision: number; onCrea
     <p className="description">An agent is a Claude or Codex cell that knows it runs in kukeon. It has no project checkout; clone one in its terminal when you need it.</p>
     {templates.loading && !templates.data && <p role="status">Loading agent templates…</p>}
     {templates.error && <ErrorNotice error={templates.error} kind="Agent template" />}
-    {templates.data && !available.length && <div className="empty-state new-agent-missing" role="note"><h3>No agent templates</h3><p>Agents are copied from the templates of the <code>default</code> team, and none is stored yet. Run <code>kuke team init</code>, or see <a href={teamsLink()}>Teams</a>.</p></div>}
+    {templates.data && !available.length && <div className="empty-state new-agent-missing" role="note"><h3>No agent templates</h3><p>Agents are copied from the templates of the <code>default</code> team, and none is stored yet. Initialize stores them; see also <a href={teamsLink()}>Teams</a>.</p><InitializePrompt onChanged={onChanged} subject="the agent templates of the default team" /></div>}
     {list.length > 0 && <fieldset className="agent-harnesses" disabled={pending}>
       <legend>Harness</legend>
       <div className="agent-cards">{list.map(template => {
@@ -62,7 +80,11 @@ export function NewAgentPage({ revision, onCreated }: { revision: number; onCrea
     {available.length > 0 && <form className="new-agent-form" onSubmit={event => { event.preventDefault(); void create(); }}>
       <label>Name <span className="description">(optional)</span><input type="text" value={name} maxLength={63} placeholder={`${titleOf(harness)} agent`} disabled={pending} onChange={event => setName(event.target.value)} /></label>
       {nameError && <p className="error" role="alert">{nameError}</p>}
-      <div className="form-actions"><button type="submit" className="primary-action" disabled={!harness || pending || !!nameError}>{pending ? "Creating…" : "Create"}</button></div>
+      <div className="form-actions">
+        <button type="submit" className="primary-action" disabled={!harness || pending || !!nameError}>{pending ? "Creating…" : "Create"}</button>
+        {connector && loginFirst && <LoginButton connector={connector.name} title={connector.title || connector.name} volume={loginFirst.volume} state={loginFirst.state} running={!!loginFirst.session} method={loginFirst.method || undefined} idle="Log in first" disabled={pending} />}
+      </div>
+      {connector && loginFirst && <p className="description new-agent-login" role="note">{connector.title || connector.name} is not logged in for agents yet. Log in first, or create the agent and log in from its terminal.</p>}
     </form>}
     {failure && <div className="error" role="alert">
       <strong>{failure.step && failure.config ? "Agent stored, but not started" : failure.code === "template_not_found" ? "Template missing" : "Agent not created"}</strong>

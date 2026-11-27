@@ -6,6 +6,7 @@ import { ScheduleDetails, cellLinker, when } from "./schedule";
 import type { InventoryResource } from "./inventory";
 import { DaemonNav } from "./daemon";
 import { connectorsLink } from "./connector-ui";
+import { InitializePrompt } from "./initialize";
 import { connectorStatuses, stateResolved, type Connector } from "./connectors.mjs";
 
 // The connector issue filing uses (#1649, D9): kuke health report submit --file-issues reads GH_TOKEN, so
@@ -163,7 +164,7 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
       <div className="panel-body">
         {major.configs.loading && !major.configs.data && <p role="status">Loading sweep configs…</p>}
         {major.configs.error && <ErrorNotice error={major.configs.error} kind="Configs" />}
-        {major.configs.data && !major.sweeps.length && <p className="description" role="status">No health-sweep config found. Run <code>kuke team init</code> on the host to apply majordomo and its sweep task.</p>}
+        {major.configs.data && !major.sweeps.length && <div className="initialize-empty"><p className="description" role="status">No health-sweep config found. Initialize applies majordomo and its sweep task.</p><InitializePrompt onChanged={onChanged} subject="majordomo and its sweep task" /></div>}
         {suspended.length > 0 && suspended.length === major.sweeps.length && <EnableSweep configs={suspended} />}
         <ul className="health-sweeps">{major.sweeps.map(config => <SweepSchedule key={JSON.stringify([...configScope(config), config.metadata.name])} config={config} connector={filing} onRun={runSweep} running={running === config.metadata.name} inventory={inventory} />)}</ul>
         {sweepResult && <div className={sweepResult.tone === "error" ? "error" : "health-sweep-started"} role={sweepResult.tone === "error" ? "alert" : "status"}>{sweepResult.tone === "error" && <strong>Sweep did not start</strong>}<p>{sweepResult.message}</p></div>}

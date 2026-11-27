@@ -28,7 +28,7 @@ Release binaries are published for `amd64` and `arm64`.
 curl -fsSL https://kukeon.io/install.sh | bash
 ```
 
-The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the newest **edge** build (a rolling build of `main`), verifies its `sha256` checksums, installs `kuke` + `kukeond` + `kukebuild` + `kukepause` to `/usr/local/bin`, runs `sudo kuke init` to bring the daemon up, runs `sudo kuke team init` to store the `kuke` team (the majordomo; skipped with a warning when `git` is missing), and (on systemd hosts) installs `/etc/systemd/system/kukeond.service` so kukeond comes back automatically after a host or containerd restart. On systemd-less hosts the unit step is skipped with a notice — bring kukeond up manually after each reboot with `sudo kuke daemon start`. Pass `--check` to run the prereq checks only without touching the system:
+The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the newest **edge** build (a rolling build of `main`), verifies its `sha256` checksums, installs `kuke` + `kukeond` + `kukebuild` + `kukepause` to `/usr/local/bin`, runs `sudo kuke init` to bring the daemon up, runs `sudo kuke team init` to store the `kuke` team (the majordomo) and the `default` team (the agent templates), and (on systemd hosts) installs two units: `kukeond.service`, so kukeond comes back automatically after a host or containerd restart, and `kuke-serve.service`, the web UI on `http://localhost:5129`. Without `git`, or when `kuke team init` fails, the installer finishes the rest and exits 3 with the reason and the command to retry. On systemd-less hosts the unit steps are skipped with a notice — bring kukeond up manually after each reboot with `sudo kuke daemon start`, and run `kuke serve` for the web UI. Pass `--check` to run the prereq checks only without touching the system:
 
 ```bash
 curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
@@ -42,15 +42,28 @@ curl -fsSL https://kukeon.io/install.sh | KUKE_CHANNEL=stable bash
 
 Keep the host current with `sudo kuke update`, which moves it to the newest build of its channel and recreates the daemon. → See [docs/site/cli/kuke-update.md](docs/site/cli/kuke-update.md).
 
-After install completes you should see the daemon's realm/space/stack hierarchy provisioned and `kukeond` listening on its unix socket:
+The installer ends with the web UI's address and login:
 
 ```text
-Realm: default (namespace: default.kukeon.io)
-System realm: kuke-system (namespace: kuke-system.kukeon.io)
-Run path: /opt/kukeon
-...
-kukeond is ready (unix:///run/kukeon/kukeond.sock)
+✓ kukeon v0.10.0-77-gabc1234 (edge) installed and initialized
+
+Open the web UI:
+  http://localhost:5129
+  user:     root
+  password: <a 32-character token>
 ```
+
+### Open the web UI
+
+Open `http://localhost:5129` on the host (from another machine: `ssh -L 5129:localhost:5129 <host>` first) and sign in. The first page shows **Get started**, a checklist that takes a new host to a running agent:
+
+1. **Initialize** — stores the `kuke` and `default` teams. The installer has normally done it; the button runs it when `git` was missing at install time.
+2. **Log in to Claude or Codex** — in a terminal the page opens, or with a token.
+3. **Set up Git and GitHub** (recommended) — an SSH key from the host, a GitHub token, or an identity entered by hand.
+4. **Enable majordomo** (optional) — kukeon's own assistant.
+5. **Launch your first agent** — **New agent**, Claude or Codex.
+
+Every step is also a `kuke` command. → See [Getting Started](docs/site/getting-started.md).
 
 If you would rather drive each step yourself — installing onto an air-gapped host, or pinning a non-default release tag — see the [manual install steps](docs/site/install/install-linux.md).
 

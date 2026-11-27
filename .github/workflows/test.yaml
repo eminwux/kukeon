@@ -9,11 +9,17 @@ name: Test
 # pass; there every job runs, because the edge build must not depend on an
 # earlier commit having been green. There is no `push` trigger here: a second
 # run would test the same commit twice.
+#
+# The nightly run is the onboarding e2e alone: it is the one job that depends
+# on things no commit changes (the kukeon source fetched from GitHub, the
+# harness image pulled from ghcr.io), so it can break while main stands still.
 on:
   pull_request:
     branches:
       - main
   workflow_call:
+  schedule:
+    - cron: "17 3 * * *"
 
 # No job comments on the PR, publishes an artifact or pushes anything. The
 # minimal read-only default scopes the GITHUB_TOKEN to what `actions/checkout`
@@ -52,6 +58,7 @@ jobs:
       webui: ${{ steps.areas.outputs.webui }}
       harnesses: ${{ steps.areas.outputs.harnesses }}
       installer: ${{ steps.areas.outputs.installer }}
+      onboarding: ${{ steps.areas.outputs.onboarding }}
     steps:
       # On a pull request the checkout is the merge of the PR into main, so its
       # first parent is main and `HEAD^1..HEAD` is exactly what the PR changes.
@@ -65,10 +72,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          lint=false go=false e2e=false webui=false harnesses=false installer=false
-          if [ "$EVENT_NAME" != "pull_request" ]; then
+          lint=false go=false e2e=false webui=false harnesses=false installer=false onboarding=false
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "Nightly run: the onboarding e2e only."
+            onboarding=true
+          elif [ "$EVENT_NAME" != "pull_request" ]; then
             echo "Not a pull request: every job runs."
-            lint=true go=true e2e=true webui=true harnesses=true installer=true
+            lint=true go=true e2e=true webui=true harnesses=true installer=true onboarding=true
           else
             # A plain assignment, so `bash -e` stops the step when git fails;
             # a failure inside `< <(…)` would skip every job and pass (#1656).
@@ -84,7 +94,7 @@ jobs:
               case "$f" in
                 # This workflow and its caller: run everything.
                 .github/workflows/test.yaml|.github/workflows/edge.yaml)
-                  lint=true go=true e2e=true webui=true harnesses=true installer=true ;;
+                  lint=true go=true e2e=true webui=true harnesses=true installer=true onboarding=true ;;
                 # Makefile holds the recipes of the Go, web UI and installer jobs.
                 Makefile)
                   go=true e2e=true webui=true installer=true ;;
@@ -106,7 +116,7 @@ jobs:
                   harnesses=true go=true e2e=true ;;
                 internal/team/harnessassets/*|internal/team/harnessbuild/*|pkg/team/harness/*)
                   harnesses=true go=true e2e=true ;;
-                scripts/install.sh|docs/site/install.sh)
+                scripts/install.sh|docs/site/install.sh|scripts/install-test.sh)
                   installer=true ;;
                 # Go sources, and every other file in a Go source tree: test
                 # data and files that Go code embeds or reads in tests.
@@ -116,9 +126,21 @@ jobs:
                 *.go|*/go.mod|*/go.sum|go.work|go.work.sum|cmd/*|internal/*|pkg/*|e2e/*|team/*|kuketeam.yaml)
                   go=true e2e=true ;;
               esac
+              # The onboarding e2e (#1694) follows first-run setup through the
+              # web UI against a real daemon: the installer's hand-off, team
+              # init, the web server, the web UI and the team definitions. A
+              # separate `case`, because these paths also belong to the areas
+              # above. Makefile and Dockerfile hold its recipe and its daemon
+              # image.
+              case "$f" in
+                scripts/install.sh|internal/team/*|internal/webserver/*|internal/webui/*|team/*|pkg/team/*)
+                  onboarding=true ;;
+                e2e/e2e_onboarding_test.go|Makefile|Dockerfile|scripts/e2e-preflight.sh)
+                  onboarding=true ;;
+              esac
             done <<< "$files"
           fi
-          for area in lint go e2e webui harnesses installer; do
+          for area in lint go e2e webui harnesses installer onboarding; do
             echo "${area}=${!area}" | tee -a "$GITHUB_OUTPUT"
           done
 
@@ -359,6 +381,113 @@ jobs:
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$(go env GOCACHE)" "$(go env GOMODCACHE)"
 
+  # First-run onboarding against a real daemon (issue #1694): `kuke init` with
+  # the kukeond image built from this commit, `kuke serve`, and a browser that
+  # signs in and follows the Workbench's Get started checklist — Initialize, a
+  # GitHub token that also serves git, a login, a first agent — then enables
+  # majordomo. TestOnboarding_WebUI (e2e/) owns the daemon and starts
+  # internal/webui/frontend/tests/onboarding.spec.mjs.
+  #
+  # Same runner prerequisites as the e2e job above, plus Node.js and Chromium.
+  # It is the one job that needs the network at test time: team init fetches
+  # github.com/eminwux/kukeon at the commit `kuke` was built from — on a pull
+  # request, the merge commit, which GitHub serves by SHA — and the agent and
+  # majordomo cells pull the claude harness image at its pinned version. No
+  # vendor login happens: the spec fakes the login marker.
+  e2e-onboarding:
+    name: Onboarding e2e
+    needs: changes
+    if: needs.changes.outputs.onboarding == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+
+      # As in the e2e job: image pulls through systemd-resolved time out
+      # under load, and this job pulls a harness image of several hundred MB.
+      - name: Use static public DNS (bypass systemd-resolved)
+        run: |
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo rm -f /etc/resolv.conf
+          cat <<'EOF' | sudo tee /etc/resolv.conf > /dev/null
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+          nameserver 1.0.0.1
+          options timeout:2 attempts:3
+          EOF
+          getent hosts github.com > /dev/null
+          getent hosts ghcr.io > /dev/null
+
+      - name: Ensure standalone containerd is running
+        run: |
+          sudo systemctl start containerd
+          test -S /run/containerd/containerd.sock
+
+      - name: Install CNI plugins to /opt/cni/bin
+        env:
+          CNI_VERSION: v1.4.1
+        run: |
+          sudo mkdir -p /opt/cni/bin
+          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" \
+            | sudo tar -C /opt/cni/bin -xz
+          test -x /opt/cni/bin/bridge
+          test -x /opt/cni/bin/host-local
+          test -x /opt/cni/bin/loopback
+          test -x /opt/cni/bin/portmap
+
+      - name: Create kukeon system group
+        run: |
+          getent group kukeon > /dev/null || sudo groupadd --system kukeon
+          getent group kukeon
+
+      # Installed as the runner user, into a directory the root test run below
+      # is pointed at: under sudo HOME is root's, where Playwright would look
+      # for its browsers otherwise.
+      - name: Install frontend dependencies and the browser
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: |
+          cd internal/webui/frontend
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      # KUKEON_E2E_HOST_LAYOUT=1: the runner has no kukeon runtime, so the
+      # daemon is bootstrapped where an installed host has it (/opt/kukeon,
+      # /run/kukeon/kukeond.sock). Majordomo's Config mounts those paths, and
+      # its step runs in this layout only.
+      #
+      # The sudo, cache and stdio handling is the e2e job's; see the comments
+      # there. Nothing is written into the tree before `make` builds kuke: an
+      # untracked file would set vcs.modified and pin team sources to branch
+      # main instead of this commit (node_modules is ignored).
+      - name: Run the onboarding e2e as root
+        timeout-minutes: 45
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: |
+          GOCACHE="$(go env GOCACHE)"
+          GOMODCACHE="$(go env GOMODCACHE)"
+          stdbuf -oL -eL sudo env "PATH=$PATH" "GOCACHE=$GOCACHE" "GOMODCACHE=$GOMODCACHE" \
+            "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" CI=1 \
+            make e2e-onboarding KUKEON_E2E_HOST_LAYOUT=1 </dev/null > >(cat) 2> >(cat >&2)
+
+      - name: Return Go caches to the runner user
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$(go env GOCACHE)" "$(go env GOMODCACHE)"
+
   # Frontend source and the generated dist/ bundle are tested here and not by
   # the Go jobs: no Go test outside internal/webui imports the package, and the
   # e2e suite never asserts on the embedded asset bytes (#1437). The Playwright
@@ -444,6 +573,17 @@ jobs:
             echo "::error::docs/site/install.sh is stale. Run 'make install.sh' and commit the result."
             exit 1
           fi
+
+      # The parts of the installer that need no network, root or systemd
+      # (issue #1694): the kuke-serve.service unit renders with the invoking
+      # user, the kukeon group and the listen address; KUKE_SKIP_WEB_UI=1
+      # installs no unit; a stubbed failing `kuke team init` (and a host
+      # without git) prints the ✗ line and exits 3, and KUKE_SKIP_TEAM_INIT=1
+      # exits 0. The script sources install.sh as a library and touches
+      # nothing outside a temporary directory.
+      - name: web UI unit, KUKE_SKIP_WEB_UI and the team init exit status
+        if: ${{ !cancelled() }}
+        run: bash scripts/install-test.sh
 
       # Positive path: the GitHub-hosted ubuntu-latest runner already runs
       # containerd (Docker is preinstalled and live), which is the only daemon

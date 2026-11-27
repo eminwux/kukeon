@@ -483,6 +483,11 @@ func TestValidateMeta(t *testing.T) {
 		{"tag is not an identifier", opaque("Forge Hub", nil), "spec.connector"},
 		{"identity without a tag", opaque("", map[string]string{"account": "work"}), "spec.identity requires spec.connector"},
 		{"field is not an identifier", opaque("forge", map[string]string{"my field": "x"}), "is not an identifier"},
+		// A key kukeon writes itself (#1693): the git identity stored from a
+		// GitHub token names the token it was copied from.
+		{"reserved key", opaque("git", map[string]string{"kukeon.io/token-from": "github-token@default"}), ""},
+		{"another prefix", opaque("git", map[string]string{"example.com/token-from": "x"}), "is not an identifier"},
+		{"nested reserved key", opaque("git", map[string]string{"kukeon.io/a/b": "x"}), "is not an identifier"},
 		{"multi-line value", opaque("forge", map[string]string{"account": "a\nb"}), "must be a single line"},
 		{"oversized value", opaque("forge", map[string]string{"account": strings.Repeat("a", 1025)}), "at most 1024 bytes"},
 		{

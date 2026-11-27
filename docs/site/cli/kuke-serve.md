@@ -6,7 +6,7 @@ Serve the local browser UI in the foreground.
 kuke serve [flags]
 ```
 
-`kuke serve` starts the web UI's HTTP server as the invoking user and prints the URL to open (`http://localhost:5129` by default). It talks to kukeond over the configured socket, so the user needs permission to connect to it (see [Daily use without sudo](../getting-started.md#4-daily-use-without-sudo)). Ctrl+C or SIGTERM closes the server; kukeond and the workloads keep running. The frontend is embedded in the `kuke` binary.
+`kuke serve` starts the web UI's HTTP server as the invoking user and prints the URL to open (`http://localhost:5129` by default). It talks to kukeond over the configured socket, so the user needs permission to connect to it (see [Daily use without sudo](../getting-started.md#6-daily-use-without-sudo)). Ctrl+C or SIGTERM closes the server; kukeond and the workloads keep running. The frontend is embedded in the `kuke` binary.
 
 The UI covers the hierarchy (realms, spaces, stacks, cells and their containers), cell lifecycle actions, cell terminals in the browser, the daemon's status, health and logs, the majordomo panel, and the Blueprints, Configs, Volumes, Secrets, Connectors, Teams, Sources and Images pages. The full description is in [docs/web-server.md](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md).
 

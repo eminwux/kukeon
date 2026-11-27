@@ -29,6 +29,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/gitcred"
 )
 
@@ -147,9 +148,19 @@ func Run(ctx context.Context, args ...string) ([]byte, error) {
 	)
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, errors.New(guidance)
+		return nil, runError(err)
 	}
 	return output, nil
+}
+
+// runError is what a failed git subprocess reports: that git itself is
+// missing, which no retry fixes, or the guidance. Git's output is never part
+// of either.
+func runError(err error) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return errdefs.ErrGitNotFound
+	}
+	return errors.New(guidance)
 }
 
 func sshCommand(ctx context.Context, env []string) (string, error) {
@@ -163,7 +174,7 @@ func sshCommand(ctx context.Context, env []string) (string, error) {
 	if err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-			return "", errors.New(guidance)
+			return "", runError(err)
 		}
 	}
 	command := strings.TrimSpace(string(output))

@@ -286,7 +286,7 @@ secrets:
 | `stack`                    | string | no       | Scopes the reference to a stack within `space` |
 | `cell`                     | string | no       | Scopes the reference to a cell within `stack`  |
 
-File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>` on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.
+File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>` on the host (the `secrets` directory beside the daemon's socket, when the daemon serves on another one), with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.
 
 ### ContainerRepo
 

@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { configLabel } from "./cells.mjs";
+import { cardAuto, cardModes, type CardMode } from "./onboarding.mjs";
 
 // Per-browser UI preferences (#1652, #1686). Each setting is one row of this
 // table: a localStorage key, a label, and a default. A missing or unreadable
@@ -26,6 +27,7 @@ type SettingTypes = {
   showSidebarGroupBy: boolean;
   showGridSearch: boolean;
   showGridGroupBy: boolean;
+  getStarted: CardMode;
 };
 export type SettingName = keyof SettingTypes;
 export type Settings = { [K in SettingName]: SettingTypes[K] };
@@ -72,10 +74,17 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
   showSidebarGroupBy: switchSetting("kukeon-sidebar-show-group-by", "Show Group by in sidebar", false, defaultStyleOnly),
   showGridSearch: switchSetting("kukeon-grid-show-search", "Show search in grid", true),
   showGridGroupBy: switchSetting("kukeon-grid-show-group-by", "Show Group by in grid", true, defaultStyleOnly),
+  // The Workbench's Get started card (#1694): shown while a required step is open, hidden once dismissed
+  // or completed, shown again from the user menu. It has no row on the Settings page.
+  getStarted: {
+    key: "kukeon-get-started", label: "Get started", defaultValue: cardAuto,
+    parse: raw => cardModes.includes(raw as CardMode) ? raw as CardMode : undefined,
+    format: value => value,
+  },
 };
 
 // The Profile section of the Settings page: its groups and their settings, in order.
-export const profileGroups: readonly { title: string; settings: readonly Exclude<SettingName, "theme">[] }[] = [
+export const profileGroups: readonly { title: string; settings: readonly Exclude<SettingName, "theme" | "getStarted">[] }[] = [
   { title: "Cell list", settings: ["cellListStyle", "defaultGroupBy"] },
   { title: "Sidebar", settings: ["showCellScope", "showTerminalStatus", "showSidebarSearch", "showSidebarGroupBy"] },
   { title: "Workbench grid", settings: ["showGridSearch", "showGridGroupBy"] },

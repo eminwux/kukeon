@@ -269,7 +269,10 @@ e2e: test-e2e
 #
 # Issue #284 collapsed KUKE_INIT_SERVER_CONFIGURATION into KUKEOND_CONFIGURATION
 # — one env var, one source of truth, the same path the daemon honours.
-test-e2e: kuke kukeond kuketty kukepause kukebuild
+#
+# The build is the e2e-image target, shared with e2e-onboarding below.
+.PHONY: e2e-image
+e2e-image: kuke kukeond kuketty kukepause kukebuild
 	./scripts/e2e-preflight.sh $(CURDIR)
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE) into kuke-system for e2e"
 	rm -rf $(KUKEON_E2E_STATE_DIR) && mkdir -p $(KUKEON_E2E_STATE_DIR)
@@ -277,6 +280,8 @@ test-e2e: kuke kukeond kuketty kukepause kukebuild
 		--root $(KUKEON_E2E_BUILD_ROOT) \
 		--build-arg VERSION=v0.0.0-e2e .
 	ctr --namespace kuke-system.kukeon.io images export $(KUKEON_E2E_IMAGE_TAR) $(KUKEON_E2E_IMAGE)
+
+test-e2e: e2e-image
 	@echo "Running e2e tests using binaries in project root"
 	@if [ -x /.kukeon/bin/kuketty ]; then \
 		echo "[nested mode: kuke init --run-path <tempdir> derives <tempdir>/kukeond.sock; parent dev cell's /run/kukeon/ socket untouched]"; \
@@ -287,6 +292,42 @@ test-e2e: kuke kukeond kuketty kukepause kukebuild
 		KUKEON_E2E_IMAGE_TAR=$(KUKEON_E2E_IMAGE_TAR) \
 		KUKEOND_CONFIGURATION=/dev/null \
 		env -u KUKEOND_SOCKET go test -v ./e2e
+
+# First-run onboarding against a real daemon (issue #1694): `kuke init` with
+# the image e2e-image built, `kuke serve`, and a browser that follows the
+# Workbench's Get started checklist (internal/webui/frontend/tests/onboarding.spec.mjs,
+# started by TestOnboarding_WebUI in e2e/). It has the prerequisites of
+# `make e2e` (root, a standalone containerd, CNI plugins) plus Node.js with
+# the frontend's node_modules (`make web-ui`, or `npm ci` in
+# internal/webui/frontend), the Playwright Chromium (`npx playwright install
+# chromium` there), git, and network access to github.com and ghcr.io: team
+# init fetches the kukeon source at the revision `kuke` was built from, and
+# the agent and majordomo cells pull the claude harness image.
+#
+# KUKEON_E2E_ONBOARDING=1 is what un-skips the test; plain `make e2e` leaves
+# it skipped, so the Go e2e job needs no Node.js. -count=1 keeps a cached
+# pass from standing in for a run. On a host whose containerd store is small
+# (a kukeon dev cell), run it with KUKEON_E2E_RECLAIM_BUILD=1: the test then
+# prunes the image build's layers before the harness image is pulled.
+#
+# By default the daemon runs under a temporary run path, like the rest of the
+# e2e suite, and the majordomo step is skipped: majordomo's Config mounts the
+# standard host paths (/opt/kukeon/bin/client, /run/kukeon/kukeond).
+# KUKEON_E2E_HOST_LAYOUT=1 bootstraps the daemon in the standard layout
+# (/opt/kukeon, /run/kukeon/kukeond.sock) and runs every step. It is for a
+# host with no kukeon runtime (CI): the test refuses to start otherwise.
+.PHONY: e2e-onboarding
+e2e-onboarding: e2e-image
+	@echo "Running the onboarding e2e using binaries in project root"
+	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) \
+		E2E_BIN_DIR=$(CURDIR) \
+		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
+		KUKEON_E2E_IMAGE_TAR=$(KUKEON_E2E_IMAGE_TAR) \
+		KUKEOND_CONFIGURATION=/dev/null \
+		KUKEON_E2E_ONBOARDING=1 \
+		KUKEON_E2E_RECLAIM_BUILD=$(KUKEON_E2E_RECLAIM_BUILD) \
+		KUKEON_E2E_HOST_LAYOUT=$(KUKEON_E2E_HOST_LAYOUT) \
+		env -u KUKEOND_SOCKET go test -v -count=1 -timeout 40m -run '^TestOnboarding_' ./e2e
 
 tag:
 	git tag -s v$(KUKEON_VERSION) -m "Release version $(KUKEON_VERSION)"

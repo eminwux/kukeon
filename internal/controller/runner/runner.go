@@ -476,7 +476,12 @@ type Exec struct {
 type Options struct {
 	ContainerdSocket string
 	RunPath          string
-	CniConf          cni.Conf
+	// SecretsStagingDir is the host directory file-mounted secrets and git
+	// bundles are staged in before containers bind-mount them
+	// (ctr.SecretsStagingDir: beside the daemon's socket). Empty means
+	// ctr.DefaultSecretsStagingDir.
+	SecretsStagingDir string
+	CniConf           cni.Conf
 	// ForceRegenerateCNI forces ensureSpaceCNIConfig to rewrite an existing conflist
 	// even when one is present and its bridge name matches SafeBridgeName. Set by
 	// `kuke init --force-regenerate-cni` as an operator escape hatch.
@@ -543,6 +548,9 @@ func (r *Exec) daemonDefaultBuildOpts() []ctr.BuildOption {
 	}
 	if r.opts.RunPath != "" {
 		opts = append(opts, ctr.WithSecretRunPath(r.opts.RunPath))
+	}
+	if r.opts.SecretsStagingDir != "" {
+		opts = append(opts, ctr.WithSecretsStagingDir(r.opts.SecretsStagingDir))
 	}
 	if r.opts.KukeonGroupGID > 0 {
 		//nolint:gosec // KukeonGroupGID is a real GID (uint16 territory); the

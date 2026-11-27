@@ -19,6 +19,7 @@ package webserver
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -30,10 +31,23 @@ func resourceRoute(
 	dial Dial,
 	read func(context.Context, kukeonv1.Client, *http.Request) (any, error),
 ) http.HandlerFunc {
+	return timedRoute(dial, 0, read)
+}
+
+// timedRoute is resourceRoute with the deadline the caller names; zero means
+// requestTimeout for a read and creationTimeout for a POST.
+func timedRoute(
+	dial Dial,
+	timeout time.Duration,
+	read func(context.Context, kukeonv1.Client, *http.Request) (any, error),
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		timeout := requestTimeout
-		if r.Method == http.MethodPost {
-			timeout = creationTimeout
+		timeout := timeout
+		if timeout == 0 {
+			timeout = requestTimeout
+			if r.Method == http.MethodPost {
+				timeout = creationTimeout
+			}
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()

@@ -4,14 +4,15 @@ Run the local equivalent of every CI gate your change triggers before pushing.
 All of them are jobs of one workflow, `.github/workflows/test.yaml`. Each job
 runs only when the files it covers changed; the rest show as skipped.
 
-| Job                 | Runs when these change                                                                                                 | Run locally                                                                              |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                              | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check` |
-| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                         |
-| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                               |
-| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                            | `make web-ui-check`, `make web-ui-unit` and `make web-ui-test`                           |
-| `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                          | `make test-harnesses`                                                                    |
-| `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `Makefile`                                                               | `make install.sh`, then `git diff --exit-code docs/site/install.sh`                      |
+| Job                 | Runs when these change                                                                                                 | Run locally                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                              | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check`       |
+| `Go unit tests`     | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                               |
+| `Go e2e tests`      | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                                     |
+| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                            | `make web-ui-check`, `make web-ui-unit` and `make web-ui-test`                                 |
+| `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                          | `make test-harnesses`                                                                          |
+| `Onboarding e2e`    | `scripts/install.sh`, `internal/team/**`, `internal/webserver/**`, `internal/webui/**`, `team/**`, `pkg/team/**`, …    | `make e2e-onboarding` (root required; see [below](#make-e2e-onboarding))                       |
+| `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `scripts/install-test.sh`, `Makefile`                                    | `make install.sh`, `git diff --exit-code docs/site/install.sh`, `bash scripts/install-test.sh` |
 
 A change under `internal/webui/frontend/` or `internal/webui/dist/` runs the
 web UI job and not the Go jobs. The `Detect changed areas` job at the top of
@@ -30,6 +31,42 @@ with one exception: [`goconst`](#goconst-and-the-new-lines-filter).
 
 CI runs `make web-ui-test` with four Playwright workers (it sets `CI`); a local
 run uses one. To reproduce a CI-only failure, run `CI=1 make web-ui-test`.
+
+The same workflow also runs every night, with the `Onboarding e2e` job alone:
+it is the one job that depends on things no commit changes.
+
+## `make e2e-onboarding`
+
+`make e2e-onboarding` is first-run onboarding against a real daemon: `kuke
+init` with a kukeond image built from your tree, `kuke serve`, and a browser
+that signs in and follows the Workbench's Get started checklist, then enables
+majordomo (`internal/webui/frontend/tests/onboarding.spec.mjs`, started by
+`TestOnboarding_WebUI` in `e2e/`). On top of what `make e2e` needs it needs:
+
+- Node.js with the frontend's dependencies and the Playwright Chromium:
+  `make web-ui`, then `npx playwright install chromium` in
+  `internal/webui/frontend`;
+- `git`, and network access to `github.com` and `ghcr.io`. Team init fetches
+  the kukeon source at the revision `kuke` was built from: the commit of a
+  clean checkout, which must be on GitHub (push the branch first), or branch
+  `main` for a modified tree. The agent and majordomo cells pull the claude
+  harness image at its pinned version;
+- room in containerd's store for that image beside the image build. On a host
+  where the store is small, such as a kukeon dev cell's 4 GB tmpfs, run
+  `make e2e-onboarding KUKEON_E2E_RECLAIM_BUILD=1`: the test then prunes the
+  build's layers before the harness image is pulled.
+
+No vendor login happens: the test fakes the login marker in the agent
+template's state volume. Plain `make e2e` skips the test.
+
+By default the daemon runs under a temporary run path, like the rest of the
+e2e suite, and the test stops before **Enable majordomo**: majordomo's Config
+bind-mounts the standard host paths (`/opt/kukeon/bin/client`,
+`/run/kukeon/kukeond`), which only a daemon in the standard layout provides.
+CI runs `make e2e-onboarding KUKEON_E2E_HOST_LAYOUT=1`, which bootstraps the
+daemon at `/opt/kukeon` and `/run/kukeon/kukeond.sock` and runs every step.
+Use it only on a host with no kukeon runtime; the test refuses to start when
+it finds one.
 
 ## `make fmt-check`
 

@@ -34,6 +34,22 @@ import (
 // typical deployments.
 const DefaultSecretsStagingDir = "/run/kukeon/" + consts.KukeonSecretsStagingSubdir
 
+// SecretsStagingDir returns the staging directory of a daemon serving on
+// socketPath: the secrets directory beside its socket. kukeond runs in a cell
+// that bind-mounts only its socket directory from the host, and containerd
+// resolves a container's bind-mount sources on the host, so a staging
+// directory anywhere else exists only inside the daemon's own container and
+// every cell with a file-mounted secret or a git block fails to start. On a
+// standard host the socket is /run/kukeon/kukeond.sock and the result is
+// DefaultSecretsStagingDir, which is also the result for an empty socketPath
+// (a process that does not know the daemon's socket).
+func SecretsStagingDir(socketPath string) string {
+	if strings.TrimSpace(socketPath) == "" {
+		return DefaultSecretsStagingDir
+	}
+	return filepath.Join(filepath.Dir(socketPath), consts.KukeonSecretsStagingSubdir)
+}
+
 // secretFileMode is the mode applied to staged secret files that are bind-
 // mounted into containers. Fixed at 0400 per the Container-secret contract.
 const secretFileMode os.FileMode = 0o400

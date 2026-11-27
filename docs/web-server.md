@@ -6,6 +6,12 @@ closes the HTTP listener and request-owned daemon connections; it does not stop
 kukeond or workloads. The binary embeds all frontend assets and needs no Node.js
 or external asset files at runtime.
 
+On a systemd host the [installer](site/install/install-linux.md#web-ui-service)
+runs the same command as `kuke-serve.service`, so the web UI is already on
+`http://localhost:5129` after an install and after every reboot. The service
+runs as the user who ran the installer through `sudo` (or as root), with the
+`kukeon` group; `KUKE_SKIP_WEB_UI=1` skips it.
+
 ## Sign in
 
 The UI asks for a user and password before it shows anything else. There is
@@ -54,6 +60,63 @@ sidebar. On it neither side of the switch is current, and both still navigate.
 `#/`, the empty hash, `#/workspace` without a cell scope and unparsable URLs
 open the Workbench grid. `#/resources`, `#/administration` and `#/dashboard`
 open the Overview. No earlier URL changed shape.
+
+### Get started
+
+On a new host the Workbench shows a **Get started** card above the grid: the
+five steps from an installed host to a running agent. Each step's state is
+derived from data the UI already reads, and nothing about it is stored in
+kukeond.
+
+| Step                          | Kind        | Done when                                                                                                | Action                                                                                                        |
+| ----------------------------- | ----------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Initialize**                | required    | `GET /api/teams` lists the `kuke` and `default` teams.                                                   | **Initialize** (see [Initialize](#initialize)).                                                               |
+| **Log in to Claude or Codex** | required    | A login identity of a harness connector is `logged in`, or a Secret tagged with one is stored (a token). | Per harness: **Log in**, which opens the identity cell's terminal, and **Use a token**, the connector's page. |
+| **Set up Git and GitHub**     | recommended | A Secret tagged with the git connector, or with a connector whose token can serve git, is stored.        | **New Git identity**: the git connector's New identity page with its three choices.                           |
+| **Enable majordomo**          | optional    | A [majordomo](#majordomo) cell exists.                                                                   | **Enable majordomo** opens the panel.                                                                         |
+| **Launch your first agent**   | required    | A cell exists whose Config was copied from an agent template (`kukeon.io/agent-template`).               | **New agent** (see [New agent](#new-agent)).                                                                  |
+
+The step titles come from the connector catalog: a harness connector is one
+with `harness`, and the git step names the git-delivered connector and every
+connector that advertises `tokenForGit`. **Log in** targets the login identity
+the harness's agent template logs in through, so the login it stores is the
+one **New agent** uses; before **Initialize** there is no template and the step
+says so. While a login session runs the step offers **Open login session** and
+the login identities are re-read every three seconds, so the step turns
+**Done** when the identity cell ends.
+
+The card shows while a required step is open. Recommended and optional steps
+never keep it open; they stay listed as **Recommended** and **Optional** until
+done. When the last required step is done the card hides for good.
+**Dismiss** hides it earlier. **Get started** in the [user menu](#layout-and-appearance)
+opens the Workbench and shows the card again, whatever its steps say. The
+choice is kept in this browser as `kukeon-get-started` (`auto`, `hidden` or
+`shown`); a hidden card makes no requests.
+
+### Initialize
+
+**Initialize** is `kuke team init` from the browser (`POST /api/teams/init`):
+`kuke serve` fetches the kukeon source with `git`, as the account running it,
+and stores the `kuke` team, the `default` team, the initial `TeamDefaults` and
+the kukeon Source. `kuke init`, which creates the daemon, stays a CLI and
+installer step.
+
+Every empty state that depends on those teams shows the button, with the
+command as secondary text: the Get started card, the sidebar's Majordomo entry
+and the majordomo panel, the Teams list, **New Config** without Blueprints,
+**New agent** without templates, the Sources list, and the Health page's sweep
+schedule. They share one run: while it is in progress each of them shows
+**Initializing… fetching kukeon source**, and when it ends the inventory and
+the catalog are re-read, so the page updates without a reload.
+
+- **Already initialized** (409 `already_initialized`): the kuke team is
+  stored. The prompt offers **Reapply**, the kuke team's
+  [reapply route](#teams-http-api), which recomposes it from its stored
+  declaration. Resetting a team (`kuke team init --force`) stays a CLI command.
+- **git is not installed** (422 `git_missing`): the host running `kuke serve`
+  has no `git`. Install it there and choose **Initialize** again.
+- Any other failure (422 `team_failed`) shows the operation's own message; git
+  output is never part of it.
 
 ### Workbench grid
 
@@ -397,10 +460,13 @@ majordomo, even if it selects that role.
 A **Majordomo** entry is always at the top of the sidebar (and on the collapsed
 rail). It shows the active majordomo cell's state — with a count badge when there is
 more than one — **Not enabled** when the configs exist but no cell does, or
-**Needs kuke team init** when no majordomo config is found. Clicking it opens
+**Not initialized** when no majordomo config is found, with an
+[**Initialize**](#initialize) button under the entry. Clicking the entry opens
 the panel.
 
-- **No majordomo configs**: the panel says to run `kuke team init` on the host.
+- **No majordomo configs**: the panel says majordomo is not installed and
+  offers **Initialize**, with `kuke team init` as the command to run on the
+  host instead.
 - **Configs, no cell**: pick a harness config and click **Enable majordomo**.
   This creates one cell named `majordomo` from that config, through the same
   create-from-config requests as [Create a Cell](#create-a-cell), and starts
@@ -426,6 +492,29 @@ cell, the header's **Add majordomo** button shows the setup form restricted to
 those Configs, with **Cancel**. It creates and starts a cell named after the
 chosen Config (the first cell is still `majordomo`) and makes it the active
 tab. No limit is enforced; the layout is designed for three tabs, and more wrap.
+
+### Harness login
+
+A majordomo Config whose harness keeps its login in a state volume reports that
+login in `status.connectors` (`login.state`). The panel shows it as a status
+line under its header, for the Config of the setup form while nothing is
+enabled and for the active cell's Config afterwards: **Claude: logged in** or
+**Claude: not logged in**. A Config on a token method, or one that reports no
+login, shows no line.
+
+- **Log in**, shown while the login is empty, starts the identity cell of the
+  majordomo state volume (`POST /api/connectors/{connector}/login`) and opens
+  its terminal in the main view; the panel stays docked. While that session
+  runs the button reads **Open login session** and the login identities are
+  re-read every three seconds; when the identity cell ends the Configs are
+  re-read and the line follows.
+- **Enable majordomo** (and **Add majordomo**) on a Config whose login is
+  empty asks first: the same line and **Log in**, with **Continue anyway**,
+  which creates and starts the cell as usual. Its harness then asks for the
+  login in majordomo's terminal.
+
+Majordomo's login is its own: one login identity serves one role, so logging
+in for agents (the Get started step) does not log majordomo in.
 
 ### Docked panel
 
@@ -797,7 +886,11 @@ this by the delivery handler only, never by a connector's name.
 
 The list shows, per connector, how it is delivered (one line per method), how
 many identities are stored, how many Configs require it, and how many of those
-have no identity. A connector with such Configs carries a **Needs a default**
+have no identity. A connector with no identity to use — no Secret tagged with
+it, and no login identity that exists and holds a login — is marked
+**Not set up — recommended** there, and its page says **Not set up —
+recommended for …**, worded from the connector's description. A team's state
+volume that no cell created yet, or that nobody logged in to, does not count. A connector with such Configs carries a **Needs a default**
 badge and a **Set a default** link that opens the connector on the first
 affected Config's scope.
 
@@ -915,8 +1008,8 @@ A secret binding's `source.env` / `source.file` is read by that process.
 - **Teams list**: every stored team with its project URL and ref, roles,
   harnesses (or "defaults" when inherited) and number of Configs. The `kuke`
   and `default` system teams are badged, cannot be deleted, and the page names
-  the team in its system-team note; when `kuke` is not stored the page says to
-  run `kuke team init`. **New team** opens the wizard.
+  the team in its system-team note; when `kuke` is not stored the page offers
+  [**Initialize**](#initialize). **New team** opens the wizard.
 - **New team** (`#/new-team`, `kuke create team`) is a wizard of six steps;
   **Next** stays disabled while a step has problems and **Back** keeps every
   input:
@@ -1222,7 +1315,8 @@ resource, catalog, and hierarchy bookmarks still open their pages; browser
 history keeps working across both views.
 
 The user menu (the avatar after **Refresh**) shows the signed-in user, links to
-**Settings** and has **Sign out**. Enter or Space opens the menu and Escape
+**Settings** and to **Get started** (the Workbench with its
+[Get started](#get-started) card shown again), and has **Sign out**. Enter or Space opens the menu and Escape
 closes it; focus returns to the avatar.
 
 ### Settings
@@ -1370,11 +1464,13 @@ resolution of every connector under `connectors`.
 
 A declaration travels as a YAML string in both directions; only plans,
 summaries and results are JSON. Every route that fetches from git is a `POST`
-and gets the creation timeout.
+and gets the creation timeout; `POST /api/teams/init` gets the lifecycle
+timeout (five minutes).
 
 | Method | Path                          | Purpose                                                                                                  |
 | ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                  |
+| `POST` | `/api/teams/init`             | `kuke team init`: store the `kuke` and `default` teams. Response `{ "teams", "notes" }`. See below.      |
 | `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.            |
 | `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                         |
 | `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                    |
@@ -1390,6 +1486,15 @@ and gets the creation timeout.
 | `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
 | `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
 
+- `POST /api/teams/init` takes an empty JSON object and, like reapply and
+  delete, requires `Content-Type: application/json`. Its response lists the
+  teams it applied, in order — `{ "team", "resources", "configs",
+"blueprints", "missingSecrets", "notes" }` each — and, in `notes`, the remarks
+  about a team it left alone (a stored `default` team is kept; a user's own
+  team named `default` is never replaced). A stored `kuke` team is a 409
+  `already_initialized`; a host without `git` is a 422 `git_missing`; a source
+  that cannot be fetched is a 422 `team_failed`. The route never resets a
+  team.
 - A team **summary** is `{ "name", "realm", "projectUrl", "projectRef",
 "roles", "rolesInherited", "harnesses", "harnessesInherited", "configs",
 "system" }`.
@@ -1547,7 +1652,12 @@ reads daemon storage directly or introduces an independent resource store.
 Workbench, is `kuke create agent`: pick **Claude** or **Codex**, optionally
 give the agent a name (at most 63 characters, no control characters), and
 **Create**. Each harness shows **Template ready** or **Template missing**;
-when no template is stored the page says to run `kuke team init`. The server
+when no template is stored the page offers [**Initialize**](#initialize).
+While the login the chosen harness's template logs in through is empty,
+**Log in first** is shown next to **Create**: it opens the identity cell of
+that state volume, like **Log in** on the connector's page. **Create** works
+either way; an agent created without a login asks for it in its own terminal.
+The server
 copies the harness's agent template (`default-agent-claude` or
 `default-agent-codex`, stored by the [`default` team](site/concepts/team.md#the-default-team))
 into a Config of its own, creates its first cell and starts it, then the UI
