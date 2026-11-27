@@ -43,8 +43,8 @@ The knob is plumbed exactly like `cgroupRoot`: `ServerConfiguration.spec.podSubn
 
 - `KUKEON_POD_SUBNET_CIDR`, when it survives the sudo boundary (`kuke init` reads it in-process);
 - `podSubnetCIDR` from the server configuration `kuke init` and the kukeond it starts read: `--server-configuration` (the dev profile's `kukeond-dev.yaml`), else `KUKEOND_CONFIGURATION`, else `/etc/kukeon/kukeond.yaml`. When that file has no `podSubnetCIDR`, the compiled-in default `10.88.0.0/16` is checked;
-- `podSubnetCIDR` from `KUKE_CONFIGURATION`'s client configuration, when set;
-- the subnet of every space already persisted under `<run-path>/data/<realm>/<space>/` (conflist IPAM subnet, else `network.json`). A space keeps its subnet whatever the configuration says now.
+- `podSubnetCIDR` from the client configuration `kuke init` reads: `KUKE_CONFIGURATION`, else root's `~/.kuke/kuke.yaml` (read only when the home directory is known, like kuke);
+- the subnet of every space already persisted under `<run-path>/data/<realm>/<space>/` (conflist IPAM subnet, else `network.json`). A space keeps its subnet whatever the configuration says now. The run path resolves like `kuke init`'s: `--run-path`, else `KUKEON_RUN_PATH`, else the server configuration's `runPath`, else the client configuration's `runPath`, else `/opt/kukeon`.
 
 Bridges this instance already owns are exempt: the bridge named in a persisted space's conflist, for addresses and routes inside that space's subnet. So a rerun with its bridges still up passes, but a foreign address on the same bridge still conflicts. There is no flag to bypass the check.
 

@@ -60,7 +60,8 @@ type resolution struct {
 
 // resolveConfig mirrors cmd/kuke/shared.LoadServerConfigurationFromFlag and
 // the client loader: an explicit path beats its env var, which beats the
-// default file; KUKEON_POD_SUBNET_CIDR beats the file's podSubnetCIDR, which
+// default file; the run path is flag > env > server runPath > client runPath >
+// default; KUKEON_POD_SUBNET_CIDR beats the file's podSubnetCIDR, which
 // beats the compiled-in default.
 //
 // Every value one of the processes can end up with is a candidate, because
@@ -100,11 +101,22 @@ func resolveConfig(lookupEnv func(string) (string, bool), serverPath, runPath st
 	if err != nil {
 		return res, err
 	}
-	if clientPath := env(config.KUKE_CONFIGURATION.Key); clientPath != "" {
+	// The client configuration path resolves like kuke's
+	// loadClientConfiguration: KUKE_CONFIGURATION, else the default
+	// ~/.kuke/kuke.yaml. The default is read only when the home directory is
+	// known; otherwise it is a relative path kuke ignores too (#1550).
+	clientPath := env(config.KUKE_CONFIGURATION.Key)
+	_, clientEnvSet := lookupEnv(config.KUKE_CONFIGURATION.Key)
+	if clientPath == "" {
+		clientPath = config.DefaultClientConfigurationFile()
+	}
+	var clientRunPath string
+	if clientEnvSet || config.HomeDirKnown() {
 		client, loadErr := clientconfig.Load(clientPath)
 		if loadErr != nil {
 			return res, loadErr
 		}
+		clientRunPath = strings.TrimSpace(client.Spec.RunPath)
 		if v := strings.TrimSpace(client.Spec.PodSubnetCIDR); v != "" {
 			if err = res.add(v, "podSubnetCIDR in "+clientPath); err != nil {
 				return res, err
@@ -118,6 +130,11 @@ func resolveConfig(lookupEnv func(string) (string, bool), serverPath, runPath st
 	}
 	if res.RunPath == "" {
 		res.RunPath = strings.TrimSpace(server.Spec.RunPath)
+	}
+	if res.RunPath == "" {
+		// kuke applies the client runPath first; the server configuration's
+		// runPath, applied later by the admin verbs, overrides it.
+		res.RunPath = clientRunPath
 	}
 	if res.RunPath == "" {
 		res.RunPath = config.DefaultRunPath()

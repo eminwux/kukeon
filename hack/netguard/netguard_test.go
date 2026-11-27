@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/hostnet"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -49,6 +50,16 @@ func nestedCell() hostnet.State {
 			{Table: hostnet.MainTable, Link: "eth0", Dst: pfx("10.88.0.0/24")},
 		},
 	}
+}
+
+// isolateHome points HOME at an empty directory so the default client
+// configuration (~/.kuke/kuke.yaml) resolveConfig reads is the test's, not
+// the host's. It returns that directory.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
 }
 
 func envMap(m map[string]string) func(string) (string, bool) {
@@ -86,6 +97,7 @@ func candidates(res resolution) []string {
 }
 
 func TestResolveConfigOverrides(t *testing.T) {
+	home := isolateHome(t)
 	dir := t.TempDir()
 	runPath := filepath.Join(dir, "run")
 	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
@@ -93,11 +105,13 @@ func TestResolveConfigOverrides(t *testing.T) {
 	client := writeFile(t, filepath.Join(dir, "kuke-dev.yaml"),
 		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.90.0.0/16\n")
 	missing := filepath.Join(dir, "absent.yaml")
+	defaultClient := filepath.Join(home, ".kuke", "kuke.yaml")
 
 	cases := []struct {
 		name       string
 		env        map[string]string
 		serverFlag string
+		homeClient string // body of ~/.kuke/kuke.yaml; empty means absent
 		want       []string
 	}{
 		{
@@ -143,9 +157,36 @@ func TestResolveConfigOverrides(t *testing.T) {
 				"10.90.0.0/16 podSubnetCIDR in " + client,
 			},
 		},
+		{
+			// kuke init falls back to ~/.kuke/kuke.yaml without
+			// KUKE_CONFIGURATION and applies its podSubnetCIDR.
+			name:       "default client configuration",
+			serverFlag: dev,
+			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n",
+			want: []string{
+				"10.89.0.0/16 podSubnetCIDR in " + dev,
+				"10.92.0.0/16 podSubnetCIDR in " + defaultClient,
+			},
+		},
+		{
+			name:       "KUKE_CONFIGURATION beats the default client configuration",
+			env:        map[string]string{"KUKE_CONFIGURATION": client},
+			serverFlag: dev,
+			homeClient: "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n",
+			want: []string{
+				"10.89.0.0/16 podSubnetCIDR in " + dev,
+				"10.90.0.0/16 podSubnetCIDR in " + client,
+			},
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			if err := os.Remove(defaultClient); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if tt.homeClient != "" {
+				writeFile(t, defaultClient, tt.homeClient)
+			}
 			res, err := resolveConfig(envMap(tt.env), tt.serverFlag, runPath)
 			if err != nil {
 				t.Fatal(err)
@@ -162,6 +203,7 @@ func TestResolveConfigOverrides(t *testing.T) {
 }
 
 func TestResolveConfigPersistedSpaces(t *testing.T) {
+	isolateHome(t)
 	dir := t.TempDir()
 	runPath := filepath.Join(dir, "run")
 	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
@@ -203,8 +245,115 @@ func TestResolveConfigPersistedSpaces(t *testing.T) {
 	}
 }
 
+// TestResolveConfigDefaultClientWithoutHome mirrors kuke: with HOME unset the
+// default client path is relative, and kuke does not read it (#1550).
+func TestResolveConfigDefaultClientWithoutHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	dir := t.TempDir()
+	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
+	writeFile(t, filepath.Join(cwd, "tmp", ".kuke", "kuke.yaml"),
+		"apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  podSubnetCIDR: 10.92.0.0/16\n")
+	res, err := resolveConfig(envMap(nil), dev, filepath.Join(dir, "run"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.89.0.0/16 podSubnetCIDR in " + dev}
+	if got := candidates(res); !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %q, want %q", got, want)
+	}
+}
+
+// TestResolveConfigRunPath covers the run-path chain kuke init resolves:
+// flag > KUKEON_RUN_PATH > server runPath > client runPath > default.
+func TestResolveConfigRunPath(t *testing.T) {
+	home := isolateHome(t)
+	dir := t.TempDir()
+	clientRun := filepath.Join(dir, "client-run")
+	serverRun := filepath.Join(dir, "server-run")
+	envRun := filepath.Join(dir, "env-run")
+	flagRun := filepath.Join(dir, "flag-run")
+	dev := writeFile(t, filepath.Join(dir, "kukeond-dev.yaml"), serverYAML("10.89.0.0/16"))
+	serverWithRun := writeFile(t, filepath.Join(dir, "kukeond-run.yaml"),
+		serverYAML("10.89.0.0/16")+"  runPath: "+serverRun+"\n")
+	clientBody := "apiVersion: v1beta1\nkind: ClientConfiguration\nspec:\n  runPath: " + clientRun + "\n"
+	client := writeFile(t, filepath.Join(dir, "kuke-dev.yaml"), clientBody)
+	writeFile(t, filepath.Join(home, ".kuke", "kuke.yaml"), clientBody)
+
+	// A space persisted under the client runPath only.
+	conf := filepath.Join(fs.MetadataRoot(clientRun), "default", "default", "network.conflist")
+	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteSpaceNetworkConfig(conf, "default-default", "10.89.0.0/24"); err != nil {
+		t.Fatal(err)
+	}
+
+	runPathKey := config.KUKEON_ROOT_RUN_PATH.Key
+	cases := []struct {
+		name   string
+		env    map[string]string
+		server string
+		flag   string
+		want   string
+	}{
+		{
+			name:   "client runPath via KUKE_CONFIGURATION",
+			env:    map[string]string{"KUKE_CONFIGURATION": client},
+			server: dev,
+			want:   clientRun,
+		},
+		{name: "client runPath via default client configuration", server: dev, want: clientRun},
+		{name: "server runPath beats client runPath", server: serverWithRun, want: serverRun},
+		{
+			name:   "env beats server runPath",
+			env:    map[string]string{runPathKey: envRun},
+			server: serverWithRun,
+			want:   envRun,
+		},
+		{
+			name:   "flag beats env",
+			env:    map[string]string{runPathKey: envRun},
+			server: serverWithRun,
+			flag:   flagRun,
+			want:   flagRun,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := resolveConfig(envMap(tt.env), tt.server, tt.flag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.RunPath != tt.want {
+				t.Fatalf("RunPath = %q, want %q", res.RunPath, tt.want)
+			}
+		})
+	}
+
+	// With only the client runPath, the space persisted there is a
+	// candidate and its bridge is this instance's own.
+	res, err := resolveConfig(envMap(nil), dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"10.89.0.0/16 podSubnetCIDR in " + dev,
+		"10.89.0.0/24 persisted subnet of space default/default",
+	}
+	if got := candidates(res); !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %q, want %q", got, want)
+	}
+	bridge := cni.SafeBridgeName("default-default")
+	if got := res.ownBridges(); !reflect.DeepEqual(got, map[string]netip.Prefix{bridge: pfx("10.89.0.0/24")}) {
+		t.Fatalf("ownBridges = %v", got)
+	}
+}
+
 func runGuard(t *testing.T, g guard, args ...string) (int, string) {
 	t.Helper()
+	isolateHome(t)
 	var out bytes.Buffer
 	g.stdout, g.stderr = &out, &out
 	if g.lookupEnv == nil {
