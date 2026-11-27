@@ -6,7 +6,7 @@ import type { TerminalState } from "./terminal";
 import type { CellFilter } from "./cell-filter";
 import type { CellListStyle } from "./settings";
 import { Icon } from "./icons";
-import { activeCells, agentGroups, cellMatches, groupCells, groupingKeys, instanceLabels, rollupState } from "./cells.mjs";
+import { activeCells, agentGroups, cellMatches, filterAgents, groupCells, groupingKeys, instanceLabels, rollupState } from "./cells.mjs";
 
 const collapsedKey = "kukeon-cell-collapsed-groups";
 const pageSize = 100;
@@ -69,9 +69,11 @@ export function CellSidebar({ inventory, selectedScope, terminalStates, filter, 
   const filtered = useMemo(() => cells.filter(row => cellMatches(row, search)), [cells, search]);
   const groups = useMemo(() => groupCells(filtered, groupBy), [filtered, groupBy]);
   const configs = inventory.data?.configs;
-  const { agents, others } = useMemo(() => agentGroups(filtered, configs), [filtered, configs]);
+  // Agents are grouped over every cell and searched after, so an agent keeps its id while the user types (#1688).
+  const allAgents = useMemo(() => agentGroups(cells, configs), [cells, configs]);
+  const { agents, others } = useMemo(() => filterAgents(allAgents, row => cellMatches(row, search)), [allAgents, search]);
   // An agent is a single link or a toggle by its listed instances, not by how many match the search.
-  const instanceCounts = useMemo(() => new Map(agentGroups(cells, configs).agents.map(agent => [agent.id, agent.rows.length])), [cells, configs]);
+  const instanceCounts = useMemo(() => new Map(allAgents.agents.map(agent => [agent.id, agent.rows.length])), [allAgents]);
   // Instance labels are counted over every cell, so a search or a stopped cell never renumbers them.
   const labels = useMemo(() => agentStyle ? instanceLabels(all, configs) : new Map<string, string>(), [agentStyle, all, configs]);
   // When every listed cell shares one realm / space / stack, show it once instead of on every row.

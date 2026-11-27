@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryResource, Row } from "./inventory";
 import type { CellFilter } from "./cell-filter";
-import { activeCells, agentGroups, attentionFirst, cellMatches, groupCells, groupingKeys, instanceLabels, rollupState, screenTail } from "./cells.mjs";
+import { activeCells, agentGroups, attentionFirst, cellMatches, filterAgents, groupCells, groupingKeys, instanceLabels, rollupState, screenTail } from "./cells.mjs";
 import type { CellListStyle } from "./settings";
 import { Icon } from "./icons";
 import { newAgentLink, newCellLink, workspaceLink } from "./routes";
@@ -64,14 +64,16 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
   const configs = inventory.data?.configs;
   // Instance labels are counted over every cell, so a search or a stopped cell never renumbers them.
   const labels = useMemo(() => agentStyle ? instanceLabels(all, configs) : new Map<string, string>(), [agentStyle, all, configs]);
+  // Agents are grouped over every cell and searched after, so a section keeps its key while the user types (#1688).
+  const allAgents = useMemo(() => agentGroups(cells, configs), [cells, configs]);
   const sections = useMemo(() => {
     if (!agentStyle) return groupCells(filtered, filter.groupBy).map(group => ({ id: group.id, name: `${group.label} group`, heading: filter.groupBy ? <>{group.label}</> : null, state: undefined as string | undefined, rollup: false, rows: attentionFirst(group.rows) }));
-    const { agents, others } = agentGroups(filtered, configs);
+    const { agents, others } = filterAgents(allAgents, row => cellMatches(row, filter.search));
     return [
       ...agents.map(agent => ({ id: agent.id, name: `${agent.displayName} agent`, heading: <><Icon name="agent" /><span>{agent.displayName}</span>{agent.named && <span className="agent-internal mono-id">{agent.name}</span>}{agent.context && <span className="agent-context">{agent.context}</span>}</>, state: rollupState(agent.rows), rollup: true, rows: attentionFirst(agent.rows) })),
       { id: "others", name: "Other cells", heading: <>Other cells</>, state: undefined, rollup: false, rows: attentionFirst(others) },
     ];
-  }, [agentStyle, filtered, filter.groupBy, configs]);
+  }, [agentStyle, allAgents, filtered, filter.groupBy, filter.search]);
   const incomplete = !!inventory.error || !!inventory.data?.failures.length;
 
   // Which tiles are on screen: only those are polled.

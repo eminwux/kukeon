@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeCells, agentGroups, attentionFirst, cellMatches, configDisplayName, displayNameError, groupCells, groupingKeys, instanceLabels, isActiveCell, matchesState, needsAttention, rollupState, screenTail } from "./cells.mjs";
+import { activeCells, agentGroups, attentionFirst, cellMatches, configDisplayName, displayNameError, filterAgents, groupCells, groupingKeys, instanceLabels, isActiveCell, matchesState, needsAttention, rollupState, screenTail } from "./cells.mjs";
 
 const row = (name, state, extra = {}) => ({ scope: ["r", "s", "k", name], doc: { metadata: { name, labels: extra.labels }, status: { state, ...extra.status } } });
 const names = rows => rows.map(item => item.doc.metadata.name);
@@ -114,6 +114,33 @@ test("agentGroups with every cell labelled has no others and keeps a single-inst
   const result = agentGroups([cell("dev", "b", { config: "pm" }), cell("dev", "a", { config: "dev" }), cell("dev", "c", { config: "dev" })]);
   assert.deepEqual(shape(result), { agents: [["dev", "dev", ["a", "c"]], ["pm", "dev", ["b"]]], others: [] });
   assert.equal(result.agents[1].rows.length, 1);
+});
+
+test("grouping a searched list moves a label-only cell to another agent when its provenance sibling is filtered out", () => {
+  // The #1688 premise: agentGroups alone is not search-stable.
+  const a = cell("r", "a", { binding: { realm: "r", space: "s", stack: "k", name: "web" }, config: "web" });
+  const b = cell("r", "b", { config: "web" });
+  assert.equal(agentGroups([a, b]).agents[0].id, JSON.stringify(["agent", JSON.stringify(["r", "s", "k", "web"])]));
+  assert.equal(agentGroups([b]).agents[0].id, JSON.stringify(["agent", JSON.stringify(["r", "", "", "web"])]));
+});
+
+test("filterAgents keeps a label-only cell in its provenance sibling's agent when the search filters the sibling out", () => {
+  const a = cell("r", "a", { binding: { realm: "r", space: "s", stack: "k", name: "web" }, config: "web" });
+  const b = cell("r", "b", { config: "web" });
+  const all = agentGroups([a, b]);
+  const searched = filterAgents(all, row => cellMatches(row, "/ b"));
+  assert.deepEqual(shape(searched), { agents: [["web", "r", ["b"]]], others: [] });
+  assert.equal(searched.agents[0].id, all.agents[0].id);
+  assert.deepEqual(searched.agents[0].scope, ["r", "s", "k"]);
+  // The full result is left as it was.
+  assert.deepEqual(names(all.agents[0].rows), ["a", "b"]);
+});
+
+test("filterAgents drops agents with no matching rows and filters others", () => {
+  const all = agentGroups([cell("dev", "a", { config: "claude" }), cell("dev", "b", { config: "codex" }), cell("dev", "c"), cell("dev", "d")]);
+  assert.deepEqual(shape(filterAgents(all, row => row.doc.metadata.name !== "a" && row.doc.metadata.name !== "d")), { agents: [["codex", "dev", ["b"]]], others: ["c"] });
+  assert.deepEqual(shape(filterAgents(all, () => false)), { agents: [], others: [] });
+  assert.deepEqual(shape(filterAgents(all, () => true)), shape(all));
 });
 
 test("rollupState is the first instance that needs attention, else the first instance", () => {
