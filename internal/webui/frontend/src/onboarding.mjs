@@ -4,8 +4,8 @@ import { configForCell } from "./relationships.mjs";
 import { systemTeam } from "./teams.mjs";
 
 // Pure logic of first-run onboarding (#1694): the Get started checklist of
-// the Workbench, when its card shows, and the wording of a connector that is
-// not set up. Every state is derived from data the web UI already reads —
+// the Workbench and the wording of a connector that is not set up. Whether
+// the card shows is one per-browser setting (showGetStarted, settings.ts). Every state is derived from data the web UI already reads —
 // GET /api/teams, the connector catalog, the Secret catalog, the login
 // identities, the Config catalog and the cell inventory — and nothing is
 // stored in kukeond. No connector is named here: a harness connector is one
@@ -27,14 +27,6 @@ export const stepAgent = "agent";
 export const kindRequired = "required";
 export const kindRecommended = "recommended";
 export const kindOptional = "optional";
-
-// How the Get started card is shown, kept per browser: `auto` while a
-// required step is open, `hidden` once dismissed or completed, `shown` when
-// reopened from the user menu.
-export const cardAuto = "auto";
-export const cardHidden = "hidden";
-export const cardShown = "shown";
-export const cardModes = [cardAuto, cardHidden, cardShown];
 
 const list = value => Array.isArray(value) ? value : [];
 const text = value => typeof value === "string" ? value.trim() : "";
@@ -158,11 +150,4 @@ export function progress(items) {
 // stepState words a step for its badge: Done, or what it asks.
 export function stepState(item) {
   return item?.done ? "Done" : item?.kind === kindRecommended ? "Recommended" : item?.kind === kindOptional ? "Optional" : "To do";
-}
-// cardVisible decides whether the Get started card shows: always when
-// reopened, never when hidden, and in auto mode while a required step is open.
-export function cardVisible(mode, items) {
-  if (mode === cardShown) return true;
-  if (mode === cardHidden) return false;
-  return requiredOpen(items).length > 0;
 }

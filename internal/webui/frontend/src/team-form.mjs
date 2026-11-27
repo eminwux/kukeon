@@ -166,10 +166,12 @@ export function selectedIndex(items, source, path) {
 // withInherit switches a list between inheriting the defaults and listing
 // its own items. Turning inheritance off starts from the inherited items, so
 // nothing changes until the user picks.
-export function withInherit(form, field, inherit, inherited = []) {
+// seed, for roles, is the connector catalog of a new team (#1745): a role it
+// declares this way starts with every per-role connector on.
+export function withInherit(form, field, inherit, inherited = [], seed) {
   const current = form?.[field] ?? { inherit: true, items: [] };
   if (inherit) return { ...form, [field]: { inherit: true, items: [] } };
-  const items = current.inherit ? list(inherited).map(item => field === "roles" ? roleItem(item) : { name: text(item.name), source: text(item.source), path: text(item.path) }) : list(current.items);
+  const items = current.inherit ? list(inherited).map(item => field === "roles" ? seededRole(roleItem(item), seed) : { name: text(item.name), source: text(item.source), path: text(item.path) }) : list(current.items);
   return { ...form, [field]: { inherit: false, items } };
 }
 
@@ -181,13 +183,25 @@ function roleItem(role) {
   };
 }
 
+// seededRole gives a role every togglable connector of seed it has no switch
+// for, switched on: a role added to a new team starts with all of them
+// (#1745), as the server's draft starts its roles. Without seed — an edit,
+// or the catalog not read yet — the role is unchanged, so a stored role
+// entry keeps what it has.
+export function seededRole(role, seed) {
+  if (!seed) return role;
+  const have = list(role?.connectors);
+  const added = list(seed).filter(togglable).map(connector => text(connector.name)).filter(name => name && !have.some(item => item.name === name));
+  return added.length ? { ...role, connectors: [...have, ...added.map(name => ({ name, enabled: true, identity: "" }))] } : role;
+}
+
 // withRole selects or drops one offered role. A selected role starts with
-// every task it declares.
-export function withRole(form, role, on, inherited = []) {
-  const next = withInherit(form, "roles", false, inherited);
+// every task it declares and, with seed, every per-role connector on.
+export function withRole(form, role, on, inherited = [], seed) {
+  const next = withInherit(form, "roles", false, inherited, seed);
   const items = [...next.roles.items];
   const at = selectedIndex(items, role.source, role.path);
-  if (on && at < 0) items.push(roleItem({ name: role.name, source: role.source, path: role.path }));
+  if (on && at < 0) items.push(seededRole(roleItem({ name: role.name, source: role.source, path: role.path }), seed));
   if (!on && at >= 0) items.splice(at, 1);
   return { ...next, roles: { inherit: false, items } };
 }

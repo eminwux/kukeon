@@ -16,7 +16,9 @@ import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } 
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
-export type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number };
+// reattach marks an interrupted session that auto-attach may open again by itself: one whose cell
+// restarted into a new process (#1745). Every other interruption waits for Reconnect or a start.
+export type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number; reattach?: boolean };
 // A paste waiting for its session: delivered once, when the session is attached and on screen.
 type PendingPaste = { text: string; nonce: number };
 const maxConnections = 20;
@@ -26,6 +28,10 @@ const pasteSettleMs = 150;
 // A program that prints nothing still gets its paste, this long after it became deliverable.
 const pasteMaxWaitMs = 2000;
 const maxSessions = 20;
+// Auto-attach retries a dropped connection after each of these delays, then leaves Reconnect (#1745). A
+// session that stayed attached this long earns the retries again.
+const reattachDelays = [1000, 2000, 5000];
+const reattachResetMs = 10_000;
 export const cellId = (scope: string[]) => JSON.stringify(scope);
 export const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
 export const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
@@ -101,10 +107,10 @@ export function useTerminalSessions(inventory: InventoryResource) {
       return next;
     });
   }, []);
-  const interruptCell = useCallback((scope: string[], message: string) => {
+  const interruptCell = useCallback((scope: string[], message: string, reattach = false) => {
     const key = cellId(scope);
     setSessions(old => old.map(item => cellId(item.scope) === key
-      ? { ...item, generation: item.generation + 1, state: "interrupted", message }
+      ? { ...item, generation: item.generation + 1, state: "interrupted", message, reattach }
       : item));
   }, []);
   // After a successful start the previous sessions are gone for good; dropping them lets the auto-attach
@@ -157,6 +163,33 @@ export function useTerminalSessions(inventory: InventoryResource) {
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
 type Manager = TerminalManager;
+
+// useReattach opens a session again by itself while auto-attach is on (#1745): an interrupted session
+// marked reattach at once, and a dropped connection after each of reattachDelays, then no more until
+// the session stays attached for reattachResetMs or the cell restarts. `enabled` carries the caller's guards; reset forgets a
+// session's retries when the user reconnects.
+export function useReattach(current: Session | undefined, enabled: boolean, attach: (session: Session) => void) {
+  const tries = useRef<Record<string, { count: number; attachedAt?: number }>>({});
+  const attachNow = useRef(attach);
+  attachNow.current = attach;
+  useEffect(() => {
+    if (!current) return;
+    const entry = tries.current[current.id] ??= { count: 0 };
+    if (current.state === "attached") { entry.attachedAt ??= Date.now(); return; }
+    if (current.state === "connecting") return;
+    if (entry.attachedAt !== undefined) {
+      if (Date.now() - entry.attachedAt >= reattachResetMs) entry.count = 0;
+      entry.attachedAt = undefined;
+    }
+    // A restart's interruption reattaches to a new process, so the dropped-connection retries start over.
+    if (current.state === "interrupted" && current.reattach) entry.count = 0;
+    if (!enabled || (current.state === "interrupted" && !current.reattach) || entry.count >= reattachDelays.length) return;
+    const session = current;
+    const timer = window.setTimeout(() => { entry.count += 1; attachNow.current(session); }, current.state === "interrupted" ? 0 : reattachDelays[entry.count]);
+    return () => window.clearTimeout(timer);
+  }, [current?.id, current?.state, current?.generation, current?.reattach, enabled]);
+  return useCallback((id: string) => { delete tries.current[id]; }, []);
+}
 // A session that is not an attach (#1432, the exec terminal): the WebSocket path it opens and the
 // label of its screen. Its process ends for good, so the server's `exit` message closes the session
 // with the exit code and nothing offers to reconnect to it.
@@ -229,7 +262,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   useEffect(() => {
     if (session.state === "interrupted") {
       terminal.current?.reset();
-      terminal.current?.write("\r\nPrevious terminal session ended. Reconnect to attach to the current process.\r\n");
+      terminal.current?.write(session.reattach ? "\r\nPrevious terminal session ended. Attaching to the current process…\r\n" : "\r\nPrevious terminal session ended. Reconnect to attach to the current process.\r\n");
       wasInterrupted.current = true;
     } else if (session.state === "connecting" && wasInterrupted.current) {
       terminal.current?.reset();
@@ -344,7 +377,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
 
 // dockedCells are the cells whose terminals live in the majordomo panel, by cellId. Their sessions are
 // mounted there and nowhere else, so this workspace neither renders nor attaches them.
-export function TerminalWorkspace({ scope, revision, inventory, manager, theme, visible = true, controlsHost, onExpandedChange, dockedCells = [], onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCells?: string[]; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
+// autoAttach is the Profile's Auto-attach terminals setting (#1745): on, the selected attachable container
+// attaches whenever the cell is started and nothing is attached or connecting; off, only Attach does.
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, autoAttach = true, visible = true, controlsHost, onExpandedChange, dockedCells = [], onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; autoAttach?: boolean; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCells?: string[]; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   // The session id of the container whose Exec panel is open (#1432); "" when none is.
@@ -409,15 +444,21 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
+  // Wait for the inventory: it is what tells whether this cell's terminal is docked.
+  // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
+  // survive, but inspecting a cell must not open a new terminal session (#1566). Nothing attaches
+  // while a lifecycle action on the cell is still running.
+  const canAutoAttach = autoAttach && visible && !!scope && !docked && !logs && !!inventory.data && !containers.loading && !containers.error && !!selected && selectedEligible && !unavailable && operation?.phase !== "pending" && skipAutoAttachFor !== currentId;
   useEffect(() => {
-    // Wait for the inventory: it is what tells whether this cell's terminal is docked.
-    // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
-    // survive, but inspecting a cell must not open a new terminal session (#1566).
-    if (!visible || !scope || docked || logs || !inventory.data || containers.loading || containers.error || !selected || !selectedEligible || unavailable || atLimit || current || skipAutoAttachFor === currentId) return;
-    manager.autoAttach(scope, selected, manager.selection[key]);
-  }, [visible, key, docked, !inventory.data, selected, selectedEligible, containers.loading, containers.error, unavailable, atLimit, current, currentId, skipAutoAttachFor, logs, manager.autoAttach]);
+    if (!canAutoAttach || atLimit || current) return;
+    manager.autoAttach(scope!, selected, manager.selection[key]);
+  }, [canAutoAttach, key, selected, atLimit, current, manager.autoAttach]);
+  // A session that ended — the cell restarted, or its connection dropped — attaches again.
+  const forgetReattach = useReattach(current, canAutoAttach && !reconnectLimited, session => manager.attach(session.scope, session.container));
+  // With auto-attach off, an attachable container with no session waits for Attach.
+  const idle = !!currentId && !current && (skipAutoAttachFor === currentId || !autoAttach);
   const headerState = logs ? "Logs" : current?.state === "attached" ? "Attached"
-    : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : "Connecting…");
+    : current?.message || (skipAutoAttachFor === currentId && currentId ? "Detached" : atLimit ? "Connection limit reached" : unavailable ? `Unavailable: ${cellState}` : containers.loading ? "Loading containers…" : containers.error ? "Container list unavailable" : !eligible.length ? "No attachable containers" : !selectedEligible ? "Container unavailable" : autoAttach ? "Connecting…" : "Detached");
   // With nothing to attach to, the terminal area carries the only (neutral) message.
   const empty = !!scope && !containers.loading && !containers.error && !workloads.length && !options.length;
   const live = current?.state === "attached" || current?.state === "connecting";
@@ -437,15 +478,15 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
         : containers.error ? <><ErrorNotice error={containers.error} kind="Containers" />{staleContainers && <p className="stale">{staleContainers}</p>}</>
           : containers.loading && !containers.data ? <p role="status">Loading containers…</p>
             : null;
-  const headerTone = logs ? "logs" : current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible ? "disconnected" : "connecting");
+  const headerTone = logs ? "logs" : current?.state ?? (skipAutoAttachFor === currentId && currentId || atLimit || unavailable || containers.error || !eligible.length || !selectedEligible || !autoAttach ? "disconnected" : "connecting");
   const toggleExpanded = () => { const next = !expanded; setExpanded(next); onExpandedChange(next); };
-  const resume = () => { setSkipAutoAttachFor(""); manager.attach(scope!, selected); };
+  const resume = () => { setSkipAutoAttachFor(""); forgetReattach(currentId); manager.attach(scope!, selected); };
   // Attach, Detach and Reconnect swap within one slot. A dropped session also keeps Detach so its retained slot can be released.
   const connectButton = (label: "Attach" | "Detach" | "Reconnect", disabled: boolean, onClick: () => void) =>
     <button type="button" className="icon-button" aria-label={label} data-tooltip={label} disabled={disabled} onClick={onClick}><Icon name={label === "Attach" ? "attach" : label === "Detach" ? "detach" : "reconnect"} /></button>;
   const connectSlot = current?.state === "attached" || current?.state === "connecting" ? connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })
     : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
-    : skipAutoAttachFor === currentId && currentId ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
+    : idle ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
   const optionLabel = (id: string) => eligible.some(container => container.id === id) ? id : logOnly.some(container => container.id === id) ? `${id} (logs)` : `${id} (unavailable)`;
   const controls = scope && !docked && <div className="terminal-workspace-tools">
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}

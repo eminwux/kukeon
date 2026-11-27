@@ -135,9 +135,11 @@ test("a fresh host is set up from the browser: Initialize, git, a login, a first
     const agentRow = page.getByRole("navigation", { name: "Cell navigation" }).getByRole("region", { name: "E2E agent agent" });
     await expect(agentRow.getByRole("link", { name: new RegExp(`^E2E agent: open .*${agentCell} \\(Ready\\)$`) })).toHaveAttribute("aria-current", "page", { timeout: minutes(1) });
     await expect(page.locator(".cell-page-title-row h1")).toHaveText("E2E agent #1");
-    // The required steps are done: the card is gone from the Workbench.
+    // The required steps are done. Get started is one switch (#1745): the card stays, set up, until dismissed.
     await workbench(page).click();
     await expect(content(page).getByRole("region", { name: "Cell terminals" })).toBeVisible();
+    await expect(card(page).getByRole("status")).toContainText("You are set up.");
+    await card(page).getByRole("button", { name: "Dismiss" }).click();
     await expect(card(page)).toHaveCount(0);
 
     // Enable majordomo on the same harness. Its own state volume holds no login, so the panel says so

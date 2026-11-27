@@ -391,18 +391,21 @@ export function staleGitNotice(result) {
 }
 // emptyGitForm is the "Also use this token for git" part of a form: on by
 // default for a new identity, and for a rotation when a git identity is
-// linked to it.
-export function emptyGitForm(on) { return { git: on === true, gitAuthor: "", gitUsername: "" }; }
+// linked to it. The commit author is typed as a name and an email (#1745).
+export function emptyGitForm(on) { return { git: on === true, gitAuthorName: "", gitAuthorEmail: "", gitUsername: "" }; }
 // tokenGitPayload is the git block of an identity request: only what the
-// user typed — the server applies the defaults it advertises.
+// user typed — the server applies the defaults it advertises. The author
+// goes out as one `Name <email>` string, as before.
 export function tokenGitPayload(form) {
   const git = {};
-  if (trimmed(form?.gitAuthor)) git.author = trimmed(form.gitAuthor);
+  const author = joinPerson(form?.gitAuthorName, form?.gitAuthorEmail);
+  if (author) git.author = author;
   if (trimmed(form?.gitUsername)) git.username = trimmed(form.gitUsername);
   return git;
 }
 export function tokenGitErrors(form) {
-  return form?.git && trimmed(form.gitAuthor) && !personPattern.test(trimmed(form.gitAuthor)) ? ["Commit author must be written Name <email>."] : [];
+  const problem = form?.git ? personError("Commit author", joinPerson(form.gitAuthorName, form.gitAuthorEmail)) : undefined;
+  return problem ? [problem] : [];
 }
 
 // Secret types as a described choice (#1693). A git-delivered connector says
@@ -453,6 +456,31 @@ export function identityDefaultOn(defaults, connector, target) {
 export function parseList(value) { return text(value).split(",").map(item => item.trim()).filter(Boolean); }
 const personPattern = /^[^<>]+<[^<>\s@]+@[^<>\s@]+>$/;
 
+// A person (a commit author) is one `Name <email>` string in requests and
+// identities (connector.ParsePerson), and a name and an email in forms
+// (#1745). splitPerson reads a stored value into the two: a value without
+// `<…>` is all name. joinPerson writes them back, "" when both are empty.
+export function splitPerson(value) {
+  const raw = text(value);
+  const match = /^([^<>]*)<([^<>]*)>\s*$/.exec(raw);
+  return match ? { name: match[1].trim(), email: match[2].trim() } : { name: raw.trim(), email: "" };
+}
+export function joinPerson(name, email) {
+  const who = trimmed(name), address = trimmed(email);
+  if (!who && !address) return "";
+  return who ? `${who} <${address}>` : `<${address}>`;
+}
+// personError words what is wrong with a person value: empty is fine (the
+// caller checks required fields), one half without the other is not, and the
+// email must look like one.
+export function personError(label, value) {
+  const person = trimmed(value);
+  if (!person) return undefined;
+  const { name, email } = splitPerson(person);
+  if (!name || !email) return `${label} needs a name and an email.`;
+  return personPattern.test(person) ? undefined : `${label} needs a valid email.`;
+}
+
 // identityErrors names what still keeps an identity form from being sent. The
 // daemon validates again; this only spares a round trip.
 export function identityErrors(connector, form) {
@@ -461,7 +489,7 @@ export function identityErrors(connector, form) {
   for (const field of identityFields(connector, form?.type)) {
     const value = trimmed(form?.fields?.[field.name]);
     if (!value) { if (field.required) errors.push(`${field.name} is required.`); continue; }
-    if (field.type === fieldPerson && !personPattern.test(value)) errors.push(`${field.name} must be written Name <email>.`);
+    if (field.type === fieldPerson) { const problem = personError(field.name, value); if (problem) errors.push(problem); }
     const values = field.type === fieldList ? parseList(value) : [value];
     if (field.enum.length && values.some(item => !field.enum.includes(item))) errors.push(`${field.name} must be one of: ${field.enum.join(", ")}.`);
   }

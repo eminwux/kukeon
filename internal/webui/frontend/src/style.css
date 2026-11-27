@@ -416,6 +416,28 @@ button:disabled { cursor: default; opacity: .4; }
   table.stackable .image-ref, table.stackable .image-media-type { max-width: none; white-space: normal; overflow-wrap: anywhere; }
 }
 
+/* Row selection and bulk actions (#1745). The checkbox column leads the table; on a card it sits before
+   the name on the first line. */
+.bulk-column { width: 1%; padding-right: 0; }
+.bulk-column + td .resource-name { white-space: nowrap; }
+.bulk-check { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: var(--accent); }
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--code); }
+.bulk-count { margin-right: auto; font-weight: 600; }
+.bulk-report { display: grid; gap: 6px; justify-items: start; margin: 12px 16px; }
+.bulk-report ul { margin: 0; padding-left: 18px; max-height: 12rem; overflow: auto; overflow-wrap: anywhere; }
+.bulk-targets { margin: 0; padding-left: 18px; max-height: 10rem; overflow: auto; }
+.bulk-targets li { overflow-wrap: anywhere; }
+@container table-scroll (max-width: 640px) {
+  table.stackable.bulk-table tr { grid-template-columns: auto minmax(0, 1fr) auto; }
+  table.stackable.bulk-table td.bulk-column { grid-column: 1; grid-row: 1; width: auto; }
+  table.stackable.bulk-table td.bulk-column[data-label]::before { content: none; }
+  table.stackable.bulk-table td.bulk-column + td { grid-column: 2; grid-row: 1; }
+  table.stackable.bulk-table td.bulk-column + td[data-label]::before { content: none; }
+  table.stackable.bulk-table td.bulk-column + td .resource-name { white-space: normal; overflow-wrap: anywhere; }
+  table.stackable.bulk-table td.row-actions { grid-column: 3; }
+  table.stackable.bulk-table td:not(.bulk-column):not(.bulk-column + td):not(.row-actions) { grid-column: 2 / -1; }
+}
+
 .new-cell-toolbar-action { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 .config-create-action { margin: 0 0 18px; }
 .creation-method-switch { display: flex; gap: 6px; margin: 0 0 18px; padding: 4px; width: fit-content; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
@@ -435,6 +457,12 @@ button:disabled { cursor: default; opacity: .4; }
 .schema-field b { color: var(--accent); }
 .schema-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .schema-fields > .schema-object, .schema-fields > .schema-array { grid-column: 1 / -1; }
+/* The team wizard's Resolves to keeps the previous rows, dimmed, while a dry run runs (#1745). */
+table.is-resolving .resolves-to { opacity: 0.55; }
+/* A person (#1745): Name and Email side by side, stacked on a narrow screen. */
+.schema-fields > .person-fields { grid-column: 1 / -1; }
+.person-fields-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.person-fields-inputs label { display: grid; gap: 5px; font-size: var(--font-sm); color: var(--muted); }
 .schema-object, .schema-array { min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
 .schema-object legend, .schema-array legend { padding: 0 5px; font-size: var(--font-sm); font-weight: 600; }
 .schema-object > .description, .schema-array > .description { margin-top: 0; margin-bottom: 12px; }
@@ -485,6 +513,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .relationship-grid .error { margin: 0; }
 @media (max-width: 760px) {
   .schema-fields, .relationship-grid { grid-template-columns: minmax(0, 1fr); }
+  .person-fields-inputs { grid-template-columns: minmax(0, 1fr); }
   .string-entry, .map-entry { grid-template-columns: minmax(0, 1fr) auto; }
   .map-entry label { grid-column: 1; }
   .map-entry button { grid-column: 2; grid-row: 1 / span 2; }

@@ -33,7 +33,7 @@ export type Connector = {
 };
 // A connector whose token can also be stored as a git identity (#1693).
 export type TokenForGit = { connector: string; hosts: string[]; username: string; name: string; tokenName: string };
-export type GitForm = { git: boolean; gitAuthor: string; gitUsername: string };
+export type GitForm = { git: boolean; gitAuthorName: string; gitAuthorEmail: string; gitUsername: string };
 export type SecretTypeChoice = { type: string; label: string; description: string };
 export type ScopeChoice = { level: string; label: string; recommended: boolean };
 export type ConnectorStatus = {
@@ -130,6 +130,9 @@ export function staleGitNotice(result: { staleGit?: Partial<SecretRef> } | undef
 export function emptyGitForm(on: boolean): GitForm;
 export function tokenGitPayload(form: Partial<GitForm> | undefined): Record<string, string>;
 export function tokenGitErrors(form: Partial<GitForm> | undefined): string[];
+export function splitPerson(value: string | undefined): { name: string; email: string };
+export function joinPerson(name: string | undefined, email: string | undefined): string;
+export function personError(label: string, value: string | undefined): string | undefined;
 export function secretTypeChoices(connector: { secretTypes?: string[]; methods?: unknown[]; delivery?: string } | undefined): SecretTypeChoice[];
 export function scopeChoices(connector: { scopes?: string[] } | undefined, realm: string | undefined): ScopeChoice[];
 export function scopeAtLevel(scope: Partial<Scope> | undefined, level: string, spaces?: (realm: string) => string[], stacks?: (realm: string, space: string) => string[]): Scope | undefined;

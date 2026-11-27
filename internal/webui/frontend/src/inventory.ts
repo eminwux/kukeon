@@ -40,7 +40,9 @@ async function eachScope(rows: Row[], read: (row: Row) => Promise<void>) {
   }));
 }
 
-export function useInventory(revision: number): InventoryResource {
+// useInventory reads the whole inventory on every revision, and every intervalMs (the Profile's Refresh
+// interval, #1745) while the tab is visible and no read is in flight.
+export function useInventory(revision: number, intervalMs: number): InventoryResource {
   const [state, setState] = useState<Resource<Inventory>>({ loading: true });
   const [daemon, setDaemon] = useState<Resource<true>>({ loading: true });
   const [pulse, setPulse] = useState(0);
@@ -80,9 +82,9 @@ export function useInventory(revision: number): InventoryResource {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && !activeRequest.current) setPulse(value => value + 1);
-    }, 60_000);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [intervalMs]);
   useEffect(() => {
     const controller = new AbortController();
     activeRequest.current = controller;

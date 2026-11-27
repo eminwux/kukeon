@@ -23,8 +23,10 @@ export function withProject(form: TeamForm, patch: Partial<FormSource>): TeamFor
 export function availableSources(form: TeamForm | undefined, stored: { name: string; url: string; identity?: string; branch?: string; tag?: string; commit?: string }[] | undefined): Available[];
 export function inspectRequest(source: Partial<Available>): { path: string; body: Record<string, unknown> };
 export function selectedIndex(items: { source: string; path: string }[] | undefined, source: string, path: string): number;
-export function withInherit(form: TeamForm, field: "roles" | "harnesses", inherit: boolean, inherited?: unknown[]): TeamForm;
-export function withRole(form: TeamForm, role: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[]): TeamForm;
+type ConnectorSeed = { name: string; harness?: string; delivery?: string }[];
+export function withInherit(form: TeamForm, field: "roles" | "harnesses", inherit: boolean, inherited?: unknown[], seed?: ConnectorSeed): TeamForm;
+export function seededRole<T extends { connectors?: FormRoleConnector[] }>(role: T, seed?: ConnectorSeed): T;
+export function withRole(form: TeamForm, role: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[], seed?: ConnectorSeed): TeamForm;
 export function withRolePatch(form: TeamForm, index: number, patch: Record<string, unknown>): TeamForm;
 export function withHarness(form: TeamForm, harness: { name: string; source: string; path: string }, on: boolean, inherited?: unknown[]): TeamForm;
 export function imageList(value: string): string[];

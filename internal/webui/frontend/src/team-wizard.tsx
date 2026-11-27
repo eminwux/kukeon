@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { sendJSON, toFailure } from "./connector-ui";
@@ -109,14 +109,16 @@ function SourceGroup({ source, inspected, onInspect, children }: { source: Avail
   </section>;
 }
 
-function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnesses, disabled, onInspect, onForm }: {
-  form: TeamForm; available: Available[]; inspected: Inspected; inheritedRoles: unknown[]; inheritedHarnesses: Selection[]; disabled: boolean;
+// seed is the connector catalog on a new team: a role selected here starts with every per-role connector on
+// (#1745). An edit passes none, so a role keeps its stored switches.
+function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnesses, seed, disabled, onInspect, onForm }: {
+  form: TeamForm; available: Available[]; inspected: Inspected; inheritedRoles: unknown[]; inheritedHarnesses: Selection[]; seed?: Connector[]; disabled: boolean;
   onInspect: (source: Available) => void; onForm: (form: TeamForm) => void;
 }) {
   const offeredRole = (role: FormRole) => inspected[role.source]?.contents?.roles.find(item => item.path === role.path);
   return <div className="wizard-step">
     <fieldset className="schema-object" aria-label="Roles"><legend>Roles</legend>
-      <label className="schema-check"><input type="checkbox" checked={form.roles.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "roles", event.target.checked, inheritedRoles))} />Use the default roles</label>
+      <label className="schema-check"><input type="checkbox" checked={form.roles.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "roles", event.target.checked, inheritedRoles, seed))} />Use the default roles</label>
       {form.roles.inherit ? <p className="description">{(inheritedRoles as Selection[]).map(role => role.name).join(", ") || "The defaults have no roles."}</p> : <>
         {form.roles.items.map((role, index) => {
           const harnesses = offeredRole(role)?.harnesses ?? [];
@@ -132,7 +134,7 @@ function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnes
         })}
         {!form.roles.items.length && <p className="description">No role is selected.</p>}
         <h4>Add roles</h4>
-        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked))} /><span>{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span></span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
+        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked, [], seed))} /><span>{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span></span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
       </>}
     </fieldset>
     <fieldset className="schema-object" aria-label="Harnesses"><legend>Harnesses</legend>
@@ -190,8 +192,11 @@ function identityNames(secrets: unknown[] | undefined, connector: string, curren
 
 // RoleAccess is the Credentials step's per-role connector switches (#1649, AC6): one row per selected role and
 // connector a team can give a role. While the role list is inherited the rows show the inherited roles, disabled.
-function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, disabled, onForm }: {
-  form: TeamForm; connectors: Connector[] | undefined; secrets: unknown[] | undefined; inheritedRoles: Selection[]; viewRows: RoleConnectorView[]; disabled: boolean; onForm: (form: TeamForm) => void;
+// Resolves to follows the form (#1745): viewRows come from a dry run of it, and while the next one runs the
+// previous rows stay, dimmed. notes name the Configs the dry run could not resolve.
+function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, resolving, notes, disabled, onForm }: {
+  form: TeamForm; connectors: Connector[] | undefined; secrets: unknown[] | undefined; inheritedRoles: Selection[]; viewRows: RoleConnectorView[];
+  resolving: boolean; notes: string[]; disabled: boolean; onForm: (form: TeamForm) => void;
 }) {
   const inherited = form.roles.inherit;
   const roles: { name: string; connectors?: FormRole["connectors"] }[] = inherited ? inheritedRoles.map(role => ({ name: role.name })) : form.roles.items;
@@ -199,7 +204,10 @@ function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, disab
     <legend>Per-role access</legend>
     <p className="description">A connector a role's cells get although the role does not ask for it, such as GitHub access for majordomo's health sweep. Turning one on adds it to the role's entry in the team; a running cell keeps what it started with until it is restarted.</p>
     {inherited && <p className="description" role="note">Declare the team's roles to change per-role access.</p>}
-    {!roles.length ? <p className="description">No role is selected.</p> : <div className="table-scroll"><table aria-label="Per-role connectors"><thead><tr><th>Role</th><th>Connector</th><th>Enabled</th><th>Identity</th><th>Resolves to</th></tr></thead><tbody>
+    {/* Always present, and only its text changes: a status region is announced that way, and a note
+        inserted before the table's query container left Chromium's table without a layout box. */}
+    <p className="description resolving-note" role="status">{resolving ? "Resolving…" : ""}</p>
+    {!roles.length ? <p className="description">No role is selected.</p> : <div className="table-scroll"><table aria-label="Per-role connectors" className={resolving ? "is-resolving" : undefined} aria-busy={resolving || undefined}><thead><tr><th>Role</th><th>Connector</th><th>Enabled</th><th>Identity</th><th>Resolves to</th></tr></thead><tbody>
       {roles.flatMap((role, index) => roleConnectorRows(role, connectors, viewRows).map(row => {
         const off = disabled || inherited;
         return <tr key={`${role.name}/${row.name}`}>
@@ -207,15 +215,18 @@ function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, disab
           <td>{row.title}</td>
           <td>{row.required ? <span className="description">Required by the role</span> : <label className="schema-check"><input type="checkbox" aria-label={`${row.title} for ${role.name}`} checked={row.enabled} disabled={off} onChange={event => onForm(withRoleConnector(form, index, row.name, { enabled: event.target.checked }))} />{row.enabled ? "On" : "Off"}</label>}</td>
           <td>{row.required ? "—" : <select aria-label={`Identity of ${row.name} for ${role.name}`} value={row.identity} disabled={off || !row.enabled} onChange={event => onForm(withRoleConnector(form, index, row.name, { identity: event.target.value }))}><option value="">Default</option>{identityNames(secrets, row.name, row.identity).map(name => <option key={name} value={name}>{name}</option>)}</select>}</td>
-          <td>{row.states.length ? <ul className="state-list">{row.states.map(state => <li key={state.config}><span className="mono-id">{state.config}</span>: {state.fill}</li>)}</ul> : <span className="description">Not rendered</span>}</td>
+          <td className="resolves-to">{row.states.length ? <ul className="state-list">{row.states.map(state => <li key={state.config}><span className="mono-id">{state.config}</span>: {state.fill}</li>)}</ul> : <span className="description">{resolving ? "Resolving…" : "Not rendered"}</span>}</td>
         </tr>;
       }))}
     </tbody></table></div>}
+    {!!notes.length && <ul className="description" aria-label="Not resolved">{notes.map(note => <li key={note}>{note}</li>)}</ul>}
   </fieldset>;
 }
 
-function CredentialsStep({ form, missing, inheritedRoles, viewRows, disabled, onForm }: { form: TeamForm; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[]; disabled: boolean; onForm: (form: TeamForm) => void }) {
-  const connectors = useResource<Connector[]>("/api/connectors", 0);
+function CredentialsStep({ form, connectors, missing, inheritedRoles, viewRows, resolving, notes, resolveError, disabled, onForm }: {
+  form: TeamForm; connectors: ReturnType<typeof useResource<Connector[]>>; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[];
+  resolving: boolean; notes: string[]; resolveError?: Failure; disabled: boolean; onForm: (form: TeamForm) => void;
+}) {
   const secrets = useResource<unknown[]>("/api/catalog/secrets", 0);
   return <div className="wizard-step">
     <label className="schema-check"><input type="checkbox" checked={form.connectors.inherit} disabled={disabled} onChange={event => onForm(withConnectorsInherit(form, event.target.checked))} />Use the defaults' connector choices</label>
@@ -233,9 +244,10 @@ function CredentialsStep({ form, missing, inheritedRoles, viewRows, disabled, on
         })}
       </tbody></table></div>
     </>}
-    <RoleAccess form={form} connectors={connectors.data} secrets={secrets.data} inheritedRoles={inheritedRoles} viewRows={viewRows} disabled={disabled} onForm={onForm} />
+    <RoleAccess form={form} connectors={connectors.data} secrets={secrets.data} inheritedRoles={inheritedRoles} viewRows={viewRows} resolving={resolving} notes={notes} disabled={disabled} onForm={onForm} />
+    {resolveError && !resolving && <p className="description" role="status">Resolves to could not be computed: {resolveError.message}</p>}
     <p className="description">Secret bindings (<code>spec.secrets</code>) and a role's <code>needs.secrets</code> are kept as they are; edit them as YAML.</p>
-    {!!missing.length && <><h3>Missing secrets in the last preview</h3><ul className="state-list" aria-label="Missing secrets">{missing.map(item => <li key={item} className="mono-id">{item}</li>)}</ul></>}
+    {!!missing.length && <><h3>Missing secrets in the preview</h3><ul className="state-list" aria-label="Missing secrets">{missing.map(item => <li key={item} className="mono-id">{item}</li>)}</ul></>}
   </div>;
 }
 
@@ -292,7 +304,16 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
   const inheritedRoles = team?.view?.roles.inherited ? team.view.roles.items : sources.data?.defaultRoles ?? [];
   const inheritedHarnesses = team?.view?.harnesses.inherited ? team.view.harnesses.items : sources.data?.defaultHarnesses ?? [];
   const configured = team?.view?.tasks ?? [];
-  const changeForm = (next: TeamForm) => { setForm(next); setPreview(undefined); setReplace(false); };
+  const connectors = useResource<Connector[]>("/api/connectors", 0);
+  // What the last dry run resolved per role and connector (#1745). It outlives a form change, so Resolves to
+  // keeps the previous rows, dimmed, until the next dry run answers.
+  const [resolved, setResolved] = useState<{ rows: RoleConnectorView[]; notes: string[] }>();
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<Failure>();
+  const formNow = useRef(form);
+  formNow.current = form;
+  const changeForm = (next: TeamForm) => { setForm(next); setPreview(undefined); setReplace(false); setError(undefined); };
+  const keepResolved = (outcome: TeamOutcome) => { if (outcome.connectors) setResolved({ rows: outcome.connectors, notes: outcome.connectorNotes ?? [] }); };
 
   async function readRepository() {
     setPending("draft"); setError(undefined);
@@ -313,15 +334,15 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
       setInspected(old => ({ ...old, [source.alias]: { contents } }));
     } catch (caught) { setInspected(old => ({ ...old, [source.alias]: { error: toFailure(caught) } })); }
   }
-  function body(force = false) {
-    return mode === "new" ? createBody(project, draft, form!, force) : editBody(name, form!);
+  function body(force = false, of: TeamForm = form!) {
+    return mode === "new" ? createBody(project, draft, of, force) : editBody(name, of);
   }
   async function send(dryRun: boolean, force = false) {
     if (!form || pending) return;
     setPending(dryRun ? "preview" : "apply"); setError(undefined);
     try {
       const outcome = await sendJSON<TeamOutcome>(dryRun ? teamsAPI("preview") : teamsAPI(), body(force));
-      if (dryRun) { setPreview(outcome); return; }
+      if (dryRun) { setPreview(outcome); keepResolved(outcome); return; }
       const added = outcome.result?.team ?? name;
       notify({ key: `team-${mode}:${added}`, tone: "success", message: mode === "new" ? `Team ${added} added.` : `Team ${added} applied.` });
       onChanged();
@@ -332,6 +353,36 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
       setError(failure);
     } finally { setPending(""); }
   }
+
+  // The Credentials step resolves the form in the background (#1745): a dry run, about 500 ms after the last
+  // change, that leaves the form editable. Its plan is the preview Review shows while the form is unchanged.
+  useEffect(() => {
+    if (key !== "credentials" || !form || preview || pending) return;
+    let live = true;
+    setResolving(true);
+    const started = form;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const outcome = await sendJSON<TeamOutcome>(teamsAPI("preview"), body(false, started));
+          if (!live) return;
+          keepResolved(outcome);
+          setResolveError(undefined);
+          if (formNow.current === started) setPreview(outcome);
+        } catch (caught) { if (live) setResolveError(toFailure(caught)); }
+        finally { if (live) setResolving(false); }
+      })();
+    }, 500);
+    return () => { live = false; window.clearTimeout(timer); setResolving(false); };
+  }, [key, form, preview, pending]);
+  // Opening Review runs the preview by itself, once per form: a changed form previews again on the next visit,
+  // and a failed one waits for Retry.
+  const previewed = useRef<TeamForm | undefined>(undefined);
+  useEffect(() => {
+    if (key !== "review" || !form || preview || pending || error || previewed.current === form) return;
+    previewed.current = form;
+    void send(true);
+  }, [key, form, preview, pending, error]);
 
   const disabled = !!pending;
   const stepNav = <ol className="wizard-steps" aria-label="Steps">{steps.map((item, i) => <li key={item.key}><button type="button" className="text-button" aria-current={i === step ? "step" : undefined} disabled={disabled || (i > step && (!form || i > step + 1 || !!errors.length))} onClick={() => setStep(i)}>{i + 1}. {item.title}</button></li>)}</ol>;
@@ -347,16 +398,14 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
         {mode === "edit" && !form && <ErrorNotice error={{ code: "invalid", message: team?.problem ?? "The team's form could not be read; edit it as YAML." }} kind="Team" />}
         {key === "project" && <ProjectStep project={project} sources={sources.data} draft={draft} pending={pending === "draft"} error={pending ? undefined : error} onChange={next => { setProject(old => ({ ...old, ...next })); setDraft(undefined); setForm(undefined); setError(undefined); }} onRead={() => void readRepository()} />}
         {form && key === "sources" && <SourcesStep mode={mode} form={form} draft={draft} sources={sources.data} disabled={disabled} onForm={changeForm} />}
-        {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
+        {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} inheritedHarnesses={inheritedHarnesses} seed={mode === "new" ? connectors.data : undefined} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
         {form && key === "tasks" && <TasksStep form={form} available={available} inspected={inspected} configured={configured} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
-        {form && key === "credentials" && <CredentialsStep form={form} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={team?.view?.connectors.roles ?? []} disabled={disabled} onForm={changeForm} />}
+        {form && key === "credentials" && <CredentialsStep form={form} connectors={connectors} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={resolved?.rows ?? team?.view?.connectors.roles ?? []} resolving={resolving} notes={resolved?.notes ?? []} resolveError={resolveError} disabled={disabled} onForm={changeForm} />}
         {form && key === "review" && <div className="wizard-step">
           <p className="description">{mode === "new" ? <>Adds team <code>{form.name || draft?.name}</code> from <code>{form.project?.url || form.project?.stored}</code> ({refLabel({ [form.project?.refKind ?? "branch"]: form.project?.ref })}).</> : <>Applies the form to team <code>{name}</code>.</>} The apply composes from scratch again: a branch may have moved since the preview, and the apply result is authoritative.</p>
-          <div className="connector-actions">
-            <button type="button" disabled={disabled} onClick={() => void send(true)}>{pending === "preview" ? "Previewing…" : preview ? "Preview again" : "Preview"}</button>
-            <button type="button" className="primary-action" disabled={disabled || !preview} onClick={() => void send(false)}>{pending === "apply" ? mode === "new" ? "Adding…" : "Applying…" : mode === "new" ? "Add team" : "Apply"}</button>
-          </div>
+          {pending === "preview" && <p role="status">Previewing…</p>}
           {error && <ErrorNotice error={error} kind="Team" />}
+          {error && !preview && <div className="connector-actions"><button type="button" disabled={disabled} onClick={() => void send(true)}>Retry</button></div>}
           {replace && <div className="error" role="alert"><p>A team of this name is stored. Reapply it from its team page to recompose it with its stored declaration, or replace the declaration with this one.</p><button type="button" className="danger-action" disabled={disabled} onClick={() => void send(false, true)}>Replace the stored declaration</button></div>}
           {preview && <OutcomeNotice outcome={preview} />}
           {preview && <PlanView plan={preview.plan} title="Preview" />}
@@ -366,7 +415,8 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
         <div className="form-actions">
           <button type="button" disabled={disabled || step === 0} onClick={() => setStep(step - 1)}>Back</button>
           {step < steps.length - 1 && <button type="button" className="primary-action" disabled={disabled || !!errors.length || !form} onClick={() => setStep(step + 1)}>Next</button>}
-          {mode === "edit" && <a className="document-action" href={teamsLink(name)}>Cancel</a>}
+          {/* Review's one action: the breadcrumbs are the way out. */}
+          {form && key === "review" && <button type="button" className="primary-action" disabled={disabled || !preview} onClick={() => void send(false)}>{pending === "apply" ? mode === "new" ? "Adding…" : "Applying…" : mode === "new" ? "Add team" : "Apply"}</button>}
         </div>
       </div>
     </section>}

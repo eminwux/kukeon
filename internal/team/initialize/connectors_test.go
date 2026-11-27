@@ -18,7 +18,9 @@ package initialize
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"slices"
 	"strings"
@@ -27,8 +29,11 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/team/teamtest"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector"
 	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
 	"gopkg.in/yaml.v3"
 )
@@ -436,6 +441,97 @@ func TestRoleConnectors(t *testing.T) {
 	}
 	if _, err = RoleConnectors(t.Context(), fake, "absent"); !errors.Is(err, errdefs.ErrTeamNotFound) {
 		t.Fatalf("absent team: %v", err)
+	}
+}
+
+// draftPreviewer answers draft renders from a table of Config names: the
+// statuses one renders with, or the error it fails with.
+type draftPreviewer struct {
+	statuses map[string][]api.ConnectorStatus
+	failures map[string]error
+	asked    []string
+}
+
+func (d *draftPreviewer) PreviewCellFromConfig(
+	_ context.Context, req kukeonv1.CellFromConfigRequest,
+) (kukeonv1.PreviewCellFromConfigResult, error) {
+	if req.Draft == nil || req.Draft.Metadata.Name != req.Config.Name {
+		return kukeonv1.PreviewCellFromConfigResult{}, fmt.Errorf(
+			"want a draft of %s, got %+v",
+			req.Config.Name,
+			req.Draft,
+		)
+	}
+	d.asked = append(d.asked, req.Config.Name)
+	if err := d.failures[req.Config.Name]; err != nil {
+		return kukeonv1.PreviewCellFromConfigResult{}, err
+	}
+	return kukeonv1.PreviewCellFromConfigResult{Connectors: d.statuses[req.Config.Name]}, nil
+}
+
+// TestPlanRoleConnectors is #1745 G: a dry run's Configs have no status, so
+// their rows come from a draft render of each Config and task Config, in the
+// rows RoleConnectorsOf builds for a stored team. A Config that does not
+// render is a note, not an error.
+func TestPlanRoleConnectors(t *testing.T) {
+	catalog, err := connector.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := func(name, task string) *api.CellConfigDoc {
+		labels := map[string]string{api.LabelTeam: "demo", api.LabelRole: "majordomo"}
+		if task != "" {
+			labels[api.LabelTask] = task
+		}
+		return &api.CellConfigDoc{Metadata: api.CellConfigMetadata{Name: name, Realm: "default", Labels: labels}}
+	}
+	login := api.ConnectorStatus{Connector: "claude", Method: "login", State: api.ConnectorResolved}
+	github := api.ConnectorStatus{
+		Connector: "github", Method: "token", State: api.ConnectorResolved, Origin: "realm",
+		Identity: &api.ContainerSecretRef{Name: "gh-token", Realm: "default"},
+	}
+	previewer := &draftPreviewer{
+		statuses: map[string][]api.ConnectorStatus{"demo-majordomo-claude": {login, github}},
+		failures: map[string]error{"demo-majordomo-claude-sweep": errors.New("blueprint claude not found")},
+	}
+	plan := &Plan{
+		Team: roleTeam(&config.Needs{Secrets: []string{"gh-token"}}),
+		composed: &compose.Result{Pairs: []compose.Pair{{
+			Role: "majordomo", Harness: "claude", Config: doc("demo-majordomo-claude", ""),
+			Tasks: []*api.CellConfigDoc{doc("demo-majordomo-claude-sweep", "sweep")},
+		}}},
+	}
+	rows, notes := plan.RoleConnectors(t.Context(), previewer, catalog)
+	want := []RoleConnector{
+		{
+			Role: "majordomo", Config: "demo-majordomo-claude", Connector: "claude", Method: "login",
+			State: api.ConnectorResolved, Fill: "-",
+		},
+		{
+			Role: "majordomo", Config: "demo-majordomo-claude", Connector: "github", Method: "token",
+			State: api.ConnectorResolved, Identity: "gh-token", Origin: "realm", Fill: "gh-token (realm)",
+			SetByTeam: true,
+		},
+	}
+	if !slices.Equal(rows, want) {
+		t.Fatalf("rows:\n%+v\nwant:\n%+v", rows, want)
+	}
+	if !slices.Equal(previewer.asked, []string{"demo-majordomo-claude", "demo-majordomo-claude-sweep"}) {
+		t.Fatalf("rendered %v", previewer.asked)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "demo-majordomo-claude-sweep") ||
+		!strings.Contains(notes[0], "blueprint claude not found") {
+		t.Fatalf("notes = %q", notes)
+	}
+	// Nothing composed, or no daemon to render with: no rows, never nil.
+	for _, p := range []*Plan{nil, {}} {
+		if rows, notes = p.RoleConnectors(t.Context(), previewer, catalog); rows == nil || len(rows) != 0 ||
+			len(notes) != 0 {
+			t.Fatalf("empty plan: %v %v", rows, notes)
+		}
+	}
+	if rows, _ = plan.RoleConnectors(t.Context(), nil, catalog); rows == nil || len(rows) != 0 {
+		t.Fatalf("no previewer: %v", rows)
 	}
 }
 

@@ -58,6 +58,20 @@ type teamClient struct {
 	deleted  []string
 
 	listErr error
+	// preview answers a draft render (#1745); nil renders every Config
+	// with no connectors.
+	preview  func(kukeonv1.CellFromConfigRequest) (kukeonv1.PreviewCellFromConfigResult, error)
+	rendered []string
+}
+
+func (c *teamClient) PreviewCellFromConfig(
+	_ context.Context, req kukeonv1.CellFromConfigRequest,
+) (kukeonv1.PreviewCellFromConfigResult, error) {
+	c.rendered = append(c.rendered, req.Config.Name)
+	if c.preview == nil {
+		return kukeonv1.PreviewCellFromConfigResult{}, nil
+	}
+	return c.preview(req)
 }
 
 func newTeamClient() *teamClient {

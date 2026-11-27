@@ -5,7 +5,7 @@ import {
   groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
   harnessEphemeral, harnessPersistent, keepsLogin, loginBody, loginEmpty, loginIdentitiesFor, loginLoggedIn, loginNameError, loginStateText, loginTone, picksIdentity, sessionScope, stateText, statusIdentity,
-  emptyGitForm, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, staleGitNotice, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
+  emptyGitForm, joinPerson, personError, splitPerson, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, staleGitNotice, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -309,7 +309,12 @@ test("identity payloads carry the readable fields and the material of the chosen
 test("identity errors name what is missing or malformed without quoting material", () => {
   assert.deepEqual(identityErrors(example, emptyIdentityForm(example)), ["Name is required.", "account is required.", "Value is required."]);
   const bad = { ...emptyIdentityForm(repo), name: "k", fields: { author: "no-email", hosts: "example.com", sign: "commits,merges" }, privateKey: "" };
-  assert.deepEqual(identityErrors(repo, bad), ["author must be written Name <email>.", "sign must be one of: commits, tags.", "Private key is required."]);
+  assert.deepEqual(identityErrors(repo, bad), ["author needs a name and an email.", "sign must be one of: commits, tags.", "Private key is required."]);
+  // The two boxes joined: an email alone, and one that is not an email.
+  assert.deepEqual(identityErrors(repo, { ...bad, fields: { ...bad.fields, author: joinPerson("", "a@example.com"), sign: "" } }), ["author needs a name and an email.", "Private key is required."]);
+  assert.deepEqual(identityErrors(repo, { ...bad, fields: { ...bad.fields, author: joinPerson("A", "not an email"), sign: "" } }), ["author needs a valid email.", "Private key is required."]);
+  // Both empty: an optional person field is valid.
+  assert.deepEqual(identityErrors(repo, { ...bad, fields: { ...bad.fields, author: joinPerson("", ""), sign: "" } }), ["Private key is required."]);
   assert.deepEqual(identityErrors(pulls, { ...emptyIdentityForm(pulls), name: "p" }), ["Username is required.", "Password or token is required."]);
   const secret = "s3cret-value";
   assert.ok(!identityErrors(example, { ...emptyIdentityForm(example), value: secret }).join(" ").includes(secret));
@@ -483,16 +488,38 @@ test("a connector whose token serves git is read from the catalog alone", () => 
 test("the token-for-git payload carries only what was typed, with makeDefault and the method", () => {
   const form = { ...emptyIdentityForm(forge), value: "tok" };
   const scope = { realm: "dev" };
-  assert.deepEqual(identityPayload(forge, scope, form, { git: tokenGitPayload({ git: true, gitAuthor: " Dev <dev@example.com> ", gitUsername: "" }), makeDefault: true, method: "token" }), {
+  assert.deepEqual(identityPayload(forge, scope, form, { git: tokenGitPayload({ git: true, gitAuthorName: " Dev ", gitAuthorEmail: " dev@example.com ", gitUsername: "" }), makeDefault: true, method: "token" }), {
     scope, name: "forge-token", type: "opaque", value: "tok", git: { author: "Dev <dev@example.com>" }, makeDefault: true, method: "token",
   });
   // Git unchecked: no git block. A connector that does not offer it never sends one.
   assert.deepEqual(identityPayload(forge, scope, form), { scope, name: "forge-token", type: "opaque", value: "tok" });
   assert.equal("git" in identityPayload(example, scope, { ...form, fields: { account: "a" } }, { git: {} }), false);
-  assert.deepEqual(tokenGitPayload({ git: true, gitAuthor: "", gitUsername: " octo " }), { username: "octo" });
-  assert.deepEqual(tokenGitErrors({ git: true, gitAuthor: "nobody" }), ["Commit author must be written Name <email>."]);
-  assert.deepEqual(tokenGitErrors({ git: false, gitAuthor: "nobody" }), []);
-  assert.deepEqual(emptyGitForm(true), { git: true, gitAuthor: "", gitUsername: "" });
+  assert.deepEqual(tokenGitPayload({ git: true, gitAuthorName: "", gitAuthorEmail: "", gitUsername: " octo " }), { username: "octo" });
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthorName: "nobody", gitAuthorEmail: "" }), ["Commit author needs a name and an email."]);
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthorName: "", gitAuthorEmail: "dev@example.com" }), ["Commit author needs a name and an email."]);
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthorName: "Dev", gitAuthorEmail: "dev" }), ["Commit author needs a valid email."]);
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthorName: "Dev", gitAuthorEmail: "dev@example.com" }), []);
+  assert.deepEqual(tokenGitErrors({ git: true, gitAuthorName: "", gitAuthorEmail: "" }), []);
+  assert.deepEqual(tokenGitErrors({ git: false, gitAuthorName: "nobody", gitAuthorEmail: "" }), []);
+  assert.deepEqual(emptyGitForm(true), { git: true, gitAuthorName: "", gitAuthorEmail: "", gitUsername: "" });
+});
+
+test("a person is split into a name and an email and joined back into Name <email>", () => {
+  assert.deepEqual(splitPerson("Ada Lovelace <ada@example.com>"), { name: "Ada Lovelace", email: "ada@example.com" });
+  assert.deepEqual(splitPerson("  Ada  <  ada@example.com > "), { name: "Ada", email: "ada@example.com" });
+  // No <…>: all name.
+  assert.deepEqual(splitPerson("Ada"), { name: "Ada", email: "" });
+  assert.deepEqual(splitPerson(""), { name: "", email: "" });
+  assert.deepEqual(splitPerson(undefined), { name: "", email: "" });
+  assert.equal(joinPerson(" Ada Lovelace ", " ada@example.com "), "Ada Lovelace <ada@example.com>");
+  assert.equal(joinPerson("", ""), "");
+  assert.equal(joinPerson("  ", " "), "");
+  // A half on its own still round-trips, so the form can say which half is missing.
+  assert.deepEqual(splitPerson(joinPerson("Ada", "")), { name: "Ada", email: "" });
+  assert.deepEqual(splitPerson(joinPerson("", "ada@example.com")), { name: "", email: "ada@example.com" });
+  assert.equal(personError("author", ""), undefined);
+  assert.equal(personError("author", "Ada <ada@example.com>"), undefined);
+  assert.equal(personError("author", "Ada"), "author needs a name and an email.");
 });
 
 test("a rotation keeps the reserved token-from key and finds the linked git identity", () => {

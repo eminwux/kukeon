@@ -9,11 +9,6 @@ export const stepAgent: string;
 export const kindRequired: string;
 export const kindRecommended: string;
 export const kindOptional: string;
-export const cardAuto: "auto";
-export const cardHidden: "hidden";
-export const cardShown: "shown";
-export type CardMode = "auto" | "hidden" | "shown";
-export const cardModes: readonly CardMode[];
 
 export type Step = { id: string; kind: string; title: string; description: string; done: boolean };
 export type AgentTemplateRef = { harness: string; name: string; realm?: string; exists: boolean };
@@ -43,4 +38,3 @@ export function checklist(input?: ChecklistInput): Step[];
 export function requiredOpen(items: Step[] | undefined): Step[];
 export function progress(items: Step[] | undefined): { done: number; total: number };
 export function stepState(item: Step | undefined): string;
-export function cardVisible(mode: string, items: Step[] | undefined): boolean;

@@ -1,0 +1,14 @@
+export const batchConcurrency: number;
+export type HeaderState = "none" | "some" | "all";
+export type BatchResult<T> = { item: T; ok: boolean; message: string };
+export function toggleKey(selected: string[], key: string, on: boolean): string[];
+export function pruneSelection(selected: string[], keys: string[]): string[];
+export function headerState(selected: string[], matching: string[]): HeaderState;
+export function toggleAll(selected: string[], matching: string[]): string[];
+export const systemSkip: string;
+export function batchTargets<T extends { scope: string[] }>(rows: T[], reasonOf: (row: T) => string): { targets: T[]; skipped: { row: T; reason: string }[] };
+export function offeredActions<T extends { scope: string[] }, A>(rows: T[], actions: readonly A[], reasonOf: (row: T, action: A) => string): A[];
+export function runBatch<T>(items: T[], run: (item: T) => Promise<{ ok: boolean; message?: string } | undefined>, limit?: number): Promise<BatchResult<T>[]>;
+export function batchSummary(verb: string, noun: string, results: { ok: boolean }[], skipped?: number): { tone: "success" | "error"; message: string };
+export function purgePhrase(count: number, noun: string): string;
+export function counted(count: number, singular: string, plural?: string): string;

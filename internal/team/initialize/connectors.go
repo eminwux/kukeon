@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"github.com/eminwux/kukeon/pkg/team/connector"
@@ -392,34 +393,105 @@ func RoleConnectors(ctx context.Context, client Client, team string) ([]RoleConn
 // and connector.
 func RoleConnectorsOf(stored *config.Team, configs []api.CellConfigDoc, catalog *connector.Catalog) []RoleConnector {
 	out := []RoleConnector{}
-	entries := map[string]*config.Role{}
-	for i := range stored.Spec.Roles {
-		entries[stored.Spec.Roles[i].Name] = &stored.Spec.Roles[i]
-	}
+	entries := roleEntries(stored)
 	for _, doc := range configs {
-		labels := doc.Metadata.Labels
-		if labels[api.LabelTeam] != stored.Metadata.Name || doc.Status == nil {
+		if doc.Metadata.Labels[api.LabelTeam] != stored.Metadata.Name || doc.Status == nil {
 			continue
 		}
-		role := labels[api.LabelRole]
 		for _, status := range doc.Status.Connectors {
-			row := RoleConnector{
-				Role: role, Config: doc.Metadata.Name, Task: labels[api.LabelTask], Connector: status.Connector,
-				Method: status.Method, State: status.State, Origin: status.Origin, Required: status.Required,
-				Fill: status.Fill(),
-			}
-			if status.Identity != nil {
-				row.Identity = identityText(*status.Identity, doc.Metadata.Realm)
-			}
-			if status.State == api.ConnectorResolved && status.Identity == nil {
-				row.Fill = "-"
-			}
-			if conn, ok := catalog.Find(status.Connector); ok {
-				row.SetByTeam = RoleConnectorSet(entries[role], conn)
-			}
-			out = append(out, row)
+			out = append(out, roleConnectorRow(doc.Metadata, status, entries, catalog))
 		}
 	}
+	sortRoleConnectors(out)
+	return out
+}
+
+// ConfigPreviewer renders a Config that is not stored: kukeond's
+// PreviewCellFromConfig with a Draft, as New Config previews one.
+type ConfigPreviewer interface {
+	PreviewCellFromConfig(context.Context, kukeonv1.CellFromConfigRequest) (kukeonv1.PreviewCellFromConfigResult, error)
+}
+
+// RoleConnectors reports what each Config of a plan would resolve before
+// anything is stored (#1745): the rows RoleConnectorsOf builds from a stored
+// team, from a draft render of every composed Config and task Config. A
+// dry-run's Configs have no status, so kukeond renders each one. Best-effort:
+// a Config that does not render — its shared blueprint is not stored yet, or
+// a connector it requires resolves to nothing — adds a note naming it and
+// the reason, and no rows.
+func (p *Plan) RoleConnectors(
+	ctx context.Context,
+	client ConfigPreviewer,
+	catalog *connector.Catalog,
+) ([]RoleConnector, []string) {
+	out := []RoleConnector{}
+	var notes []string
+	if p == nil || p.composed == nil || client == nil {
+		return out, notes
+	}
+	entries := roleEntries(p.Team)
+	for _, pair := range p.composed.Pairs {
+		for _, doc := range append([]*api.CellConfigDoc{pair.Config}, pair.Tasks...) {
+			if doc == nil {
+				continue
+			}
+			if ctx.Err() != nil {
+				return out, notes
+			}
+			rendered, err := client.PreviewCellFromConfig(
+				ctx,
+				kukeonv1.CellFromConfigRequest{Config: doc.Metadata, Draft: doc},
+			)
+			if err != nil {
+				notes = append(notes, fmt.Sprintf("%s: connectors not resolved: %v", doc.Metadata.Name, err))
+				continue
+			}
+			for _, status := range rendered.Connectors {
+				out = append(out, roleConnectorRow(doc.Metadata, status, entries, catalog))
+			}
+		}
+	}
+	sortRoleConnectors(out)
+	return out, notes
+}
+
+// roleEntries indexes a team's role entries by name.
+func roleEntries(team *config.Team) map[string]*config.Role {
+	entries := map[string]*config.Role{}
+	if team == nil {
+		return entries
+	}
+	for i := range team.Spec.Roles {
+		entries[team.Spec.Roles[i].Name] = &team.Spec.Roles[i]
+	}
+	return entries
+}
+
+// roleConnectorRow is one connector status of a team's Config as a row: the
+// Config's role and task labels, and whether the role entry enables it.
+func roleConnectorRow(
+	md api.CellConfigMetadata, status api.ConnectorStatus, entries map[string]*config.Role, catalog *connector.Catalog,
+) RoleConnector {
+	role := md.Labels[api.LabelRole]
+	row := RoleConnector{
+		Role: role, Config: md.Name, Task: md.Labels[api.LabelTask], Connector: status.Connector,
+		Method: status.Method, State: status.State, Origin: status.Origin, Required: status.Required,
+		Fill: status.Fill(),
+	}
+	if status.Identity != nil {
+		row.Identity = identityText(*status.Identity, md.Realm)
+	}
+	if status.State == api.ConnectorResolved && status.Identity == nil {
+		row.Fill = "-"
+	}
+	if conn, ok := catalog.Find(status.Connector); ok {
+		row.SetByTeam = RoleConnectorSet(entries[role], conn)
+	}
+	return row
+}
+
+// sortRoleConnectors orders rows by role, Config and connector.
+func sortRoleConnectors(out []RoleConnector) {
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Role != b.Role {
@@ -430,7 +502,6 @@ func RoleConnectorsOf(stored *config.Team, configs []api.CellConfigDoc, catalog 
 		}
 		return a.Connector < b.Connector
 	})
-	return out
 }
 
 // identityText is a Secret reference as name[@realm[/space[/stack]]], the

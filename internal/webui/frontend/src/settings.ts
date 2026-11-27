@@ -1,9 +1,9 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { configLabel } from "./cells.mjs";
-import { cardAuto, cardModes, type CardMode } from "./onboarding.mjs";
+import { defaultRefreshSeconds, parseRefreshSeconds, parseShowGetStarted, parseSwitch, type RefreshSeconds } from "./settings-values.mjs";
 
-// Per-browser UI preferences (#1652, #1686). Each setting is one row of this
-// table: a localStorage key, a label, and a default. A missing or unreadable
+// Per-browser UI preferences (#1652, #1686, #1745). Each setting is one row of
+// this table: a localStorage key, a label, and a default. A missing or unreadable
 // key reads as the default, and a failed write keeps the value for this page
 // only. Nothing is stored in kukeond.
 
@@ -28,7 +28,9 @@ type SettingTypes = {
   showSidebarGroupBy: boolean;
   showGridSearch: boolean;
   showGridGroupBy: boolean;
-  getStarted: CardMode;
+  autoAttach: boolean;
+  refreshSeconds: RefreshSeconds;
+  showGetStarted: boolean;
 };
 export type SettingName = keyof SettingTypes;
 export type Settings = { [K in SettingName]: SettingTypes[K] };
@@ -48,7 +50,7 @@ const defaultStyleOnly = "Applies to the Default cell list style.";
 
 const switchSetting = (key: string, label: string, defaultValue: boolean, note?: string): Definition<boolean> => ({
   key, label, defaultValue, note,
-  parse: raw => raw === "true" ? true : raw === "false" ? false : undefined,
+  parse: parseSwitch,
   format: value => String(value),
 });
 
@@ -77,17 +79,29 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
   showSidebarGroupBy: switchSetting("kukeon-sidebar-show-group-by", "Show Group by in sidebar", false, defaultStyleOnly),
   showGridSearch: switchSetting("kukeon-grid-show-search", "Show search in grid", true),
   showGridGroupBy: switchSetting("kukeon-grid-show-group-by", "Show Group by in grid", true, defaultStyleOnly),
-  // The Workbench's Get started card (#1694): shown while a required step is open, hidden once dismissed
-  // or completed, shown again from the user menu. It has no row on the Settings page.
-  getStarted: {
-    key: "kukeon-get-started", label: "Get started", defaultValue: cardAuto,
-    parse: raw => cardModes.includes(raw as CardMode) ? raw as CardMode : undefined,
-    format: value => value,
+  // The cell terminal attaches by itself whenever the cell is started and nothing is attached (#1745).
+  autoAttach: switchSetting("kukeon-terminal-auto-attach", "Auto-attach terminals", true),
+  // How often the inventory is read while the tab is visible.
+  refreshSeconds: {
+    key: "kukeon-refresh-seconds", label: "Refresh interval", defaultValue: defaultRefreshSeconds,
+    parse: parseRefreshSeconds,
+    format: value => String(value),
+  },
+  // The Workbench's Get started card (#1694): On until dismissed. The key once held a card mode, which
+  // parseShowGetStarted still reads.
+  showGetStarted: {
+    key: "kukeon-get-started", label: "Show Get started", defaultValue: true,
+    parse: parseShowGetStarted,
+    format: value => String(value),
   },
 };
 
-// The Profile section of the Settings page: its groups and their settings, in order.
-export const profileGroups: readonly { title: string; settings: readonly Exclude<SettingName, "theme" | "getStarted">[] }[] = [
+// The Settings page: its groups and their settings, in order.
+export const profileGroups: readonly { title: string; settings: readonly SettingName[] }[] = [
+  { title: "Appearance", settings: ["theme"] },
+  { title: "Terminal", settings: ["autoAttach"] },
+  { title: "Refresh", settings: ["refreshSeconds"] },
+  { title: "Workbench", settings: ["showGetStarted"] },
   { title: "Cell list", settings: ["cellListStyle", "defaultGroupBy"] },
   { title: "Sidebar", settings: ["showCellScope", "showTerminalStatus", "showUnreadBytes", "showSidebarSearch", "showSidebarGroupBy"] },
   { title: "Workbench grid", settings: ["showGridSearch", "showGridGroupBy"] },

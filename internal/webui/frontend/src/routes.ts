@@ -55,9 +55,9 @@ export function readRoute(): Route {
     // majordomo's sweep reports and schedule) and #/daemon/logs. #/health is the historical Health route.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : parts[1] === "health" ? "health" : "daemon", scope: [], parent: [], document: false };
-    // #/settings is the General section and #/settings/profile the Profile section (#1686); an unknown
-    // section shows General.
-    if (parts[0] === "settings") return { view: "settings", scope: parts[1] === "profile" ? ["profile"] : [], parent: [], document: false };
+    // #/settings is the Settings page and its one section, Profile (#1745); #/settings/profile and any
+    // other section open it too, so links from when General was a section of its own keep working.
+    if (parts[0] === "settings") return { view: "settings", scope: [], parent: [], document: false };
     if (parts[0] === "workspace") return parts.length === 5 ? { view: "workspace", scope: parts.slice(1), parent: [], document: false } : HOME();
     if (path === "/resources" || path === "/administration" || path === "/dashboard") return { view: "dashboard", scope: [], parent: [], document: false };
     // #/images/<realm>/<image reference>; the reference is one encoded segment.
@@ -96,8 +96,8 @@ export function newSecretLink(): string {
 export function catalogPageLink(kind: string, scope: string[], options: { document?: boolean; edit?: boolean } = {}): string {
   return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (options.document ? "?document=1" : options.edit ? "?edit=1" : "");
 }
-export function settingsLink(section?: "profile"): string {
-  return "#/settings" + (section ? `/${section}` : "");
+export function settingsLink(): string {
+  return "#/settings";
 }
 export function healthLink(): string {
   return "#/daemon/health";

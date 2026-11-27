@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { teamsLink } from "./teams.mjs";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
@@ -8,6 +8,7 @@ import {
   allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, defaultTargets, emptyGitForm, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
   formatSecretReference, harnessEphemeral, identitiesFor, identityDefaultOn, identityErrors, identityFields, identityPayload, keepsLogin, linkedGitIdentity, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeAtLevel, scopeChoices, scopeLevel, scopeLevels, scopeParts, scopeQuery,
   secretBasicAuth, secretOpaque, secretRef, secretSSHKey, secretTypeChoices, secretTypesOf, sessionScope, staleGitNotice, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf, tokenForGit, tokenGitErrors, tokenGitPayload,
+  joinPerson, splitPerson,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 
@@ -259,6 +260,34 @@ function SecretTypeChoice({ connector, value, onChange, disabled }: { connector:
   </fieldset>;
 }
 
+// PersonFields asks for a person — a commit author — as two boxes, Name and Email (#1745), in the markup
+// of the Config form's IdentityFields. The caller joins them into the `Name <email>` string requests carry.
+function PersonFields({ label, required = false, name, email, onChange, disabled, help }: { label: string; required?: boolean; name: string; email: string; onChange: (name: string, email: string) => void; disabled: boolean; help?: ReactNode }) {
+  const mark = required && <b aria-label="required"> *</b>;
+  return <div className="schema-field person-fields" role="group" aria-label={label}>
+    <span>{label}{mark}</span>
+    <div className="person-fields-inputs">
+      <label><span>Name</span><input aria-label={`${label} name`} value={name} disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(event.target.value, email)} /></label>
+      <label><span>Email</span><input type="email" aria-label={`${label} email`} value={email} disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(name, event.target.value)} /></label>
+    </div>
+    {help}
+  </div>;
+}
+
+// PersonFieldInput keeps a schema person field's joined value in the form and its two halves as typed, so
+// a space at the end of a name survives the round trip. A value set from outside (a prefill, a reset) is
+// split again.
+function PersonFieldInput({ field, value, onChange, disabled, help }: { field: FormField; value: string; onChange: (value: string) => void; disabled: boolean; help: ReactNode }) {
+  const [parts, setParts] = useState(() => splitPerson(value));
+  const sent = useRef(value);
+  if (value !== sent.current) { sent.current = value; setParts(splitPerson(value)); }
+  return <PersonFields label={field.name} required={field.required} name={parts.name} email={parts.email} disabled={disabled} help={help} onChange={(name, email) => {
+    setParts({ name, email });
+    sent.current = joinPerson(name, email);
+    onChange(sent.current);
+  }} />;
+}
+
 function IdentityFieldInput({ field, value, onChange, disabled, secrets, listId }: { field: FormField; value: string; onChange: (value: string) => void; disabled: boolean; secrets: unknown[] | undefined; listId: string }) {
   const label = <span>{field.name}{field.required && <b aria-label="required"> *</b>}</span>;
   const help = field.help && <small>{field.help}</small>;
@@ -268,7 +297,8 @@ function IdentityFieldInput({ field, value, onChange, disabled, secrets, listId 
   }
   if (field.enum.length) return <label className="schema-field">{label}<select value={value} disabled={disabled} onChange={event => onChange(event.target.value)}><option value="">{field.required ? "Select…" : "None"}</option>{field.enum.map(option => <option key={option}>{option}</option>)}</select>{help}</label>;
   if (field.type === fieldSecret) return <label className="schema-field">{label}<input value={value} list={listId} placeholder="name@realm[/space[/stack]]" disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(event.target.value)} /><datalist id={listId}>{(secrets ?? []).map(doc => formatSecretReference((doc as { metadata?: SecretRef }).metadata)).filter(Boolean).map(reference => <option key={reference} value={reference} />)}</datalist>{help}</label>;
-  return <label className="schema-field">{label}<input value={value} placeholder={field.type === fieldPerson ? "Name <email>" : field.type === fieldList ? "Comma-separated" : undefined} disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(event.target.value)} />{help}</label>;
+  if (field.type === fieldPerson) return <PersonFieldInput field={field} value={value} onChange={onChange} disabled={disabled} help={help} />;
+  return <label className="schema-field">{label}<input value={value} placeholder={field.type === fieldList ? "Comma-separated" : undefined} disabled={disabled} autoComplete="off" spellCheck={false} onChange={event => onChange(event.target.value)} />{help}</label>;
 }
 
 // SecretMaterialFields are the write-only inputs of one Secret type, shared by
@@ -375,7 +405,7 @@ export function IdentityForm({ connector, scope, existing, secrets, onSaved, onC
       <label className="schema-check"><input type="checkbox" checked={git.git} disabled={pending} onChange={event => { setGit(old => ({ ...old, git: event.target.checked })); setError(undefined); }} />Also use this token for git on {hosts}</label>
       {git.git ? <>
         <p className="description">{linked ? <>Rotates the linked git identity <code>{linked.name}</code> too.</> : <>Also stored as the git identity <code>{offer.name}</code>: username and token, for HTTPS on {hosts} only.</>} Signing needs an SSH key: <a href={newIdentityLink(offer.connector, scope)}>Import from this machine</a>.</p>
-        <label className="schema-field"><span>Commit author</span><input value={git.gitAuthor} placeholder="Name <email>" disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitAuthor: event.target.value })); setError(undefined); }} /><small>Optional. The name and email of commits made with this identity.</small></label>
+        <PersonFields label="Commit author" name={git.gitAuthorName} email={git.gitAuthorEmail} disabled={pending} help={<small>Optional. The name and email of commits made with this identity.</small>} onChange={(gitAuthorName, gitAuthorEmail) => { setGit(old => ({ ...old, gitAuthorName, gitAuthorEmail })); setError(undefined); }} />
         <label className="schema-field"><span>Username</span><input value={git.gitUsername} placeholder={offer.username} disabled={pending} autoComplete="off" spellCheck={false} onChange={event => { setGit(old => ({ ...old, gitUsername: event.target.value })); setError(undefined); }} /><small>Optional. {title} accepts any non-empty username with a personal access token; empty stores <code>{offer.username}</code>.</small></label>
       </> : <p className="description">Git is unchanged: the token reaches cells as an API token only.{linked && <> The linked git identity <code>{linked.name}</code> keeps the previous token: check the box to rotate it too.</>}</p>}
     </div>}

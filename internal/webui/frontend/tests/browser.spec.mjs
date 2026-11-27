@@ -43,12 +43,12 @@ const expand = (page, name) => page.getByRole("region", { name }).locator("summa
 const userButton = page => page.locator(".toolbar").getByRole("button", { name: /^User menu/ });
 const settingsPage = page => content(page).locator(".settings-page");
 const settingsNav = page => page.getByRole("navigation", { name: "Settings navigation" });
-async function openSettings(page, section = "General") {
+// Every setting is on the one Profile section (#1745), which #/settings opens.
+async function openSettings(page) {
   await userButton(page).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page).toHaveURL(/#\/settings$/);
-  if (section !== "General") await settingsNav(page).getByRole("link", { name: section }).click();
-  await expect(settingsPage(page).getByRole("heading", { name: section, level: 2 })).toBeVisible();
+  await expect(settingsPage(page).getByRole("heading", { name: "Profile", level: 2 })).toBeVisible();
   return settingsPage(page);
 }
 // Sets the appearance on the Settings page and returns to the page the test was on. From a URL with a
@@ -998,6 +998,26 @@ test("periodic refresh waits for a slow inventory traversal", async ({ page }) =
   }
 });
 
+test("the inventory refreshes at the Profile's interval, 10 s by default", async ({ page }) => {
+  await page.clock.install();
+  let realmReads = 0;
+  await mock(page, path => { if (path === "/api/realms") realmReads++; });
+  await page.goto(server.url);
+  await expect(page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link")).toHaveCount(2);
+  await expect(page.locator("main footer")).toContainText("Refreshes every 10 s.");
+  const after = async (ms, reads) => { await page.clock.fastForward(ms); await expect.poll(() => realmReads).toBe(reads); };
+  const start = realmReads;
+  await after(9_000, start);
+  await after(1_100, start + 1);
+  // 30 s from the Profile: the new interval applies at once, without a reload.
+  const settings = await openSettings(page);
+  await settings.getByLabel("Refresh interval").selectOption("30");
+  await expect(page.locator("main footer")).toContainText("Refreshes every 30 s.");
+  const before = realmReads;
+  await after(20_000, before);
+  await after(10_100, before + 1);
+});
+
 test("initial inventory failure is distinct from an empty inventory", async ({ page }) => {
   await mock(page, () => failure);
   await page.goto(server.url);
@@ -1031,7 +1051,8 @@ for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.getByRole("row")).toHaveCount(3);
     await expect(page.locator("pre")).toHaveCount(0);
     const first = page.getByRole("row").nth(1);
-    await expect(first.getByRole("cell").nth(1)).toContainText("Ready");
+    // The checkbox column leads (#1745), then Name and State.
+    await expect(first.getByRole("cell").nth(2)).toContainText("Ready");
     await first.getByRole("link", { name: /View document/ }).click();
     await expect(page.locator("pre")).toContainText('"futureField"');
     await page.getByRole("link", { name: "Show overview" }).click();
@@ -1039,6 +1060,98 @@ for (const type of ["Realms", "Spaces", "Stacks", "Cells"]) {
     await expect(page.getByRole("heading", { name: "Resource overview" })).toBeVisible();
   });
 }
+
+// #1745: row selection and bulk actions on the list tables.
+test("the Cells table selects every matching row across pages and deletes them in one confirmed batch, four at a time, listing the one that failed", async ({ page }) => {
+  const deleted = new Set();
+  const posts = [];
+  let inFlight = 0, peak = 0;
+  const cellsPath = /\/cells$/;
+  await mock(page, async (path, request) => {
+    if (request.method() === "POST") {
+      posts.push(path);
+      inFlight++; peak = Math.max(peak, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 40));
+      inFlight--;
+      if (path === "/api/realms/dev/spaces/shared/stacks/services/cells/api-08/delete") return { status: 409, json: { error: { code: "invalid_state", message: "cell is busy" } } };
+      deleted.add(path.replace(/\/delete$/, ""));
+      return { json: { action: "delete", metadataDeleted: true, cgroupDeleted: true, containersDeleted: true } };
+    }
+    // Even cells are Stopped, odd ones Ready: 30 stopped cells over two realms, two pages of them.
+    if (cellsPath.test(path)) return { json: fixture(path, 30).filter(cell => !deleted.has(`${path}/${cell.metadata.name}`)).map(cell => ({ ...cell, status: { state: Number(cell.metadata.name.slice(-2)) % 2 ? "Ready" : "Stopped" } })) };
+    if (deleted.has(path)) return { status: 404, json: { error: { code: "not_found", message: "cell not found" } } };
+  });
+  await page.goto(`${server.url}#/cells`);
+  const list = page.getByRole("region", { name: "Cells list" });
+  await expect(list.locator(".result-count")).toHaveText("60 results");
+  await list.getByLabel("Filter by state").selectOption("inactive");
+  await expect(list.locator(".result-count")).toHaveText("30 results");
+  const bar = list.getByRole("region", { name: "Bulk actions" });
+  await expect(bar).toHaveCount(0);
+  // The header box takes every matching row, not only the 25 on this page.
+  await list.getByRole("checkbox", { name: "Select all 30 cells matching" }).check();
+  await expect(bar.getByRole("status")).toHaveText("30 cells selected");
+  await expect(list.locator("tbody .bulk-check:checked")).toHaveCount(25);
+  await list.getByRole("button", { name: "Next" }).click();
+  await expect(list.locator("tbody .bulk-check:checked")).toHaveCount(5);
+  // Stopped cells: Start, Kill, Delete and Purge apply; Stop and Restart need a Ready cell.
+  await expect(bar.getByRole("button")).toHaveText(["Start…", "Kill…", "Delete…", "Purge…", "Clear"]);
+  await bar.getByRole("button", { name: "Delete…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete 30 cells" });
+  await expect(dialog.getByRole("list", { name: "Targets" }).getByRole("listitem")).toHaveCount(30);
+  const confirm = dialog.getByRole("button", { name: "Delete 30 cells" });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: /I understand Delete removes these cells/ }).check();
+  await confirm.click();
+  await expect(toasts(page).filter({ hasText: "Delete: 29 of 30 cells done, 1 failed." })).toBeVisible();
+  // One summary toast for the batch, not one per cell.
+  await expect(toasts(page)).toHaveCount(1);
+  expect(posts).toHaveLength(30);
+  expect(peak).toBe(4);
+  const report = list.getByRole("alert", { name: "Delete report" });
+  await expect(report.getByRole("list", { name: "Failed" })).toContainText("dev / shared / services / api-08");
+  await expect(report.getByRole("list", { name: "Failed" })).toContainText("cell is busy");
+  await expect(bar).toHaveCount(0);
+  await expect(list.locator(".result-count")).toHaveText("1 results");
+});
+
+test("every list table selects all its matching rows, and a batch skips each kuke-system target and asks for a typed purge phrase", async ({ page }) => {
+  // A kuke-system realm next to dev: each of its rows is skipped, whatever the action.
+  await mockCatalog(page);
+  await page.route("**/api/realms", route => route.fulfill({ json: [doc(["dev"]), doc(["kuke-system"])] }));
+  for (const [type, noun] of [["Realms", "realms"], ["Spaces", "spaces"], ["Stacks", "stacks"], ["Cells", "cells"]]) {
+    await page.goto(`${server.url}#/${type.toLowerCase()}`);
+    const list = page.getByRole("region", { name: `${type} list` });
+    await expect(list.locator(".result-count")).toHaveText("2 results");
+    await list.getByRole("checkbox", { name: `Select all 2 ${noun} matching` }).check();
+    const bar = list.getByRole("region", { name: "Bulk actions" });
+    await expect(bar.getByRole("status"), type).toHaveText(`2 ${noun} selected`);
+    await bar.getByRole("button", { name: "Purge…" }).click();
+    const one = noun.replace(/s$/, "");
+    const dialog = page.getByRole("dialog", { name: `Purge 1 ${one}` });
+    await expect(dialog.getByRole("list", { name: "Targets" }), type).toHaveText(type === "Realms" ? "dev" : new RegExp(`^dev / `));
+    await expect(dialog.getByRole("list", { name: "Skipped" }), type).toContainText("kuke-system");
+    await expect(dialog.getByRole("list", { name: "Skipped" }), type).toContainText("inside kuke-system, where kukeond runs");
+    const confirm = dialog.getByRole("button", { name: `Purge 1 ${one}` });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox").fill(`purge 1 ${one}`);
+    await expect(confirm, type).toBeEnabled();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+    // Clear empties the selection; the header box clears it too.
+    await bar.getByRole("button", { name: "Clear" }).click();
+    await expect(bar).toHaveCount(0);
+  }
+  // The catalog lists: Delete only.
+  await page.goto(`${server.url}#/configs`);
+  const configs = page.getByRole("region", { name: "Configs list" });
+  await configs.getByRole("checkbox", { name: "Select all 4 configs matching" }).check();
+  const bar = configs.getByRole("region", { name: "Bulk actions" });
+  await expect(bar.getByRole("status")).toHaveText("4 configs selected");
+  await expect(bar.getByRole("button")).toHaveText(["Delete…", "Clear"]);
+  await configs.getByRole("checkbox", { name: "Select all 4 configs matching" }).uncheck();
+  await expect(bar).toHaveCount(0);
+});
 
 test("lists filter by name and realm and retain complete scope for duplicate names", async ({ page }) => {
   await mock(page);
@@ -1296,7 +1409,7 @@ test("Settings sidebar switches hide the cell scope and terminal status and pers
   await expect(link).toContainText("Terminal attached");
   await expect(cells.locator(".cell-link-scope").first()).toBeVisible();
   const cell = page.url();
-  const settings = await openSettings(page, "Profile");
+  const settings = await openSettings(page);
   const scopeSwitch = settings.getByRole("switch", { name: "Show cell scope in sidebar" });
   const statusSwitch = settings.getByRole("switch", { name: "Show terminal status in sidebar" });
   await expect(scopeSwitch).toHaveAttribute("aria-checked", "true");
@@ -1317,7 +1430,7 @@ test("Settings sidebar switches hide the cell scope and terminal status and pers
   await page.reload();
   await expect(cells.getByRole("link").first()).toBeVisible();
   await expect(cells.locator(".cell-link-scope, .cell-group-scope")).toHaveCount(0);
-  const reopened = await openSettings(page, "Profile");
+  const reopened = await openSettings(page);
   await expect(reopened.getByRole("switch", { name: "Show cell scope in sidebar" })).toHaveAttribute("aria-checked", "false");
   expect(await page.evaluate(() => [localStorage.getItem("kukeon-sidebar-show-scope"), localStorage.getItem("kukeon-sidebar-show-terminal-status")])).toEqual(["false", "false"]);
 });
@@ -3853,13 +3966,17 @@ test("an identity form follows the connector's secret types and field types", as
   await page.goto(`${server.url}#/connectors/repo/new-identity`);
   await page.getByRole("button", { name: /^Enter a key or password/ }).click();
   const create = page.getByRole("form", { name: "New Repo identity" });
-  const author = create.getByRole("textbox", { name: /^author/ });
+  // A person field is a Name box and an Email box (#1745), sent joined as Name <email>.
+  const author = create.getByRole("group", { name: "author" });
+  const authorName = author.getByRole("textbox", { name: "author name" });
+  const authorEmail = author.getByRole("textbox", { name: "author email" });
   // Several accepted types: a described choice (#1693); ssh-key shows every field, including the ones limited to it.
   const types = create.getByRole("group", { name: "Secret type" });
   await expect(types.getByRole("radio")).toHaveCount(3);
   await expect(types.locator("label")).toHaveText(["SSH key — clone, push and sign", "Username and password or token — HTTPS", "Author only — commits without push"]);
   await expect(types.getByRole("radio", { name: /^SSH key/ })).toBeChecked();
-  await expect(author).toHaveAttribute("placeholder", "Name <email>");
+  await expect(author.getByText("Name", { exact: true })).toBeVisible();
+  await expect(authorEmail).toHaveAttribute("type", "email");
   await expect(create.getByRole("group", { name: "sign" }).getByRole("checkbox")).toHaveCount(2);
   await expect(create.getByLabel("allowedSignersRef")).toHaveAttribute("placeholder", "name@realm[/space[/stack]]");
   await expect(create.locator("textarea")).toHaveCount(2);
@@ -3870,13 +3987,13 @@ test("an identity form follows the connector's secret types and field types", as
   await types.getByRole("radio", { name: /^SSH key/ }).check();
 
   await create.getByLabel("Identity name").fill("repo-new");
-  await author.fill("not-a-person");
+  await authorName.fill("Dev");
   await create.getByRole("textbox", { name: /^hosts/ }).fill("example.com, example.org/group");
   await create.getByRole("group", { name: "sign" }).getByLabel("commits").check();
   await create.getByLabel("Private key").fill(key);
   await create.getByRole("button", { name: "Create identity" }).click();
-  await expect(create.getByRole("alert")).toContainText("author must be written Name <email>.");
-  await author.fill("Dev <dev@example.com>");
+  await expect(create.getByRole("alert")).toContainText("author needs a name and an email.");
+  await authorEmail.fill("dev@example.com");
   await expect(create.getByRole("checkbox", { name: "Make this the default in dev" })).toBeChecked();
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-new/ })).toContainText("hosts: example.com,example.org/group");
@@ -3896,7 +4013,8 @@ test("an identity form follows the connector's secret types and field types", as
   await expect(create.getByRole("textbox", { name: /^hosts/ })).toHaveCount(0);
   await expect(create.getByRole("group", { name: "sign" })).toHaveCount(0);
   await create.getByLabel("Identity name").fill("repo-author");
-  await author.fill("Dev <dev@example.com>");
+  await authorName.fill("Dev");
+  await authorEmail.fill("dev@example.com");
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(page.getByRole("table", { name: "Repo identities" }).getByRole("row", { name: /repo-author/ })).toContainText("opaque");
   expect(world.posts("/api/connectors/repo/identities")[1].body).toEqual({
@@ -3951,6 +4069,30 @@ test("a connector page shows its title with the slug as context, and its scope p
   await expect(heading.locator(".page-context")).toHaveCount(0);
   await page.goto(`${server.url}#/connectors`);
   await expect(heading.locator("h1")).toHaveText("Connectors");
+});
+
+// #1745: a connector's identities are deleted in one batch; Rotate stays a row action.
+test("a connector's identities are selected together and deleted in one batch, skipping one in kuke-system", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.secrets.push({ name: "example-system", realm: "kuke-system", connector: "example-token", identity: { account: "system" } });
+  await page.goto(`${server.url}#/connectors/example-token`);
+  const panel = page.getByRole("region", { name: "Example identities" });
+  const table = panel.getByRole("table", { name: "Example identities" });
+  await expect(table.locator("tbody tr")).toHaveCount(4);
+  await panel.getByRole("checkbox", { name: "Select all 4 identities" }).check();
+  const bar = panel.getByRole("region", { name: "Bulk actions" });
+  await expect(bar.getByRole("status")).toHaveText("4 identities selected");
+  await bar.getByRole("button", { name: "Delete…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete 3 identities" });
+  await expect(dialog.getByRole("list", { name: "Targets" }).getByRole("listitem")).toHaveCount(3);
+  await expect(dialog.getByRole("list", { name: "Skipped" })).toContainText("example-system");
+  await dialog.getByRole("checkbox", { name: "I understand this permanently deletes every identity listed." }).check();
+  await dialog.getByRole("button", { name: "Delete 3 identities" }).click();
+  await expect(toasts(page).filter({ hasText: "Delete: 3 of 3 identities done, 1 skipped." })).toBeVisible();
+  await expect(panel.getByRole("status", { name: "Delete report" }).getByRole("list", { name: "Skipped" })).toContainText("example-system");
+  await expect(table.locator("tbody tr")).toHaveCount(1);
+  expect(world.secrets.filter(secret => secret.connector === "example-token").map(secret => secret.name)).toEqual(["example-system"]);
+  await expect(table.getByRole("link", { name: /^Rotate Example identity/ })).toHaveCount(1);
 });
 
 test("a git-delivered connector imports its identity from the server's host", async ({ page }) => {
@@ -4019,12 +4161,14 @@ test("a token connector stores its token for git too, and makes both the default
   await expect(create.getByLabel("Username")).toHaveAttribute("placeholder", "x-access-token");
   await expect(create.getByText("Forge accepts any non-empty username")).toBeVisible();
   await create.getByRole("textbox", { name: /^Token/ }).fill(token);
-  await create.getByLabel("Commit author").fill("nobody");
+  // The commit author is a Name box and an Email box (#1745).
+  await create.getByRole("textbox", { name: "Commit author email" }).fill("nobody@example.com");
   await create.getByRole("button", { name: "Create identity" }).click();
-  await expect(create.getByRole("alert")).toContainText("Commit author must be written Name <email>.");
+  await expect(create.getByRole("alert")).toContainText("Commit author needs a name and an email.");
   expect(posts()).toHaveLength(0);
   await create.getByRole("textbox", { name: /^Token/ }).fill(token);
-  await create.getByLabel("Commit author").fill("Dev <dev@example.com>");
+  await create.getByRole("textbox", { name: "Commit author name" }).fill("Dev");
+  await create.getByRole("textbox", { name: "Commit author email" }).fill("dev@example.com");
   await create.getByRole("button", { name: "Create identity" }).click();
   await expect(toasts(page).filter({ hasText: "Forge identity forge-token created in dev. Git identity forge-git created for forge.example.com. Both are now the defaults in dev." })).toBeVisible();
   expect(posts().map(request => request.body)).toEqual([{
@@ -4857,6 +5001,44 @@ function lifecycleMock(state) {
   return { posts, handler };
 }
 
+// #1745: Auto-attach terminals, On by default, reattaches after a restart; Off, a terminal waits for Attach.
+test("with Auto-attach terminals on a restart reattaches by itself; off, the terminal waits for Attach", async ({ page }) => {
+  const state = { value: "Ready" };
+  const { posts, handler } = lifecycleMock(state);
+  await mock(page, handler);
+  let sockets = 0;
+  await page.routeWebSocket("**/attach", socket => { sockets++; readyAttach(socket); });
+  const cell = `${server.url}#/workspace/dev/shared/services/api`;
+  const connection = terminalTools(page).locator(".terminal-connection-state");
+  const row = page.locator(".cell-page-title-row");
+  await page.goto(cell);
+  await expect(connection).toHaveText("Attached");
+  expect(sockets).toBe(1);
+  await row.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => posts).toEqual(["restart"]);
+  await expect.poll(() => sockets).toBe(2);
+  await expect(connection).toHaveText("Attached");
+
+  // Off: opening the cell attaches nothing until Attach.
+  const settings = await openSettings(page);
+  await settings.getByRole("switch", { name: "Auto-attach terminals" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-terminal-auto-attach"))).toBe("false");
+  await page.goto(cell);
+  await page.reload();
+  await expect(connection).toHaveText("Detached");
+  await page.waitForTimeout(300);
+  expect(sockets).toBe(2);
+  await terminalTools(page).getByRole("button", { name: "Attach", exact: true }).click();
+  await expect(connection).toHaveText("Attached");
+  expect(sockets).toBe(3);
+  // A restart ends the session: Reconnect attaches to the new process, nothing reattaches by itself.
+  await row.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => posts).toEqual(["restart", "restart"]);
+  await expect(terminalTools(page).getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(sockets).toBe(3);
+});
+
 test("cell screen toasts stay clear of the title-row buttons, so Start follows Stop without dismissing the toast", async ({ page }) => {
   // Eight view × viewport passes take over half the default 30s on a single CPU.
   test.slow();
@@ -5253,8 +5435,9 @@ test("New team reads a repository with a git identity, walks the steps, previews
   await expect(steps.getByRole("heading", { name: "Credentials" })).toBeVisible();
   await steps.getByRole("button", { name: "Next" }).click();
 
-  await expect(steps.getByRole("button", { name: "Add team" })).toBeDisabled();
-  await steps.getByRole("button", { name: "Preview" }).click();
+  // The Review step previews by itself (#1745): it has no Preview button and no Cancel link.
+  await expect(steps.getByRole("button", { name: "Preview" })).toHaveCount(0);
+  await expect(steps.getByRole("link", { name: "Cancel" })).toHaveCount(0);
   const preview = steps.getByRole("region", { name: "Preview" });
   await expect(preview.getByRole("table", { name: "Role and harness pairs" })).toContainText("pick-issue (@hourly)");
   await expect(preview.getByRole("list", { name: "Missing secrets" })).toContainText("gh-token");
@@ -5360,7 +5543,6 @@ test("Edit team switches one schedule off and moves the project ref without YAML
   await steps.getByLabel("Schedule of dev task health-sweep").selectOption("on");
   await steps.getByRole("button", { name: "Next" }).click();
   await steps.getByRole("button", { name: "Next" }).click();
-  await steps.getByRole("button", { name: "Preview" }).click();
   await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
   const sent = lastPost(world, "/api/teams/preview");
   expect(Object.keys(sent).sort()).toEqual(["form", "name"]);
@@ -5406,7 +5588,6 @@ test("Edit team switches a task's schedule on for one harness of a two-harness r
   await steps.getByLabel("Schedule of dev task health-sweep on claude").selectOption("on");
   await steps.getByRole("button", { name: "Next" }).click();
   await steps.getByRole("button", { name: "Next" }).click();
-  await steps.getByRole("button", { name: "Preview" }).click();
   await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
   const sent = lastPost(world, "/api/teams/preview");
   expect(sent.form.roles.items[0].tasks).toEqual({ all: false, items: [{ name: "health-sweep", suspend: null, harnesses: { claude: { suspend: false } } }] });
@@ -5653,13 +5834,13 @@ test("Volumes show reclaim policy and mount counts, and a Volume page lists moun
   ] }));
   await page.goto(`${server.url}#/volumes`);
   const list = page.getByRole("region", { name: "Volumes list" });
-  await expect(list.getByRole("columnheader")).toHaveText(["Name", "Scope", "Reclaim policy", "Mounted by", "Actions"]);
+  await expect(list.getByRole("columnheader")).toHaveText(["", "Name", "Scope", "Reclaim policy", "Mounted by", "Actions"]);
   const row = scope => list.getByRole("row").filter({ has: page.getByRole("cell", { name: scope, exact: true }) });
-  await expect(row("dev").getByRole("cell").nth(2)).toHaveText("Delete");
-  await expect(row("dev").getByRole("cell").nth(3)).toHaveText("1");
-  await expect(row("dev / shared").getByRole("cell").nth(2)).toHaveText("Retain");
-  await expect(row("dev / shared").getByRole("cell").nth(3)).toHaveText("1");
-  await expect(row("dev / shared / services").getByRole("cell").nth(3)).toHaveText("0");
+  await expect(row("dev").getByRole("cell").nth(3)).toHaveText("Delete");
+  await expect(row("dev").getByRole("cell").nth(4)).toHaveText("1");
+  await expect(row("dev / shared").getByRole("cell").nth(3)).toHaveText("Retain");
+  await expect(row("dev / shared").getByRole("cell").nth(4)).toHaveText("1");
+  await expect(row("dev / shared / services").getByRole("cell").nth(4)).toHaveText("0");
 
   await page.goto(`${server.url}#/volumes/dev/shared/data`);
   await expect(page.locator(".details-grid dt")).toHaveText(["Name", "Scope", "Kind", "Reclaim policy"]);
@@ -5700,13 +5881,13 @@ test("a scheduled Config shows its Schedule panel and list columns, and its cell
 
   await page.goto(`${server.url}#/configs`);
   const list = page.getByRole("region", { name: "Configs list" });
-  await expect(list.getByRole("columnheader")).toHaveText(["Name", "Scope", "Schedule", "Next fire", "Actions"]);
+  await expect(list.getByRole("columnheader")).toHaveText(["", "Name", "Scope", "Schedule", "Next fire", "Actions"]);
   const row = name => list.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
-  await expect(row("sweep").getByRole("cell").nth(2)).toHaveText("*/15 * * * * (Europe/Madrid)");
-  await expect(row("sweep").getByRole("cell").nth(3)).toHaveText("2026-11-23T10:15:00Z");
-  await expect(row("paused").getByRole("cell").nth(2)).toHaveText("@daily");
-  await expect(row("paused").getByRole("cell").nth(3)).toHaveText("suspended");
-  await expect(row("plain").getByRole("cell").nth(2)).toHaveText("—");
+  await expect(row("sweep").getByRole("cell").nth(3)).toHaveText("*/15 * * * * (Europe/Madrid)");
+  await expect(row("sweep").getByRole("cell").nth(4)).toHaveText("2026-11-23T10:15:00Z");
+  await expect(row("paused").getByRole("cell").nth(3)).toHaveText("@daily");
+  await expect(row("paused").getByRole("cell").nth(4)).toHaveText("suspended");
+  await expect(row("plain").getByRole("cell").nth(3)).toHaveText("—");
 
   await page.goto(`${server.url}#/configs/dev/shared/services/sweep`);
   const panel = page.getByRole("region", { name: "Schedule" });
@@ -5799,7 +5980,7 @@ test("the Spaces table shows each Space's CIDR, distinguishing unallocated, lega
   });
   await page.goto(`${server.url}#/spaces`);
   const list = page.getByRole("region", { name: "Spaces list" });
-  await expect(list.getByRole("columnheader")).toHaveText(["Name", "State", "CIDR", "Scope", "Actions"]);
+  await expect(list.getByRole("columnheader")).toHaveText(["", "Name", "State", "CIDR", "Scope", "Actions"]);
   const cidr = name => list.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) }).locator("td.space-cidr");
   await expect(cidr("alpha")).toHaveText("10.88.1.0/24");
   await expect(cidr("bravo")).toHaveText("10.22.0.0/16 (legacy conflist)");
@@ -5850,7 +6031,7 @@ test("each route family shows its view's sidebar and side of the switch", async 
   await mockCatalog(page);
   const workbench = ["#/", "#/workspace/dev/shared/services/api", "#/new-cell", "#/resource/dev/shared/services/api", "#/resource/dev/shared/services/api?document=1", "#/resource/dev/shared/services/api/web"];
   const manage = ["#/resources", "#/realms", "#/cells", "#/resource/dev", "#/resource/dev/shared/services", "#/configs", "#/new-config", "#/secrets", "#/connectors", "#/teams", "#/new-team", "#/sources", "#/images", "#/daemon", "#/daemon/logs", "#/health", "#/daemon/health"];
-  // The settings routes; an unknown section shows General.
+  // The settings routes; each one shows Profile, the only section (#1745).
   const settings = ["#/settings", "#/settings/profile", "#/settings/nothing"];
   for (const hash of [...workbench, ...manage, ...settings]) {
     const isWorkbench = workbench.includes(hash);
@@ -5864,12 +6045,11 @@ test("each route family shows its view's sidebar and side of the switch", async 
     await expect(page.getByRole("navigation", { name: "Cell navigation" }), hash).toHaveCount(isWorkbench ? 1 : 0);
     await expect(settingsNav(page), hash).toHaveCount(isSettings ? 1 : 0);
     if (isSettings) {
-      const section = hash.endsWith("/profile") ? "Profile" : "General";
       await expect(page.locator(".page-heading h1"), hash).toHaveText("Settings");
-      await expect(settingsPage(page).getByRole("heading", { level: 2 }), hash).toHaveText(section);
-      await expect(settingsNav(page).getByRole("link"), hash).toHaveText(["General", "Profile"]);
-      await expect(settingsNav(page).locator('[aria-current="page"]'), hash).toHaveText(section);
-      await expect(page.locator(".breadcrumbs"), hash).toHaveText(section === "Profile" ? "SettingsProfile" : "Settings");
+      await expect(settingsPage(page).getByRole("heading", { level: 2 }), hash).toHaveText("Profile");
+      await expect(settingsNav(page).getByRole("link"), hash).toHaveText(["Profile"]);
+      await expect(settingsNav(page).locator('[aria-current="page"]'), hash).toHaveText("Profile");
+      await expect(page.locator(".breadcrumbs"), hash).toHaveText("SettingsProfile");
     }
     // No page renders a horizontal navigation row.
     await expect(page.locator(".resources-nav, .nav-more"), hash).toHaveCount(0);
@@ -5908,7 +6088,7 @@ test("switching to Manage and back keeps an attached terminal", async ({ page })
   }
   // Opening the settings routes closes no session either; the open cell's terminal is still attached.
   const cell = page.url();
-  await openSettings(page, "Profile");
+  await openSettings(page);
   await page.goto(cell);
   await expect(state).toHaveText("Attached");
   expect(attaches).toBe(1);
@@ -5932,11 +6112,7 @@ test("Back and Forward across a view switch restore the page and its sidebar", a
   await expect(page.getByRole("complementary", { name: "Cell sidebar" })).toBeVisible();
   await expect(switchSide(page)).toHaveText("Workbench");
   // A settings page is one more history entry: Back and Forward restore it, its sidebar and the focus.
-  await openSettings(page, "Profile");
-  await expect(page.locator(".page-heading h1")).toBeFocused();
-  await page.goBack();
-  await expect(page).toHaveURL(/#\/settings$/);
-  await expect(settingsNav(page).locator('[aria-current="page"]')).toHaveText("General");
+  await openSettings(page);
   await expect(page.locator(".page-heading h1")).toBeFocused();
   await page.goBack();
   await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
@@ -5945,10 +6121,11 @@ test("Back and Forward across a view switch restore the page and its sidebar", a
   await expect(page.getByRole("complementary", { name: "Manage sidebar" })).toBeVisible();
   await page.goForward();
   await page.goForward();
-  await page.goForward();
-  await expect(page).toHaveURL(/#\/settings\/profile$/);
+  await expect(page).toHaveURL(/#\/settings$/);
   await expect(page.getByRole("complementary", { name: "Settings sidebar" })).toBeVisible();
+  await expect(settingsNav(page).locator('[aria-current="page"]')).toHaveText("Profile");
   await expect(settingsPage(page).getByRole("heading", { name: "Profile", level: 2 })).toBeVisible();
+  await expect(page.locator(".page-heading h1")).toBeFocused();
 });
 
 test("grid tiles show the terminal's last rows, attention first, and a state-only tile without a screen", async ({ page }) => {
@@ -6215,14 +6392,21 @@ test("Default Group by groups both lists until one picks its own, and changing i
   await expect(cells.getByRole("region", { name: "platform group" })).toBeVisible();
 });
 
-test("Profile shows its nine settings in three groups with their defaults; each applies at once, works from the keyboard and survives a reload", async ({ page }) => {
+test("Profile shows every setting in its groups with their defaults; each applies at once, works from the keyboard and survives a reload", async ({ page }) => {
   await mock(page);
-  await page.goto(`${server.url}#/settings/profile`);
+  await page.goto(`${server.url}#/settings`);
   const settings = settingsPage(page);
   await expect(settings).toContainText("Stored in this browser only.");
-  await expect(settings.getByRole("heading", { level: 3 })).toHaveText(["Cell list", "Sidebar", "Workbench grid"]);
-  const switches = { "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show unread bytes": false, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
-  const keys = { "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show unread bytes": "kukeon-show-unread-bytes", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
+  // One section, Profile (#1745): the former General settings lead it.
+  await expect(settings.getByRole("heading", { level: 2 })).toHaveText(["Profile"]);
+  await expect(settings.getByRole("heading", { level: 3 })).toHaveText(["Appearance", "Terminal", "Refresh", "Workbench", "Cell list", "Sidebar", "Workbench grid"]);
+  await expect(settings.getByRole("region", { name: "Appearance" }).getByRole("radio", { name: "System" })).toBeChecked();
+  await expect(settings.getByLabel("Refresh interval")).toHaveValue("10");
+  await expect(settings.getByLabel("Refresh interval").locator("option")).toHaveText(["5 s", "10 s", "30 s", "60 s"]);
+  const switches = { "Auto-attach terminals": true, "Show Get started": true, "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show unread bytes": false, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
+  const keys = { "Auto-attach terminals": "kukeon-terminal-auto-attach", "Show Get started": "kukeon-get-started", "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show unread bytes": "kukeon-show-unread-bytes", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
+  await expect(settings.getByRole("region", { name: "Terminal" }).getByRole("switch")).toHaveCount(1);
+  await expect(settings.getByRole("region", { name: "Workbench", exact: true }).getByRole("switch")).toHaveCount(1);
   await expect(settings.getByRole("region", { name: "Cell list" }).getByRole("radio")).toHaveCount(2);
   // Show unread bytes (#1696) follows Show terminal status in sidebar.
   const sidebarSwitches = settings.getByRole("region", { name: "Sidebar" }).getByRole("switch");
@@ -6252,6 +6436,7 @@ test("Profile shows its nine settings in three groups with their defaults; each 
   await page.keyboard.press("ArrowRight");
   await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
   await settings.getByLabel("Default Group by").selectOption("team");
+  await settings.getByLabel("Refresh interval").selectOption("30");
   for (const [index, name] of Object.keys(switches).entries()) {
     await settings.getByRole("switch", { name }).focus();
     await page.keyboard.press(index % 2 ? "Enter" : "Space");
@@ -6260,8 +6445,13 @@ test("Profile shows its nine settings in three groups with their defaults; each 
   await page.reload();
   await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
   await expect(settings.getByLabel("Default Group by")).toHaveValue("team");
+  await expect(settings.getByLabel("Refresh interval")).toHaveValue("30");
   for (const [name, on] of Object.entries(switches)) await expect(settings.getByRole("switch", { name }), name).toHaveAttribute("aria-checked", String(!on));
-  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-list-style"), localStorage.getItem("kukeon-default-group-by")])).toEqual(["default", "team"]);
+  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-list-style"), localStorage.getItem("kukeon-default-group-by"), localStorage.getItem("kukeon-refresh-seconds")])).toEqual(["default", "team", "30"]);
+  // An interval outside the offered values reads as 10 s.
+  await page.evaluate(() => localStorage.setItem("kukeon-refresh-seconds", "7"));
+  await page.reload();
+  await expect(settings.getByLabel("Refresh interval")).toHaveValue("10");
   expect(await page.evaluate(stored => stored.map(key => localStorage.getItem(key)), Object.values(keys))).toEqual(Object.keys(keys).map(name => String(!switches[name])));
 });
 
@@ -6281,7 +6471,7 @@ test("at 390×844 the drawer shows the Settings navigation, and its collapsed ra
   await fits();
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await expect(sidebar).toBeVisible();
-  await expect(settingsNav(page).getByRole("link")).toHaveText(["General", "Profile"]);
+  await expect(settingsNav(page).getByRole("link")).toHaveText(["Profile"]);
   await expect(sidebar.getByRole("navigation", { name: "Cell navigation" })).toHaveCount(0);
   await expect(sidebar.getByRole("navigation", { name: "Manage navigation" })).toHaveCount(0);
   await settingsNav(page).getByRole("link", { name: "Profile" }).click();
@@ -6615,11 +6805,53 @@ test("Edit team switches GitHub on for a role, picks its identity, and shows a c
   await github.check();
   await access.getByLabel("Identity of github for dev").selectOption("bot-token");
   await steps.getByRole("button", { name: "Next" }).click();
-  await steps.getByRole("button", { name: "Preview" }).click();
   await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
   const sent = lastPost(world, "/api/teams/preview");
   expect(sent.form.roles.items[0].connectors).toEqual([{ name: "github", enabled: true, identity: "bot-token" }]);
   expect(sent.form.connectors).toEqual({ inherit: true, items: {} });
+});
+
+// #1745: in New team a selected role's per-role connectors start On, and Resolves to is filled from a dry run
+// of the form, run in the background on the Credentials step.
+test("New team starts a role's connectors on and fills Resolves to from a background dry run", async ({ page }) => {
+  const world = await mockTeams(page);
+  await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: roleAccessConnectors }));
+  const previews = [];
+  await page.route(url => url.pathname === "/api/teams/preview", route => {
+    previews.push(route.request().postDataJSON());
+    return route.fulfill({ json: { plan: world.plan("web", { kind: "file", detail: "form" }),
+      connectors: [{ role: "dev", config: "web-dev-claude", connector: "github", state: "unresolved", method: "token", fill: "MISSING", setByTeam: true }],
+      connectorNotes: ["web-dev-claude-pick-issue: connectors not resolved: blueprint not stored"] } });
+  });
+  await page.goto(`${server.url}#/new-team`);
+  const steps = wizard(page);
+  await steps.getByRole("textbox", { name: /^Repository address/ }).fill("github.com/acme/web");
+  await steps.getByRole("button", { name: "Read repository" }).click();
+  await expect(steps.getByRole("status", { name: "Repository read" })).toBeVisible();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Next" }).click();
+  // A role selected here starts with every per-role connector on.
+  const role = steps.getByRole("checkbox", { name: "Role dev from project" });
+  await role.uncheck();
+  await role.check();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("heading", { name: "Credentials" })).toBeVisible();
+  const access = steps.getByRole("group", { name: "Per-role access" });
+  await expect(access.getByRole("checkbox", { name: "GitHub for dev" })).toBeChecked();
+  await expect(access.getByRole("checkbox", { name: "Git for dev" })).toBeChecked();
+  // The dry run answers on its own; the form stays editable meanwhile.
+  await expect(access.getByRole("table", { name: "Per-role connectors" })).toBeVisible();
+  const github = access.locator("tbody tr").filter({ hasText: "GitHub" });
+  await expect(github.locator(".resolves-to")).toHaveText("web-dev-claude: MISSING");
+  await expect(access.getByRole("list", { name: "Not resolved" })).toContainText("blueprint not stored");
+  expect(previews).toHaveLength(1);
+  expect(previews[0].form.roles.items[0].connectors).toEqual([{ name: "git", enabled: true, identity: "" }, { name: "github", enabled: true, identity: "" }]);
+  // Review shows the background dry run's plan: no second request for the unchanged form.
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  expect(previews).toHaveLength(1);
+  await expect(steps.getByRole("button", { name: "Add team" })).toBeEnabled();
 });
 
 test("Edit team disables per-role access while the team inherits its roles (#1649)", async ({ page }) => {
@@ -7312,19 +7544,18 @@ test("the Workbench shows Get started with five steps whose actions reach their 
   await expect(startedStep(page, "login")).toHaveAccessibleName("Log in to Demo: Done", { timeout: 10000 });
   await expect(card.locator(".panel-heading .badge")).toHaveText("2 of 3 done");
 
-  // The first agent completes the required steps: the card goes away for good.
+  // The first agent completes the required steps. Get started is one switch (#1745): the card stays until
+  // it is dismissed, and nothing is stored for it.
   await startedStep(page, "agent").getByRole("link", { name: "New agent" }).click();
   await page.getByRole("region", { name: "New agent" }).getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/default-agent-demo-a1b2c3-d4e5f6$/);
   await page.locator(".view-switch").getByRole("link", { name: "Workbench" }).click();
   await expect(content(page).getByRole("region", { name: "Cell terminals" })).toBeVisible();
-  await expect(card).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("kukeon-get-started"))).toBe("hidden");
+  await expect(card).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-get-started"))).toBeNull();
   expect(await pageMarked(page)).toBe(true);
 
-  // The user menu reopens it: required steps done, the others still recommended until set up.
-  await userButton(page).click();
-  await page.getByRole("menuitem", { name: "Get started" }).click();
+  // Required steps done, the others still recommended until set up.
   await expect.poll(() => stepNames(page)).toEqual(["Initialize: Done", "Log in to Demo: Done", "Set up Repo and Forge: Recommended", "Enable majordomo: Optional", "Launch your first agent: Done"]);
   await expect(card.locator(".panel-heading .badge")).toHaveText("3 of 3 done");
   await expect(card.getByRole("status")).toContainText("You are set up.");
@@ -7332,6 +7563,23 @@ test("the Workbench shows Get started with five steps whose actions reach their 
   host.secrets.push({ metadata: { name: "repo-key", realm: "default" }, spec: { connector: "repo", type: "ssh-key" } });
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(startedStep(page, "git-identity")).toHaveAccessibleName("Set up Repo and Forge: Done");
+});
+
+test("Get started reads a card mode stored before it was one switch, and the Profile switch shows and hides it", async ({ page }) => {
+  const host = onboardingHost();
+  await host.install(page);
+  await seed(page, { "kukeon-get-started": "hidden" });
+  await page.goto(server.url);
+  await expect(content(page).getByRole("heading", { name: "No active cells" })).toBeVisible();
+  await expect(getStarted(page)).toHaveCount(0);
+  const settings = await openSettings(page);
+  const show = settings.getByRole("switch", { name: "Show Get started" });
+  await expect(show).toHaveAttribute("aria-checked", "false");
+  await show.click();
+  await expect(show).toHaveAttribute("aria-checked", "true");
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-get-started"))).toBe("true");
+  await page.goto(server.url);
+  await expect(getStarted(page)).toBeVisible();
 });
 
 test("Get started can be dismissed, stays dismissed across a reload and reopens from the user menu", async ({ page }) => {
@@ -7343,6 +7591,8 @@ test("Get started can be dismissed, stays dismissed across a reload and reopens 
   await expect(content(page).getByRole("heading", { name: "No active cells" })).toBeVisible();
   await getStarted(page).getByRole("button", { name: "Dismiss" }).click();
   await expect(getStarted(page)).toHaveCount(0);
+  // Dismiss turns the Profile's Show Get started off (#1745).
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-get-started"))).toBe("false");
   await page.reload();
   await expect(content(page).getByRole("heading", { name: "No active cells" })).toBeVisible();
   await expect(getStarted(page)).toHaveCount(0);
