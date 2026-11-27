@@ -107,7 +107,8 @@ type ContainerSpec struct {
 	// kuketty reads them straight from this ContainerDoc.Spec (it owns the
 	// spec→TerminalSpec build since issue #641) — there is no sidecar doc. Has
 	// no effect unless Attachable=true (kuketty owns the resolution step).
-	// Per-repo outcome surfaces in ContainerStatus.Repos over RPC. Issue #617.
+	// Per-repo outcome surfaces in ContainerStatus.Repos through kuketty's
+	// supervisor document. Issues #617, #1711.
 	Repos []ContainerRepo `json:"repos,omitempty"                  yaml:"repos,omitempty"`
 	// Git declares the container's default git identity, stored credentials
 	// and signing config. The daemon renders it into a cell-global gitconfig
@@ -387,8 +388,8 @@ type VolumeRef struct {
 // clones (or fetches) it into Target before the workload starts, replacing the
 // hand-rolled `if [ ! -d $DIR/.git ]; then git clone …; fi` blocks that team
 // blueprint templates duplicate in onInit scripts today. The clone state
-// becomes daemon-observable via ContainerStatus.Repos (reported over RPC in
-// phase 1b, #642) rather than buried in attach stderr. Issue #617, phase 1a of
+// becomes daemon-observable via ContainerStatus.Repos (reported through the
+// supervisor document, #1711) rather than buried in attach stderr. Issue #617, phase 1a of
 // #423.
 type ContainerRepo struct {
 	// Name is the operator-facing identifier for the repo, echoed back in
@@ -580,33 +581,48 @@ type ContainerResources struct {
 }
 
 type ContainerStatus struct {
-	Name  string         `json:"name"                yaml:"name"`
-	ID    string         `json:"id"                  yaml:"id"`
-	State ContainerState `json:"state"               yaml:"state"`
+	Name  string         `json:"name"                 yaml:"name"`
+	ID    string         `json:"id"                   yaml:"id"`
+	State ContainerState `json:"state"                yaml:"state"`
 	// CreatedAt is the wall-clock time of the first time the controller
 	// observed this container in cell.Spec.Containers. Stamped on the
 	// first populateCellContainerStatuses pass and preserved across
 	// reconciliations (mirrors realm/space/stack/cell.Status.CreatedAt).
 	// Sources the AGE column on `kuke get container`. Issue #605.
-	CreatedAt    time.Time `json:"createdAt,omitempty" yaml:"createdAt,omitempty"`
-	RestartCount int       `json:"restartCount"        yaml:"restartCount"`
-	RestartTime  time.Time `json:"restartTime"         yaml:"restartTime"`
-	StartTime    time.Time `json:"startTime"           yaml:"startTime"`
-	FinishTime   time.Time `json:"finishTime"          yaml:"finishTime"`
-	ExitCode     int       `json:"exitCode"            yaml:"exitCode"`
-	ExitSignal   string    `json:"exitSignal"          yaml:"exitSignal"`
+	CreatedAt    time.Time `json:"createdAt,omitempty"  yaml:"createdAt,omitempty"`
+	RestartCount int       `json:"restartCount"         yaml:"restartCount"`
+	RestartTime  time.Time `json:"restartTime"          yaml:"restartTime"`
+	StartTime    time.Time `json:"startTime"            yaml:"startTime"`
+	FinishTime   time.Time `json:"finishTime"           yaml:"finishTime"`
+	ExitCode     int       `json:"exitCode"             yaml:"exitCode"`
+	ExitSignal   string    `json:"exitSignal"           yaml:"exitSignal"`
+	// Reason is a short reason code for how the container ended, set when it
+	// ended on its own with a non-zero exit: one of the ContainerReason*
+	// constants (RepoFailed, StageFailed, SupervisorFailed,
+	// SupervisorTerminated, WorkloadFailed, SupervisorStatusUnavailable).
+	// Empty while the container runs, after a clean exit and after an
+	// operator stop. Issue #1711.
+	Reason string `json:"reason,omitempty"     yaml:"reason,omitempty"`
+	// Message is the human-readable detail backing Reason: the failing repo
+	// and git's error, the stage and its error, or the exit code.
+	Message string `json:"message,omitempty"    yaml:"message,omitempty"`
 	// Repos reports the per-repo outcome of kuketty's pre-Serve clone/fetch
-	// step for an Attachable container's Spec.Repos. Empty for containers
-	// with no repos[] or that have not yet been provisioned. Populated over
-	// the GetSetupStatus RPC in phase 1b (#642); phase 1a lands the schema
-	// only. Issue #617.
-	Repos []RepoStatus `json:"repos,omitempty"     yaml:"repos,omitempty"`
+	// step for an Attachable container's Spec.Repos, read from the
+	// supervisor document in every state, including after a failure. Empty
+	// for containers with no repos[] or that have not yet reported. Issues
+	// #617, #1711.
+	Repos []RepoStatus `json:"repos,omitempty"      yaml:"repos,omitempty"`
 	// Stages reports the per-stage outcome of kuketty's pre-Serve execution of
-	// the container's runOn: create TtyStages, in declaration order. Empty for
-	// containers with no create stages or that have not yet been provisioned.
-	// Populated over the GetSetupStatus RPC in phase B (#689); this phase (#635)
-	// lands the schema only. Issue #635.
-	Stages []StageStatus `json:"stages,omitempty"    yaml:"stages,omitempty"`
+	// the container's runOn: create TtyStages, in declaration order, read from
+	// the supervisor document in every state. Empty for containers with no
+	// create stages or that have not yet reported. Issues #635, #1711.
+	Stages []StageStatus `json:"stages,omitempty"     yaml:"stages,omitempty"`
+	// Supervisor is what an Attachable container's terminal supervisor
+	// (kuketty) last reported in its tty/supervisor.json document: its phase,
+	// the repo or stage in progress, its terminals and its exit. Nil for
+	// non-attachable containers and until a document has been read. Issue
+	// #1711.
+	Supervisor *SupervisorStatus `json:"supervisor,omitempty" yaml:"supervisor,omitempty"`
 }
 
 // RepoStatus is the resolved state of a single ContainerRepo after kuketty's
@@ -764,6 +780,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Git = cloneGit(out.Spec.Git)
 	out.Status.Repos = cloneRepoStatuses(out.Status.Repos)
 	out.Status.Stages = cloneStageStatuses(out.Status.Stages)
+	out.Status.Supervisor = out.Status.Supervisor.DeepCopy()
 
 	if out.Spec.Capabilities != nil {
 		caps := *out.Spec.Capabilities

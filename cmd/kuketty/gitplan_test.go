@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/gitcred/gitplan"
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -113,11 +112,11 @@ func TestProcessRepos_PlanRewritesURLAndWritesLocalConfig(t *testing.T) {
 		"other": {URL: declared},
 	}}
 
-	statuses, err := processRepos(context.Background(), repos, plan, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, plan, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("processRepos: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateCloned || statuses[0].Error != "" {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateCloned || statuses[0].Error != "" {
 		t.Fatalf("status = %+v, want a single clean clone", statuses)
 	}
 	if got := gitOut(t, target, "remote", "get-url", "origin"); got != origin {
@@ -179,17 +178,17 @@ func TestProcessRepos_PlanRefreshedOnRestart(t *testing.T) {
 		}}}
 	}
 
-	if _, err := processRepos(context.Background(), repos, planFor("old@example.com", "old"), discardLogger()); err != nil {
+	if _, err := processRepos(context.Background(), repos, planFor("old@example.com", "old"), discardLogger(), nil); err != nil {
 		t.Fatalf("first processRepos (clone): %v", err)
 	}
 	// The workload (or an operator) re-pointed origin; a restart restores it.
 	gitRun(t, target, "remote", "set-url", "origin", declared)
 
-	statuses, err := processRepos(context.Background(), repos, planFor("new@example.com", "new"), discardLogger())
+	statuses, err := processRepos(context.Background(), repos, planFor("new@example.com", "new"), discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("second processRepos (fetch): %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFetched || statuses[0].Error != "" {
+	if len(statuses) != 1 || statuses[0].State != v1beta1.RepoStateFetched || statuses[0].Error != "" {
 		t.Fatalf("status = %+v, want a single clean fetch", statuses)
 	}
 	if got := gitOut(t, target, "remote", "get-url", "origin"); got != origin {
@@ -215,7 +214,7 @@ func TestProcessRepos_PlanLeavesUnplannedRepoAlone(t *testing.T) {
 	plan := &gitplan.Plan{Repos: map[string]gitplan.Repo{
 		"elsewhere": {Config: []gitplan.ConfigEntry{{Key: "user.email", Value: "x@example.com"}}},
 	}}
-	if _, err := processRepos(context.Background(), repos, plan, discardLogger()); err != nil {
+	if _, err := processRepos(context.Background(), repos, plan, discardLogger(), nil); err != nil {
 		t.Fatalf("processRepos: %v", err)
 	}
 	if got := gitOut(t, target, "remote", "get-url", "origin"); got != origin {

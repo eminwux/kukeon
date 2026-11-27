@@ -81,6 +81,11 @@ const (
 	// request, never stored. Not a server-side resource — `kuke apply`
 	// rejects it.
 	KindHealthDigest Kind = "HealthDigest"
+	// KindTerminalSupervisor identifies the status document an attachable
+	// container's terminal supervisor (kuketty) writes to tty/supervisor.json
+	// (issue #1711). kukeond copies it into ContainerStatus; it is never
+	// stored. Not a server-side resource — `kuke apply` rejects it.
+	KindTerminalSupervisor Kind = "TerminalSupervisor"
 	// KindTeam identifies a team's declaration (issue #1618): its project
 	// source, recorded secret bindings and role, harness, source and
 	// connector selections. Realm-scoped. kukeond validates and stores it;

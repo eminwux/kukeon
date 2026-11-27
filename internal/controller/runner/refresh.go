@@ -19,12 +19,14 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // observedGenerationBehind reports whether the reconciler has not yet
@@ -2004,7 +2006,7 @@ func rootContainerExitedNonZero(rootID string, statuses []intmodel.ContainerStat
 // those) drives a cell to CellStateFailed (#1206). Distinct from the
 // StartCellFailed / CreateCellFailed / StartContainerFailed startup reasons so
 // machine consumers can tell a post-Ready crash apart from a failed bring-up.
-const reasonWorkloadFailed = "WorkloadFailed"
+const reasonWorkloadFailed = v1beta1.ContainerReasonWorkloadFailed
 
 // reasonRootContainerExited is the stable PascalCase Status.Reason label
 // stamped when the reconciler observes a cell's root container terminal while
@@ -2018,7 +2020,21 @@ const reasonRootContainerExited = "RootContainerExited"
 // Reason is the stable machine label; Message names the failing container and
 // its exit code/signal, falling back to a generic line if the failing
 // container can't be pinpointed in the snapshot.
+//
+// When the failing container carries a derived Reason (issue #1711 —
+// RepoFailed, StageFailed, SupervisorFailed, …), the cell takes that reason and
+// the container's message, prefixed with the container's name, so `kuke get
+// cell` and `kuke health` say why the cell failed, not only that a workload
+// exited non-zero.
 func cellFailureBreadcrumb(cell intmodel.Cell) (string, string) {
+	if st, ok := failingContainerStatus(cell); ok && st.Reason != "" {
+		// A plain workload exit keeps the historical cell message, which
+		// already names the container and its exit.
+		if st.Reason == reasonWorkloadFailed || st.Message == "" {
+			return st.Reason, formatContainerFailure(st)
+		}
+		return st.Reason, fmt.Sprintf("container %q: %s", st.ID, st.Message)
+	}
 	msg := describeCellFailure(cell)
 	if msg == "" {
 		msg = "workload exited with a non-zero status"
@@ -2040,6 +2056,17 @@ func stampCellFailure(cell *intmodel.Cell) {
 // root. Returns "" when no failing container is found (defensive — callers only
 // invoke this after derivation returned Error).
 func describeCellFailure(cell intmodel.Cell) string {
+	if st, ok := failingContainerStatus(cell); ok {
+		return formatContainerFailure(st)
+	}
+	return ""
+}
+
+// failingContainerStatus returns the status of the container that drove a
+// cell to Error: the first terminal non-root workload that exited non-zero
+// for cells that have workloads, otherwise the root. ok is false when none is
+// found.
+func failingContainerStatus(cell intmodel.Cell) (intmodel.ContainerStatus, bool) {
 	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
 	for i := range cell.Status.Containers {
 		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
@@ -2053,19 +2080,19 @@ func describeCellFailure(cell intmodel.Cell) string {
 			}
 			if st, ok := statusByID[spec.ID]; ok &&
 				containerStateIsTerminal(st.State) && containerExitedNonZero(st) {
-				return formatContainerFailure(st)
+				return st, true
 			}
 		}
-		return ""
+		return intmodel.ContainerStatus{}, false
 	}
 
 	rootSpec := findRootContainerSpec(cell)
 	if rootSpec != nil {
 		if st, ok := statusByID[rootSpec.ID]; ok && containerExitedNonZero(st) {
-			return formatContainerFailure(st)
+			return st, true
 		}
 	}
-	return ""
+	return intmodel.ContainerStatus{}, false
 }
 
 // formatContainerFailure renders a single container's exit triple as a human
@@ -2095,14 +2122,87 @@ func findRootContainerSpec(cell intmodel.Cell) *intmodel.ContainerSpec {
 	return nil
 }
 
+// containerStatusesEqual reports whether two container-status snapshots carry
+// the same persisted facts. It gates the metadata persist in RefreshCell and
+// ReconcileCell, so it compares everything an operator reads back from the
+// stored cell — `kuke health` reads persisted cells only — beyond ID and State:
+// the exit code, the derived reason and message, the repo and stage outcomes,
+// and the supervisor status. The supervisor's UpdatedAt is ignored, so a
+// re-read of an unchanged document is not a change. Issue #1711.
 func containerStatusesEqual(a, b []intmodel.ContainerStatus) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i].ID != b[i].ID || a[i].State != b[i].State {
+		if a[i].ID != b[i].ID || a[i].State != b[i].State ||
+			a[i].ExitCode != b[i].ExitCode ||
+			a[i].Reason != b[i].Reason || a[i].Message != b[i].Message {
+			return false
+		}
+		if !reposEqual(a[i].Repos, b[i].Repos) || !stagesEqual(a[i].Stages, b[i].Stages) ||
+			!supervisorStatusEqual(a[i].Supervisor, b[i].Supervisor) {
 			return false
 		}
 	}
 	return true
+}
+
+func reposEqual(a, b []intmodel.RepoStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stagesEqual(a, b []intmodel.StageStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// supervisorStatusEqual compares two supervisor views, ignoring UpdatedAt.
+func supervisorStatusEqual(a, b *v1beta1.SupervisorStatus) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ac, bc := normalizedSupervisorStatus(a), normalizedSupervisorStatus(b)
+	ac.UpdatedAt, bc.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(ac, bc)
+}
+
+// normalizedSupervisorStatus returns a copy whose timestamps compare by
+// instant under reflect.DeepEqual: UTC, with no monotonic reading. A view
+// decoded from the stored cell and one decoded from the document then compare
+// equal when they carry the same instants.
+func normalizedSupervisorStatus(s *v1beta1.SupervisorStatus) *v1beta1.SupervisorStatus {
+	out := s.DeepCopy()
+	norm := func(t time.Time) time.Time { return t.UTC().Round(0) }
+	out.PhaseSince = norm(out.PhaseSince)
+	if out.Exit != nil {
+		out.Exit.At = norm(out.Exit.At)
+	}
+	for i := range out.Terminals {
+		out.Terminals[i].LastAttachedAt = norm(out.Terminals[i].LastAttachedAt)
+		if len(out.Terminals[i].Attachers) == 0 {
+			out.Terminals[i].Attachers = nil
+		}
+		if out.Terminals[i].Exit != nil {
+			out.Terminals[i].Exit.At = norm(out.Terminals[i].Exit.At)
+		}
+	}
+	if len(out.Terminals) == 0 {
+		out.Terminals = nil
+	}
+	return out
 }

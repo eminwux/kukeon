@@ -102,3 +102,16 @@ func TestParseHealthDigestRejected(t *testing.T) {
 		t.Fatalf("HealthDigest: got %v, want ErrUnknownKind", err)
 	}
 }
+
+// A TerminalSupervisor document is written by kuketty inside a container and
+// copied into ContainerStatus by kukeond; it is never stored, so `kuke apply`
+// rejects it as an unknown kind (#1711).
+func TestParseTerminalSupervisorRejected(t *testing.T) {
+	_, err := parser.ParseDocument(
+		0,
+		[]byte("apiVersion: v1beta1\nkind: TerminalSupervisor\nmetadata:\n  name: work\n"),
+	)
+	if !errors.Is(err, errdefs.ErrUnknownKind) {
+		t.Fatalf("TerminalSupervisor: got %v, want ErrUnknownKind", err)
+	}
+}

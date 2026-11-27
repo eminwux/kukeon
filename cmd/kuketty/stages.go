@@ -25,7 +25,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -47,38 +46,53 @@ var errRequiredStageFailed = errors.New("one or more required create stages fail
 // An empty stage list is a no-op — the common case for a container with no
 // create stages — and returns a nil status slice. processStages returns the
 // per-stage outcome in declaration order alongside the terminating error: each
-// completed stage is recorded StageDone, and on the first failing stage the
-// failed stage is recorded StageFailed (with the error detail), processStages
-// logs the outcome, and returns errRequiredStageFailed so run() exits before
-// Serve and the daemon sees the task as Failed; subsequent stages do not run.
-//
-// Because run() returns on a non-nil error before registering the
-// GetSetupStatus verb, the StageFailed entry is never served over RPC in
-// practice — a failed create stage is observed via the task-failed signal +
-// kuketty log, the same post-Serve-only path required repos take (AC #5 of
-// #617). The status slice is carried back regardless so the executor stays the
-// single source of per-stage truth and the failure path is unit-testable.
-// Issue #689 (phase B); the executor + routing landed in phase A (#635).
-func processStages(ctx context.Context, stages []indexedStage, logger *slog.Logger) ([]setupstatus.Stage, error) {
+// completed stage is recorded done, and on the first failing stage the failed
+// stage is recorded failed (with the error detail), processStages logs the
+// outcome, and returns errRequiredStageFailed so run() exits before Serve and
+// the daemon sees the task as failed; subsequent stages do not run. obs, when
+// non-nil, is told when each stage starts and how it ended, so the supervisor
+// document reports the failed stage (issue #1711). Issue #689 (phase B); the
+// executor + routing landed in phase A (#635).
+func processStages(
+	ctx context.Context, stages []indexedStage, logger *slog.Logger, obs stageObserver,
+) ([]v1beta1.StageStatus, error) {
 	if len(stages) == 0 {
 		return nil, nil
 	}
-	statuses := make([]setupstatus.Stage, 0, len(stages))
+	statuses := make([]v1beta1.StageStatus, 0, len(stages))
 	for _, st := range stages {
 		logger.InfoContext(ctx, "running create stage", "index", st.Index)
+		if obs != nil {
+			obs.onStageStart(st.Index)
+		}
 		if err := runStage(ctx, st.Stage); err != nil {
 			logger.WarnContext(ctx, "create stage failed", "index", st.Index, "error", err)
-			statuses = append(statuses, setupstatus.Stage{
+			failed := v1beta1.StageStatus{
 				Index: st.Index,
-				State: setupstatus.StageFailed,
+				State: v1beta1.StageStateFailed,
 				Error: err.Error(),
-			})
+			}
+			statuses = append(statuses, failed)
+			if obs != nil {
+				obs.onStageDone(failed)
+			}
 			return statuses, fmt.Errorf("%w: stage %d: %v", errRequiredStageFailed, st.Index, err)
 		}
-		statuses = append(statuses, setupstatus.Stage{Index: st.Index, State: setupstatus.StageDone})
+		done := v1beta1.StageStatus{Index: st.Index, State: v1beta1.StageStateDone}
+		statuses = append(statuses, done)
+		if obs != nil {
+			obs.onStageDone(done)
+		}
 		logger.InfoContext(ctx, "create stage completed", "index", st.Index)
 	}
 	return statuses, nil
+}
+
+// stageObserver is told when each create stage starts and how it ended.
+// *supervisorReporter implements it.
+type stageObserver interface {
+	onStageStart(index int)
+	onStageDone(status v1beta1.StageStatus)
 }
 
 // runStage runs a single create stage's Script through `sh -c`, inheriting

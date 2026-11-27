@@ -33,7 +33,6 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	extmodel "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -683,7 +682,7 @@ func TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart(t *testing.T)
 		},
 	}
 	priorStages := []intmodel.StageStatus{
-		{Index: 0, State: setupstatus.StageDone, Hash: doneHash},
+		{Index: 0, State: extmodel.StageStateDone, Hash: doneHash},
 		// freshStage at Index 2 has no prior record — must render unchanged.
 	}
 
@@ -764,7 +763,7 @@ func TestWriteKukettyDoc_RenderGate_EditedStageReRuns(t *testing.T) {
 		},
 	}
 	priorStages := []intmodel.StageStatus{
-		{Index: 0, State: setupstatus.StageDone, Hash: priorHash},
+		{Index: 0, State: extmodel.StageStateDone, Hash: priorHash},
 	}
 
 	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
@@ -821,7 +820,7 @@ func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
 	// stageA carries forward at its new Index, and confirm the rendered
 	// Script is cleared.
 	priorStages := []intmodel.StageStatus{
-		{Index: 0, State: setupstatus.StageDone, Hash: hashA},
+		{Index: 0, State: extmodel.StageStateDone, Hash: hashA},
 	}
 
 	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
@@ -854,7 +853,7 @@ func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
 	}
 	priorFresh := []intmodel.StageStatus{
 		// hashB belongs to stageB which no longer exists in spec.
-		{Index: 0, State: setupstatus.StageDone, Hash: hashB},
+		{Index: 0, State: extmodel.StageStateDone, Hash: hashB},
 	}
 	pathFresh := filepath.Join(dir, "fresh.json")
 	if err := r.writeKukettyDoc(pathFresh, specFresh, 0, []string{"/bin/sh"}, priorFresh); err != nil {
@@ -898,8 +897,8 @@ func TestWriteKukettyDoc_RenderGate_IgnoresFailedAndMissingHash(t *testing.T) {
 	// Two records that look like they cover Index 0 but neither qualifies
 	// to gate: failed (not done) and done-without-hash (key-less).
 	priorStages := []intmodel.StageStatus{
-		{Index: 0, State: setupstatus.StageFailed, Error: "boom", Hash: hash},
-		{Index: 0, State: setupstatus.StageDone}, // Hash empty
+		{Index: 0, State: extmodel.StageStateFailed, Error: "boom", Hash: hash},
+		{Index: 0, State: extmodel.StageStateDone}, // Hash empty
 	}
 
 	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {

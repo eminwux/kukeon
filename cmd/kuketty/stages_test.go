@@ -23,19 +23,18 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func TestProcessStages_EmptyIsNoOp(t *testing.T) {
-	statuses, err := processStages(context.Background(), nil, discardLogger())
+	statuses, err := processStages(context.Background(), nil, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("nil stages should be a no-op, got %v", err)
 	}
 	if statuses != nil {
 		t.Errorf("nil stages should report nil statuses, got %+v", statuses)
 	}
-	statuses, err = processStages(context.Background(), []indexedStage{}, discardLogger())
+	statuses, err = processStages(context.Background(), []indexedStage{}, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("empty stages should be a no-op, got %v", err)
 	}
@@ -56,7 +55,7 @@ func TestProcessStages_RunsScriptsInOrder(t *testing.T) {
 		{Index: 1, Stage: v1beta1.TtyStage{Script: "touch " + a, RunOn: v1beta1.RunOnCreate}},
 		{Index: 3, Stage: v1beta1.TtyStage{Script: "touch " + b, RunOn: v1beta1.RunOnCreate}},
 	}
-	statuses, err := processStages(context.Background(), stages, discardLogger())
+	statuses, err := processStages(context.Background(), stages, discardLogger(), nil)
 	if err != nil {
 		t.Fatalf("processStages: %v", err)
 	}
@@ -65,9 +64,9 @@ func TestProcessStages_RunsScriptsInOrder(t *testing.T) {
 			t.Errorf("expected marker %q to exist: %v", f, statErr)
 		}
 	}
-	want := []setupstatus.Stage{
-		{Index: 1, State: setupstatus.StageDone},
-		{Index: 3, State: setupstatus.StageDone},
+	want := []v1beta1.StageStatus{
+		{Index: 1, State: v1beta1.StageStateDone},
+		{Index: 3, State: v1beta1.StageStateDone},
 	}
 	if len(statuses) != len(want) {
 		t.Fatalf("want %d statuses, got %d: %+v", len(want), len(statuses), statuses)
@@ -91,7 +90,7 @@ func TestProcessStages_FailurePropagates(t *testing.T) {
 		{Index: 1, Stage: v1beta1.TtyStage{Script: "exit 7", RunOn: v1beta1.RunOnCreate}},
 		{Index: 2, Stage: v1beta1.TtyStage{Script: "touch " + after, RunOn: v1beta1.RunOnCreate}},
 	}
-	statuses, err := processStages(context.Background(), stages, discardLogger())
+	statuses, err := processStages(context.Background(), stages, discardLogger(), nil)
 	if err == nil {
 		t.Fatal("processStages: expected error for failing stage, got nil")
 	}
@@ -104,10 +103,10 @@ func TestProcessStages_FailurePropagates(t *testing.T) {
 	if len(statuses) != 2 {
 		t.Fatalf("want 2 statuses (done + failed), got %d: %+v", len(statuses), statuses)
 	}
-	if statuses[0] != (setupstatus.Stage{Index: 0, State: setupstatus.StageDone}) {
+	if statuses[0] != (v1beta1.StageStatus{Index: 0, State: v1beta1.StageStateDone}) {
 		t.Errorf("status[0] = %+v, want done stage at index 0", statuses[0])
 	}
-	if statuses[1].Index != 1 || statuses[1].State != setupstatus.StageFailed || statuses[1].Error == "" {
+	if statuses[1].Index != 1 || statuses[1].State != v1beta1.StageStateFailed || statuses[1].Error == "" {
 		t.Errorf("status[1] = %+v, want failed stage at index 1 with error detail", statuses[1])
 	}
 }
@@ -119,7 +118,7 @@ func TestProcessStages_CapturesOutputInError(t *testing.T) {
 	stages := []indexedStage{
 		{Index: 0, Stage: v1beta1.TtyStage{Script: "echo boom >&2; exit 1", RunOn: v1beta1.RunOnCreate}},
 	}
-	statuses, err := processStages(context.Background(), stages, discardLogger())
+	statuses, err := processStages(context.Background(), stages, discardLogger(), nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -129,7 +128,7 @@ func TestProcessStages_CapturesOutputInError(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("want 1 status, got %d: %+v", len(statuses), statuses)
 	}
-	if statuses[0].State != setupstatus.StageFailed || !contains(statuses[0].Error, "boom") {
+	if statuses[0].State != v1beta1.StageStateFailed || !contains(statuses[0].Error, "boom") {
 		t.Errorf("status[0] = %+v, want failed status carrying the stage output", statuses[0])
 	}
 }

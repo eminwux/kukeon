@@ -51,6 +51,7 @@ type fakeClient struct {
 	readContainerLogFn func(
 		doc v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
 	) (kukeonv1.ContainerLogResult, error)
+	getContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error)
 
 	// closes counts Close calls: the follow loop closes the client to
 	// make the next poll dial a restarted kukeond again.
@@ -60,6 +61,15 @@ type fakeClient struct {
 func (f *fakeClient) Close() error {
 	f.closes.Add(1)
 	return nil
+}
+
+func (f *fakeClient) GetContainer(
+	_ context.Context, doc v1beta1.ContainerDoc,
+) (kukeonv1.GetContainerResult, error) {
+	if f.getContainerFn == nil {
+		return kukeonv1.GetContainerResult{}, kukeonv1.ErrUnexpectedCall
+	}
+	return f.getContainerFn(doc)
 }
 
 func (f *fakeClient) ReadContainerLog(

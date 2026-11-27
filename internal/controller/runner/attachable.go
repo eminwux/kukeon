@@ -158,6 +158,14 @@ func (r *Exec) attachableBuildOpts(
 		}
 	}
 
+	// Every path that starts the task builds its options here, so this is
+	// where a supervisor document left by the previous run is removed: the
+	// new kuketty writes its own, and a stale exit or failure must never be
+	// credited to it. Issue #1711.
+	if err := removeSupervisorDoc(ttyDir); err != nil {
+		return nil, err
+	}
+
 	binaryPath, err := stageKukettyBinary(r.opts.RunPath)
 	if err != nil {
 		return nil, err
