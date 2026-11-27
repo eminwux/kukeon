@@ -27,10 +27,10 @@ spec:
     fields:
       - name: author
         type: person
-        help: Commit author, as `Name <email>`.
+        help: Commit author, a name and an email (`Name <email>` on the command line).
       - name: committer
         type: person
-        help: Committer, as `Name <email>`. Defaults to git's own fallback, the author.
+        help: Committer, a name and an email (`Name <email>` on the command line). Defaults to git's own fallback, the author.
       - name: hosts
         type: list
         required: true

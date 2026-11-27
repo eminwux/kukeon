@@ -65,7 +65,7 @@ export const testConnectors = [
   {
     name: "repo", title: "Repo", description: "The identity a cell clones and signs with.", delivery: "git", optional: true, scopes: ["realm", "space", "stack"], secretTypes: ["ssh-key", "basic-auth", "opaque"], methods: [],
     fields: [
-      { name: "author", type: "person", help: "Commit author, as Name <email>." },
+      { name: "author", type: "person", help: "Commit author." },
       { name: "hosts", type: "list", required: true, secretTypes: ["ssh-key", "basic-auth"], help: "Hosts the secret authenticates." },
       { name: "sign", type: "list", enum: ["commits", "tags"], secretTypes: ["ssh-key"], help: "What to sign with the key." },
       { name: "allowedSignersRef", type: "secret", secretTypes: ["ssh-key"], help: "Secret holding the allowed-signers file." },

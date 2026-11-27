@@ -435,6 +435,10 @@ button:disabled { cursor: default; opacity: .4; }
 .schema-field b { color: var(--accent); }
 .schema-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .schema-fields > .schema-object, .schema-fields > .schema-array { grid-column: 1 / -1; }
+/* A person (#1745): Name and Email side by side, stacked on a narrow screen. */
+.schema-fields > .person-fields { grid-column: 1 / -1; }
+.person-fields-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.person-fields-inputs label { display: grid; gap: 5px; font-size: var(--font-sm); color: var(--muted); }
 .schema-object, .schema-array { min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
 .schema-object legend, .schema-array legend { padding: 0 5px; font-size: var(--font-sm); font-weight: 600; }
 .schema-object > .description, .schema-array > .description { margin-top: 0; margin-bottom: 12px; }
@@ -485,6 +489,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .relationship-grid .error { margin: 0; }
 @media (max-width: 760px) {
   .schema-fields, .relationship-grid { grid-template-columns: minmax(0, 1fr); }
+  .person-fields-inputs { grid-template-columns: minmax(0, 1fr); }
   .string-entry, .map-entry { grid-template-columns: minmax(0, 1fr) auto; }
   .map-entry label { grid-column: 1; }
   .map-entry button { grid-column: 2; grid-row: 1 / span 2; }
