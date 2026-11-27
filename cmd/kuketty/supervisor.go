@@ -72,8 +72,8 @@ func readBuildVersion() string {
 
 // supervisorDocPath is where kuketty writes its status document (kind:
 // TerminalSupervisor, issue #1711), inside the tty bind mount so kukeond reads
-// it from the host. A variable so tests can point it at a temp dir. Mirrors
-// ctr.AttachableSupervisorPath.
+// it from the host. A variable so tests can point it at a temp dir. The
+// host-side peer is fs.ContainerSupervisorPath.
 //
 //nolint:gochecknoglobals // overridden by tests
 var supervisorDocPath = attachableTTYDir + "/supervisor.json"

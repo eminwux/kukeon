@@ -497,7 +497,7 @@ An attachable container's kuketty wrapper is the container's terminal supervisor
 | `exit`             | `code` and `at`: the code the wrapper exited with. Absent while it runs, and when it was killed. Dropped when it differs from containerd's exit code.   |
 | `updatedAt`        | When the wrapper last wrote the document                                                                                                                |
 
-kukeond deletes a leftover `tty/supervisor.json` before every start, so a record from the previous run is never credited to the next one. The workload can write to `tty/`, so the document is display data: kukeond reads at most 256 KiB, refuses symlinks and other non-regular files, requires `apiVersion: v1beta1` and `kind: TerminalSupervisor`, and logs why it ignored a document. Without a valid document the last reported values stay. A container started by a kuketty older than its kukeond writes no document until it is recreated.
+kukeond deletes a leftover `tty/supervisor.json` before every start, so a record from the previous run is never credited to the next one. The workload can write to `tty/`, so the document is display data: kukeond reads at most 256 KiB, refuses symlinks and other non-regular files, requires `apiVersion: v1beta1` and `kind: TerminalSupervisor`, and logs why it ignored a document. Without a valid document the last reported values stay only once the task is gone (after a wind-down or a reboot). A running or freshly exited task with no valid document shows no `supervisor` or `repos`. If it failed, its reason is `SupervisorStatusUnavailable`, never the previous run's. A container started by a kuketty older than its kukeond writes no document until it is recreated.
 
 ### Failure reasons
 

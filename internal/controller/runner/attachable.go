@@ -162,7 +162,11 @@ func (r *Exec) attachableBuildOpts(
 	// where a supervisor document left by the previous run is removed: the
 	// new kuketty writes its own, and a stale exit or failure must never be
 	// credited to it. Issue #1711.
-	if err := removeSupervisorDoc(filepath.Join(ttyDir, consts.KukeonContainerSupervisorFile)); err != nil {
+	if err := removeSupervisorDoc(fs.ContainerSupervisorPath(
+		r.opts.RunPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
+		spec.ID,
+	)); err != nil {
 		return nil, err
 	}
 

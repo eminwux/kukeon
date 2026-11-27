@@ -232,8 +232,9 @@ func ContainerKukettyLogPath(baseRunPath, realmName, spaceName, stackName, cellN
 }
 
 // ContainerSupervisorPath returns the host-side path of an Attachable
-// container's supervisor status document, the host-visible peer of
-// ctr.AttachableSupervisorPath. Issue #1711.
+// container's supervisor status document, the host-visible peer of the
+// in-container path kuketty writes it to (/run/kukeon/tty/supervisor.json).
+// Issue #1711.
 func ContainerSupervisorPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
 		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),

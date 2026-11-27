@@ -172,6 +172,26 @@ func parseSupervisorDoc(data []byte) supervisorDocResult {
 	return supervisorDocResult{State: supervisorDocValid, Doc: &doc}
 }
 
+// taskRecordGone reports whether state says containerd holds no task for
+// the container (Stopped: the task was deleted; NotCreated: no container
+// record; Unknown: not observed this pass). Only then may a pass without a
+// valid supervisor document carry the previous pass's repos and supervisor
+// forward. Every start path deletes the document before it creates the task
+// (attachableBuildOpts) and the tty directory outlives the task, so a live
+// task with no valid document belongs to a run whose kuketty wrote none, and
+// the previous run's record must not be credited to it. Issue #1711.
+func taskRecordGone(state intmodel.ContainerState) bool {
+	switch state {
+	case intmodel.ContainerStateStopped, intmodel.ContainerStateNotCreated, intmodel.ContainerStateUnknown:
+		return true
+	case intmodel.ContainerStatePending, intmodel.ContainerStateReady, intmodel.ContainerStatePaused,
+		intmodel.ContainerStatePausing, intmodel.ContainerStateFailed, intmodel.ContainerStateExited,
+		intmodel.ContainerStateError:
+		return false
+	}
+	return false
+}
+
 // removeSupervisorDoc deletes a container's leftover supervisor document
 // before its task starts, so a record from the previous run is never credited
 // to the new one. A missing document is not an error.

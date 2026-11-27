@@ -219,9 +219,13 @@ func supervisorTestCell(runPath string) (intmodel.Cell, string) {
 // the supervisor view and reason RepoFailed.
 func TestPopulateCellContainerStatuses_RepoFailureFromSupervisorDoc(t *testing.T) {
 	exitAt := time.Date(2026, 11, 26, 19, 50, 24, 0, time.UTC)
+	taskGone := false
 	fake := &deleteCellFakeClient{
 		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
 		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			if taskGone {
+				return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+			}
 			return containerd.Status{Status: containerd.Stopped, ExitStatus: 70, ExitTime: exitAt}, nil
 		},
 	}
@@ -256,7 +260,9 @@ func TestPopulateCellContainerStatuses_RepoFailureFromSupervisorDoc(t *testing.T
 		t.Errorf("cell breadcrumb = %q/%q", reason, msg)
 	}
 
-	// A second pass with the document gone keeps what was reported.
+	// A second pass with the task and the document gone (a reboot empties
+	// /run) keeps what was reported.
+	taskGone = true
 	if err := os.Remove(filepath.Join(ttyDir, consts.KukeonContainerSupervisorFile)); err != nil {
 		t.Fatal(err)
 	}
@@ -271,6 +277,70 @@ func TestPopulateCellContainerStatuses_RepoFailureFromSupervisorDoc(t *testing.T
 			st.Supervisor,
 			st.Reason,
 		)
+	}
+}
+
+// A restart deletes the previous run's document. If the new kuketty writes
+// none (its writes are best effort), the new run must not inherit the
+// previous run's repos, supervisor or reason: a failure of the new task reads
+// SupervisorStatusUnavailable, and a running one shows no supervisor.
+func TestPopulateCellContainerStatuses_RestartWithoutDocDropsPriorRun(t *testing.T) {
+	cases := []struct {
+		name       string
+		next       containerd.Status
+		wantState  intmodel.ContainerState
+		wantReason string
+	}{
+		{
+			"new run fails",
+			containerd.Status{Status: containerd.Stopped, ExitStatus: 70, ExitTime: time.Now()},
+			intmodel.ContainerStateError,
+			v1beta1.ContainerReasonSupervisorStatusUnavailable,
+		},
+		{"new run is running", containerd.Status{Status: containerd.Running}, intmodel.ContainerStateReady, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next := containerd.Status{Status: containerd.Stopped, ExitStatus: 70, ExitTime: time.Now()}
+			fake := &deleteCellFakeClient{
+				existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+				taskStatusFn:      func(_, _ string) (containerd.Status, error) { return next, nil },
+			}
+			r := newDeleteCellTestExec(t, fake)
+			seedDeleteCellRealm(t, r, "default")
+			cell, ttyDir := supervisorTestCell(r.opts.RunPath)
+			writeSupervisorFile(t, ttyDir, mustJSON(t, repoFailedDoc()))
+			if err := r.populateCellContainerStatuses(&cell); err != nil {
+				t.Fatal(err)
+			}
+			if st := cell.Status.Containers[0]; st.Reason != v1beta1.ContainerReasonRepoFailed {
+				t.Fatalf("first run: reason = %q, want RepoFailed", st.Reason)
+			}
+
+			// Restart: the start path removes the document (see
+			// TestAttachableBuildOpts_RemovesLeftoverSupervisorDoc) and the
+			// new task runs without ever writing one.
+			if err := removeSupervisorDoc(filepath.Join(ttyDir, consts.KukeonContainerSupervisorFile)); err != nil {
+				t.Fatal(err)
+			}
+			next = tc.next
+			if err := r.populateCellContainerStatuses(&cell); err != nil {
+				t.Fatal(err)
+			}
+			st := cell.Status.Containers[0]
+			if st.State != tc.wantState {
+				t.Fatalf("state = %v, want %v", st.State, tc.wantState)
+			}
+			if st.Supervisor != nil || len(st.Repos) != 0 {
+				t.Errorf("previous run carried into the new one: supervisor=%+v repos=%+v", st.Supervisor, st.Repos)
+			}
+			if st.Reason != tc.wantReason {
+				t.Errorf("reason = %q (%q), want %q", st.Reason, st.Message, tc.wantReason)
+			}
+			if tc.wantReason != "" && !strings.Contains(st.Message, "no supervisor status document") {
+				t.Errorf("message = %q", st.Message)
+			}
+		})
 	}
 }
 

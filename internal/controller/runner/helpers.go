@@ -1058,8 +1058,9 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	priorRestartCount := make(map[string]int, len(cell.Status.Containers))
 	priorRestartTime := make(map[string]time.Time, len(cell.Status.Containers))
 	// Snapshot prior Repos and Supervisor: when this pass reads no valid
-	// supervisor document (missing, unsupported, invalid), the last reported
-	// values stay rather than being wiped. Issue #1711.
+	// supervisor document (missing, unsupported, invalid) and the task record
+	// is gone, the last reported values stay rather than being wiped.
+	// Issue #1711.
 	priorRepos := make(map[string][]intmodel.RepoStatus, len(cell.Status.Containers))
 	priorSupervisor := make(map[string]*v1beta1.SupervisorStatus, len(cell.Status.Containers))
 	// Snapshot prior Reason/Message: a container whose task was deleted
@@ -1158,7 +1159,9 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 		// (issue #1711), in any state: it carries the repo and create-stage
 		// outcomes, the supervisor's phase and its exit, including after a
 		// setup failure. Without a valid document the last reported values
-		// stay.
+		// stay only while the task record is gone (see taskRecordGone): a
+		// live task without one is a run whose kuketty wrote none, and the
+		// previous run's record must not be credited to it.
 		var liveStages []intmodel.StageStatus
 		var docResult supervisorDocResult
 		if containerSpec.Attachable {
@@ -1167,17 +1170,18 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 				cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name,
 				containerSpec.ID,
 			))
-			if docResult.State == supervisorDocValid {
+			switch {
+			case docResult.State == supervisorDocValid:
 				liveStages = applySupervisorDoc(&status, docResult.Doc)
-			} else {
+			case taskRecordGone(obs.State):
 				status.Repos = priorRepos[containerSpec.ID]
 				status.Supervisor = priorSupervisor[containerSpec.ID].DeepCopy()
-				if docResult.State != supervisorDocMissing {
-					r.logger.WarnContext(r.ctx, "ignoring supervisor status document",
-						"container", containerSpec.ID,
-						"state", docResult.State.String(),
-						"reason", docResult.Detail)
-				}
+			}
+			if docResult.State != supervisorDocValid && docResult.State != supervisorDocMissing {
+				r.logger.WarnContext(r.ctx, "ignoring supervisor status document",
+					"container", containerSpec.ID,
+					"state", docResult.State.String(),
+					"reason", docResult.Detail)
 			}
 		}
 		// Merge live + prior stages against the current spec so done
