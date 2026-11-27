@@ -6,12 +6,12 @@ import { identitiesFor } from "./connectors.mjs";
 import type { Connector } from "./connectors.mjs";
 import { GitIdentitySelect, OutcomeNotice, PlanView, RefFields } from "./team-plan";
 import {
-  availableSources, createBody, draftPayload, editBody, emptyProject, emptySource, imageList, inspectRequest, projectAlias, projectErrors, selectedIndex, stateLabel, stepErrors,
+  availableSources, cleanPath, createBody, draftPayload, editBody, emptyProject, emptySource, imageList, inspectRequest, projectAlias, projectErrors, selectedIndex, stateLabel, stepErrors,
   roleConnectorRows, roleHarnesses, stepsFor, taskRows, withAllTasks, withConnector, withConnectorsInherit, withHarness, withInherit, withProject, withRole, withRoleConnector, withRolePatch, withSource, withTask,
 } from "./team-form.mjs";
 import type { Available, ProjectInput } from "./team-form.mjs";
 import { editPayload, needsForce, originLabel, refLabel, sourcesLink, teamsAPI, teamsLink } from "./teams.mjs";
-import type { Draft, FormRole, RoleConnectorView, Selection, SourceContents, Sources, TeamForm, TeamOutcome, TeamView, ViewTask } from "./teams.mjs";
+import type { Draft, FormConnector, FormRole, RoleConnectorView, Selection, SourceContents, Sources, TeamForm, TeamOutcome, TeamView, ViewTask } from "./teams.mjs";
 
 // The team wizard (#1644, AC2 and AC4): one component for New team
 // (#/new-team) and Edit team (#/teams/<name>/edit). Its state is the server's
@@ -109,17 +109,26 @@ function SourceGroup({ source, inspected, onInspect, children }: { source: Avail
   </section>;
 }
 
+// Through names the alias an offered entry is selected through when it is another alias of the same repository
+// (#1746).
+function Through({ items, source, path, available }: { items: { source: string; path: string }[]; source: string; path: string; available: Available[] }) {
+  const at = selectedIndex(items, source, path, available);
+  if (at < 0 || items[at].source === source) return null;
+  return <span className="description"> — selected through <code>{items[at].source}</code></span>;
+}
+
 // seed is the connector catalog on a new team: a role selected here starts with every per-role connector on
-// (#1745). An edit passes none, so a role keeps its stored switches.
-function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnesses, seed, disabled, onInspect, onForm }: {
-  form: TeamForm; available: Available[]; inspected: Inspected; inheritedRoles: unknown[]; inheritedHarnesses: Selection[]; seed?: Connector[]; disabled: boolean;
+// (#1745). An edit passes none, so a role keeps its stored switches. defaultRoles are the default roles in the
+// form's shape (#1746): switching off "Use the default roles" starts from them as the defaults declare them.
+function RolesStep({ form, available, inspected, inheritedRoles, defaultRoles, inheritedHarnesses, seed, disabled, onInspect, onForm }: {
+  form: TeamForm; available: Available[]; inspected: Inspected; inheritedRoles: Selection[]; defaultRoles: unknown[]; inheritedHarnesses: Selection[]; seed?: Connector[]; disabled: boolean;
   onInspect: (source: Available) => void; onForm: (form: TeamForm) => void;
 }) {
-  const offeredRole = (role: FormRole) => inspected[role.source]?.contents?.roles.find(item => item.path === role.path);
+  const offeredRole = (role: FormRole) => inspected[role.source]?.contents?.roles.find(item => cleanPath(item.path) === cleanPath(role.path));
   return <div className="wizard-step">
     <fieldset className="schema-object" aria-label="Roles"><legend>Roles</legend>
-      <label className="schema-check"><input type="checkbox" checked={form.roles.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "roles", event.target.checked, inheritedRoles, seed))} />Use the default roles</label>
-      {form.roles.inherit ? <p className="description">{(inheritedRoles as Selection[]).map(role => role.name).join(", ") || "The defaults have no roles."}</p> : <>
+      <label className="schema-check"><input type="checkbox" checked={form.roles.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "roles", event.target.checked, defaultRoles, seed))} />Use the default roles</label>
+      {form.roles.inherit ? <p className="description">{inheritedRoles.map(role => role.name).join(", ") || "The defaults have no roles."}</p> : <>
         {form.roles.items.map((role, index) => {
           const harnesses = offeredRole(role)?.harnesses ?? [];
           return <div key={`${role.source}:${role.path}`} className="wizard-role" aria-label={`Role ${role.name}`}>
@@ -134,14 +143,14 @@ function RolesStep({ form, available, inspected, inheritedRoles, inheritedHarnes
         })}
         {!form.roles.items.length && <p className="description">No role is selected.</p>}
         <h4>Add roles</h4>
-        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked, [], seed))} /><span>{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span></span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
+        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.roles.length ? <div className="team-picker">{contents.roles.map(role => <label key={role.path} className="schema-check"><input type="checkbox" aria-label={`Role ${role.name} from ${source.alias}`} checked={selectedIndex(form.roles.items, source.alias, role.path, available) >= 0} disabled={disabled} onChange={event => onForm(withRole(form, { name: role.name, source: source.alias, path: role.path }, event.target.checked, [], seed, available))} /><span>{role.name} <span className="description">{role.path}{role.harnesses.length ? ` — ${role.harnesses.join(", ")}` : ""}</span><Through items={form.roles.items} source={source.alias} path={role.path} available={available} /></span></label>)}</div> : <p className="description">No role.</p>}</SourceGroup>)}
       </>}
     </fieldset>
     <fieldset className="schema-object" aria-label="Harnesses"><legend>Harnesses</legend>
       <label className="schema-check"><input type="checkbox" checked={form.harnesses.inherit} disabled={disabled} onChange={event => onForm(withInherit(form, "harnesses", event.target.checked, inheritedHarnesses))} />Use the default harnesses</label>
       {form.harnesses.inherit ? <p className="description">{inheritedHarnesses.map(h => h.name).join(", ") || "The defaults have no harnesses."}</p> : <>
         <ul className="state-list">{form.harnesses.items.map(h => <li key={`${h.source}:${h.path}`}>{h.name} <span className="description"><code>{h.source}</code>:{h.path}</span> <button type="button" className="text-button" disabled={disabled} onClick={() => onForm(withHarness(form, h, false))}>Remove</button></li>)}</ul>
-        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.harnesses.length ? <div className="team-picker">{contents.harnesses.map(h => <label key={h.path} className="schema-check"><input type="checkbox" aria-label={`Harness ${h.name} from ${source.alias}`} checked={selectedIndex(form.harnesses.items, source.alias, h.path) >= 0} disabled={disabled} onChange={event => onForm(withHarness(form, { name: h.name, source: source.alias, path: h.path }, event.target.checked))} /><span>{h.name} <span className="description">{h.path}</span></span></label>)}</div> : <p className="description">No harness.</p>}</SourceGroup>)}
+        {available.map(source => <SourceGroup key={source.alias} source={source} inspected={inspected} onInspect={onInspect}>{contents => contents.harnesses.length ? <div className="team-picker">{contents.harnesses.map(h => <label key={h.path} className="schema-check"><input type="checkbox" aria-label={`Harness ${h.name} from ${source.alias}`} checked={selectedIndex(form.harnesses.items, source.alias, h.path, available) >= 0} disabled={disabled} onChange={event => onForm(withHarness(form, { name: h.name, source: source.alias, path: h.path }, event.target.checked, [], available))} /><span>{h.name} <span className="description">{h.path}</span><Through items={form.harnesses.items} source={source.alias} path={h.path} available={available} /></span></label>)}</div> : <p className="description">No harness.</p>}</SourceGroup>)}
       </>}
     </fieldset>
   </div>;
@@ -153,7 +162,7 @@ function TasksStep({ form, available, inspected, configured, inheritedHarnesses,
 }) {
   if (form.roles.inherit) return <div className="wizard-step"><p className="description">The team uses the default roles, with every task each declares. To choose tasks and schedules, select the roles in Roles and harnesses.</p></div>;
   return <div className="wizard-step">{form.roles.items.map((role, index) => {
-    const offeredRole = inspected[role.source]?.contents?.roles.find(item => item.path === role.path);
+    const offeredRole = inspected[role.source]?.contents?.roles.find(item => cleanPath(item.path) === cleanPath(role.path));
     const offered = offeredRole?.tasks;
     const mine = configured.filter(task => task.role === role.name);
     // One switch per harness only when the role's tasks render on two or more (#1668).
@@ -223,13 +232,15 @@ function RoleAccess({ form, connectors, secrets, inheritedRoles, viewRows, resol
   </fieldset>;
 }
 
-function CredentialsStep({ form, connectors, missing, inheritedRoles, viewRows, resolving, notes, resolveError, disabled, onForm }: {
-  form: TeamForm; connectors: ReturnType<typeof useResource<Connector[]>>; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[];
+// defaultConnectors are the defaults' connector choices (#1746): switching off "Use the defaults' connector
+// choices" starts from them.
+function CredentialsStep({ form, connectors, defaultConnectors, missing, inheritedRoles, viewRows, resolving, notes, resolveError, disabled, onForm }: {
+  form: TeamForm; connectors: ReturnType<typeof useResource<Connector[]>>; defaultConnectors: Record<string, FormConnector>; missing: string[]; inheritedRoles: Selection[]; viewRows: RoleConnectorView[];
   resolving: boolean; notes: string[]; resolveError?: Failure; disabled: boolean; onForm: (form: TeamForm) => void;
 }) {
   const secrets = useResource<unknown[]>("/api/catalog/secrets", 0);
   return <div className="wizard-step">
-    <label className="schema-check"><input type="checkbox" checked={form.connectors.inherit} disabled={disabled} onChange={event => onForm(withConnectorsInherit(form, event.target.checked))} />Use the defaults' connector choices</label>
+    <label className="schema-check"><input type="checkbox" checked={form.connectors.inherit} disabled={disabled} onChange={event => onForm(withConnectorsInherit(form, event.target.checked, defaultConnectors))} />Use the defaults' connector choices</label>
     {!form.connectors.inherit && <>
       {connectors.error && <ErrorNotice error={connectors.error} kind="Connectors" />}
       <div className="table-scroll"><table aria-label="Connector choices"><thead><tr><th>Connector</th><th>Method</th><th>Identity</th></tr></thead><tbody>
@@ -238,8 +249,8 @@ function CredentialsStep({ form, connectors, missing, inheritedRoles, viewRows, 
           const identities = identitiesFor(secrets.data, connector.name).filter(identity => identity.realm === "default" && !identity.space);
           return <tr key={connector.name}>
             <td>{connector.title || connector.name}</td>
-            <td><select aria-label={`Method of ${connector.name}`} value={choice.method ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { method: event.target.value }))}><option value="">Default</option>{connector.methods.map(method => <option key={method.name} value={method.name}>{method.name}</option>)}</select></td>
-            <td><select aria-label={`Identity of ${connector.name}`} value={choice.identity ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { identity: event.target.value }))}><option value="">From the scope defaults</option>{[...new Set([...identities.map(identity => identity.name), ...(choice.identity ? [choice.identity] : [])])].map(name => <option key={name} value={name}>{name}</option>)}</select></td>
+            <td><select aria-label={`Method of ${connector.name}`} value={choice.method ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { method: event.target.value }, defaultConnectors))}><option value="">Default</option>{connector.methods.map(method => <option key={method.name} value={method.name}>{method.name}</option>)}</select></td>
+            <td><select aria-label={`Identity of ${connector.name}`} value={choice.identity ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { identity: event.target.value }, defaultConnectors))}><option value="">From the scope defaults</option>{[...new Set([...identities.map(identity => identity.name), ...(choice.identity ? [choice.identity] : [])])].map(name => <option key={name} value={name}>{name}</option>)}</select></td>
           </tr>;
         })}
       </tbody></table></div>
@@ -303,6 +314,9 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
   const available = availableSources(form, sources.data?.sources);
   const inheritedRoles = team?.view?.roles.inherited ? team.view.roles.items : sources.data?.defaultRoles ?? [];
   const inheritedHarnesses = team?.view?.harnesses.inherited ? team.view.harnesses.items : sources.data?.defaultHarnesses ?? [];
+  // The defaults in the form's shape (#1746), which a list that stops inheriting starts from.
+  const defaultRoles = sources.data?.defaultForm?.roles ?? inheritedRoles;
+  const defaultConnectors = sources.data?.defaultForm?.connectors ?? {};
   const configured = team?.view?.tasks ?? [];
   const connectors = useResource<Connector[]>("/api/connectors", 0);
   // What the last dry run resolved per role and connector (#1745). It outlives a form change, so Resolves to
@@ -398,9 +412,9 @@ export function TeamWizard({ mode, team, onChanged }: { mode: Mode; team?: TeamV
         {mode === "edit" && !form && <ErrorNotice error={{ code: "invalid", message: team?.problem ?? "The team's form could not be read; edit it as YAML." }} kind="Team" />}
         {key === "project" && <ProjectStep project={project} sources={sources.data} draft={draft} pending={pending === "draft"} error={pending ? undefined : error} onChange={next => { setProject(old => ({ ...old, ...next })); setDraft(undefined); setForm(undefined); setError(undefined); }} onRead={() => void readRepository()} />}
         {form && key === "sources" && <SourcesStep mode={mode} form={form} draft={draft} sources={sources.data} disabled={disabled} onForm={changeForm} />}
-        {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} inheritedHarnesses={inheritedHarnesses} seed={mode === "new" ? connectors.data : undefined} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
+        {form && key === "roles" && <RolesStep form={form} available={available} inspected={inspected} inheritedRoles={inheritedRoles} defaultRoles={defaultRoles} inheritedHarnesses={inheritedHarnesses} seed={mode === "new" ? connectors.data : undefined} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
         {form && key === "tasks" && <TasksStep form={form} available={available} inspected={inspected} configured={configured} inheritedHarnesses={inheritedHarnesses} disabled={disabled} onInspect={source => void inspect(source)} onForm={changeForm} />}
-        {form && key === "credentials" && <CredentialsStep form={form} connectors={connectors} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={resolved?.rows ?? team?.view?.connectors.roles ?? []} resolving={resolving} notes={resolved?.notes ?? []} resolveError={resolveError} disabled={disabled} onForm={changeForm} />}
+        {form && key === "credentials" && <CredentialsStep form={form} connectors={connectors} defaultConnectors={defaultConnectors} missing={preview?.plan.missingSecrets ?? []} inheritedRoles={inheritedRoles} viewRows={resolved?.rows ?? team?.view?.connectors.roles ?? []} resolving={resolving} notes={resolved?.notes ?? []} resolveError={resolveError} disabled={disabled} onForm={changeForm} />}
         {form && key === "review" && <div className="wizard-step">
           <p className="description">{mode === "new" ? <>Adds team <code>{form.name || draft?.name}</code> from <code>{form.project?.url || form.project?.stored}</code> ({refLabel({ [form.project?.refKind ?? "branch"]: form.project?.ref })}).</> : <>Applies the form to team <code>{name}</code>.</>} The apply composes from scratch again: a branch may have moved since the preview, and the apply result is authoritative.</p>
           {pending === "preview" && <p role="status">Previewing…</p>}

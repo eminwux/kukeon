@@ -31,6 +31,7 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
 	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
+	"gopkg.in/yaml.v3"
 )
 
 func draftOf(t *testing.T, h http.Handler, body map[string]any) draftView {
@@ -403,5 +404,93 @@ func TestTeamTaskHarnessOverrides(t *testing.T) {
 	}
 	if len(got.View.Tasks) != 1 || got.View.Tasks[0].Harness != "claude" {
 		t.Fatalf("view tasks = %+v", got.View.Tasks)
+	}
+}
+
+// inheritingDefaults are TeamDefaults whose role sets every field the form
+// models and some it does not (needs.secrets), with a connector choice
+// (#1746).
+func inheritingDefaults(t *testing.T, c *teamClient) *config.TeamDefaults {
+	t.Helper()
+	on := false
+	defaults := initialize.InitialDefaults("default")
+	defaults.Spec.Defaults.Roles = []config.Role{{
+		Name: "lead", Source: "kukeon", Path: "team/roles/majordomo", Harness: "claude", InitialPath: "$HOME/work",
+		Needs:      &config.Needs{Image: []string{"go", "node"}, Secrets: []string{"gh-token"}},
+		Connectors: map[string]config.ConnectorChoice{"github": {Identity: "bot-token"}},
+		Tasks:      &[]config.TaskSelection{{Name: "health-sweep", Schedule: "@daily", Suspend: &on}},
+	}}
+	defaults.Spec.Defaults.Connectors = map[string]config.ConnectorChoice{"git": {Identity: "git-ssh"}}
+	raw, err := yaml.Marshal(defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.defaults = raw
+	return defaults
+}
+
+// TestTeamDefaultsInForm is #1746 part 2 over the routes: /api/sources gives
+// the default roles and connector choices in the form's shape, and an edit
+// that declares them unchanged composes what inheriting them did.
+func TestTeamDefaultsInForm(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	defaults := inheritingDefaults(t, c)
+	inheriting := storedProj()
+	inheriting.Spec.Roles = nil
+	c.putTeam(t, inheriting)
+
+	w := connectorRequest(t, h, http.MethodGet, "/api/sources", "")
+	list := decodeBody[sourcesListView](t, w)
+	roles := list.DefaultForm.Roles
+	if w.Code != http.StatusOK || len(roles) != 1 {
+		t.Fatalf("sources: %d %s", w.Code, w.Body)
+	}
+	lead := roles[0]
+	if lead.Harness != "claude" || lead.InitialPath != "$HOME/work" || strings.Join(lead.Image, ",") != "go,node" ||
+		lead.Tasks.All || len(lead.Tasks.Items) != 1 || lead.Tasks.Items[0].Schedule != "@daily" {
+		t.Fatalf("default role = %+v", lead)
+	}
+	if github := roleSwitch(t, &teamForm{Roles: formRoles{Items: roles}}, "github"); !github.Enabled ||
+		github.Identity != "bot-token" {
+		t.Fatalf("github switch = %+v", github)
+	}
+	if got := list.DefaultForm.Connectors; len(got) != 1 || got["git"].Identity != "git-ssh" {
+		t.Fatalf("default connectors = %+v", got)
+	}
+
+	w = connectorRequest(t, h, http.MethodGet, "/api/teams/proj", "")
+	view := decodeBody[teamView](t, w)
+	if w.Code != http.StatusOK || view.Form == nil || !view.Form.Roles.Inherit || !view.Form.Connectors.Inherit {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	preview := func(form teamForm) teamOutcomeView {
+		t.Helper()
+		got := connectorRequest(t, h, http.MethodPost, "/api/teams/preview",
+			jsonBody(t, map[string]any{"name": "proj", "form": form}))
+		if got.Code != http.StatusOK {
+			t.Fatalf("preview: %d %s", got.Code, got.Body)
+		}
+		return decodeBody[teamOutcomeView](t, got)
+	}
+	inherited := preview(*view.Form)
+	declared := *view.Form
+	declared.Roles = formRoles{Items: roles}
+	declared.Connectors = formConnectors{Items: list.DefaultForm.Connectors}
+	got := preview(declared)
+	if len(inherited.Plan.Pairs) == 0 || jsonBody(t, got.Plan.Pairs) != jsonBody(t, inherited.Plan.Pairs) {
+		t.Fatalf("pairs:\n declared  %s\n inherited %s", jsonBody(t, got.Plan.Pairs), jsonBody(t, inherited.Plan.Pairs))
+	}
+	if slices.Compare(got.Plan.MissingSecrets, inherited.Plan.MissingSecrets) != 0 {
+		t.Fatalf("missing secrets: %v, inheriting %v", got.Plan.MissingSecrets, inherited.Plan.MissingSecrets)
+	}
+	team, err := config.DecodeTeamDeclaration(strings.NewReader(got.Plan.Declaration))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := defaults.Spec.Defaults; jsonBody(t, team.Spec.Roles) != jsonBody(t, want.Roles) ||
+		jsonBody(t, team.Spec.Connectors) != jsonBody(t, want.Connectors) {
+		t.Fatalf("declared roles %s connectors %s, want the defaults'", jsonBody(t, team.Spec.Roles),
+			jsonBody(t, team.Spec.Connectors))
 	}
 }
