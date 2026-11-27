@@ -172,6 +172,10 @@ func renderCellFromConfig(r runner.Runner, cfg intmodel.CellConfig, binding cell
 	// MaterializeWithName places the cell in the Config's scope; move it to
 	// the target. The Config's metadata stays as is: provenance reads it.
 	cellDoc.Spec.SpaceID, cellDoc.Spec.StackID = resolved.spaceName, resolved.stackName
+	// Host mounts and KUKEON_HOST name this daemon's own run path and socket
+	// (#1710). Expanded here, the render digest changes when the daemon
+	// moves, so the OutOfSync reconciler follows it.
+	cellblueprint.ExpandHostPaths(hostPathsOf(r), cellDoc.Spec.Containers)
 	// Ephemeral harness state mounts no state volume (#1685).
 	if resolved.state == v1beta1.HarnessStateEphemeral {
 		dropStateVolumeMounts(&cellDoc, merged.Spec.Values)
@@ -1045,4 +1049,24 @@ func (b *Exec) RealmImages(realm intmodel.Realm) []v1beta1.RealmImageStatus {
 		})
 	}
 	return out
+}
+
+// hostPathSource is the part of the runner that knows the daemon's host
+// paths: runner.Exec implements it. A runner that does not (a test fake) gets
+// the standard layout.
+type hostPathSource interface {
+	HostPaths() (runPath, socket string)
+}
+
+var _ hostPathSource = (*runner.Exec)(nil)
+
+// hostPathsOf returns the daemon host paths a render expands a blueprint's
+// reserved host-path variables to (cellblueprint.ExpandHostPaths, #1710).
+func hostPathsOf(r runner.Runner) cellblueprint.HostPaths {
+	src, ok := r.(hostPathSource)
+	if !ok {
+		return cellblueprint.HostPaths{}
+	}
+	runPath, socket := src.HostPaths()
+	return cellblueprint.HostPaths{RunPath: runPath, Socket: socket}
 }

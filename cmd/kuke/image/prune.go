@@ -27,7 +27,9 @@ import (
 // NewPruneCmd builds the `kuke image prune` subcommand. It reclaims dangling
 // image layers and the orphaned containerd leases pinning them in the
 // realm's namespace, leaving tagged images and the snapshots backing live
-// cells untouched. Idempotent: a second run on a clean realm is a no-op.
+// cells untouched, and drops the namespace's kukebuild cache directory,
+// whose records point at the released leases (#1705). Idempotent: a second
+// run on a clean realm is a no-op.
 func NewPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "prune",
@@ -49,14 +51,24 @@ func NewPruneCmd() *cobra.Command {
 			defer func() { _ = client.Close() }()
 
 			res, err := client.PruneImages(cmd.Context(), realm)
+			if res.Namespace != "" {
+				// Printed on a build-cache removal error too: the leases
+				// are released by then.
+				cmd.Printf(
+					"pruned realm %q (namespace %q): released %d lease(s), retained %d\n",
+					res.Realm, res.Namespace, res.LeasesDeleted, res.LeasesRetained,
+				)
+			}
 			if err != nil {
 				return err
 			}
-
-			cmd.Printf(
-				"pruned realm %q (namespace %q): released %d lease(s), retained %d\n",
-				res.Realm, res.Namespace, res.LeasesDeleted, res.LeasesRetained,
-			)
+			if res.BuildCacheRemoved {
+				cmd.Printf(
+					"removed build cache %s: its records pointed at the released leases; "+
+						"the next `kuke build` into the realm starts uncached\n",
+					res.BuildCachePath,
+				)
+			}
 			return nil
 		},
 	}

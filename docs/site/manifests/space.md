@@ -38,6 +38,8 @@ Directory where Kukeon writes this space's CNI conflist. Defaults to the system 
 
 Constrains outbound traffic leaving the space's bridge. When omitted, traffic is unconstrained — matching the pre-`v1beta1` behavior.
 
+`kuke apply -f` of an existing space applies a changed policy at once: the apply reports `updated`, the stored space carries the new policy, and the space's chain is rebuilt, so an added rule admits traffic, a removed rule stops admitting it, and a change from `default: allow` to `default: deny` starts dropping. Re-applying a space without `spec.network` removes its egress policy, and the space's traffic becomes unconstrained.
+
 | Field     | Type                | Description                                                                     |
 | --------- | ------------------- | ------------------------------------------------------------------------------- |
 | `default` | `allow` \| `deny`   | Fallthrough action when no `allow` rule matches. Required when `egress` is set. |

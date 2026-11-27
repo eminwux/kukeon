@@ -102,6 +102,11 @@ type Options struct {
 	// staged (issue #1643); empty is the gitfetch directory beside
 	// KukeondSocket. Tests set it.
 	GitFetchDir string
+	// BuildCacheBaseDir overrides the directory under which `kukebuild` keeps
+	// its per-namespace BuildKit state, which PruneImages drops alongside the
+	// leases it releases (issue #1705). Empty falls back to
+	// consts.KukebuildBaseDir. Tests set it.
+	BuildCacheBaseDir string
 	// KukeondSocketGID, when non-zero, is passed to the kukeond cell as
 	// --socket-gid <gid> so the daemon can chown its listener socket on every
 	// restart. Set by `kuke init` to the kukeon group's numeric GID.
@@ -152,6 +157,7 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 			ContainerdSocket:         opts.ContainerdSocket,
 			RunPath:                  opts.RunPath,
 			SecretsStagingDir:        ctr.SecretsStagingDir(opts.KukeondSocket),
+			KukeondSocket:            opts.KukeondSocket,
 			ForceRegenerateCNI:       opts.ForceRegenerateCNI,
 			KukeonGroupGID:           opts.KukeondSocketGID,
 			DefaultMemoryLimitBytes:  opts.DefaultMemoryLimitBytes,

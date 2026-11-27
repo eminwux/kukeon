@@ -1313,18 +1313,18 @@ func (c *Client) PullImage(_ context.Context, realm, ref string) error {
 // PruneImages reclaims dangling image layers and the orphaned leases pinning
 // them in the realm's containerd namespace. The realm is validated by the
 // controller layer; this wrapper only re-encodes the controller result onto
-// the wire type.
+// the wire type. A build-cache removal failure returns the error together
+// with the populated result, because the leases were already released.
 func (c *Client) PruneImages(_ context.Context, realm string) (kukeonv1.PruneImagesResult, error) {
 	res, err := c.ctrl.PruneImages(realm)
-	if err != nil {
-		return kukeonv1.PruneImagesResult{}, err
-	}
 	return kukeonv1.PruneImagesResult{
-		Realm:          res.Realm,
-		Namespace:      res.Namespace,
-		LeasesDeleted:  res.LeasesDeleted,
-		LeasesRetained: res.LeasesRetained,
-	}, nil
+		Realm:             res.Realm,
+		Namespace:         res.Namespace,
+		LeasesDeleted:     res.LeasesDeleted,
+		LeasesRetained:    res.LeasesRetained,
+		BuildCachePath:    res.BuildCache.Path,
+		BuildCacheRemoved: res.BuildCache.Removed,
+	}, err
 }
 
 func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {

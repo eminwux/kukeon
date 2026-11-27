@@ -19,6 +19,7 @@ package apply
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -206,7 +207,80 @@ func DiffSpace(desired, actual intmodel.Space) DiffResult {
 		markCompatible(&result, "spec.defaults", "CellConfig defaults changed")
 	}
 
+	// Compatible change: the egress policy. UpdateSpace persists it and
+	// rebuilds the space's chain (#1703). A desired document without
+	// spec.network means "unconstrained", like spec.defaults' replace
+	// semantics, so dropping the block from a restricted space is a change.
+	if !spaceEgressEqual(desired.Spec.Network, actual.Spec.Network) {
+		markCompatible(&result, "spec.network.egress", "egress policy changed")
+	}
+
 	return result
+}
+
+// spaceEgressEqual reports whether two space network blocks mean the same
+// egress policy. nil Network, nil Egress, and a default=allow policy with no
+// rules all mean "unconstrained" (netpolicy.FromInternal returns nil for all
+// three). Default is compared trimmed and lowercased, "" meaning allow; an
+// invalid value is compared verbatim and left for the runner to reject. The
+// allow list is a set (every rule is an ACCEPT ahead of one terminal action,
+// so order has no effect on enforcement), as is each rule's port list. The
+// inputs are not mutated.
+func spaceEgressEqual(a, b *intmodel.SpaceNetwork) bool {
+	an, bn := normalizeSpaceEgress(a), normalizeSpaceEgress(b)
+	if an == nil || bn == nil {
+		return an == nil && bn == nil
+	}
+	if an.Default != bn.Default || len(an.Allow) != len(bn.Allow) {
+		return false
+	}
+	for i := range an.Allow {
+		if !egressRuleEqual(an.Allow[i], bn.Allow[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeSpaceEgress returns a sorted copy of the network's egress policy,
+// or nil when the policy is unconstrained (see spaceEgressEqual).
+func normalizeSpaceEgress(n *intmodel.SpaceNetwork) *intmodel.EgressPolicy {
+	if n == nil || n.Egress == nil {
+		return nil
+	}
+	def := intmodel.EgressDefault(strings.ToLower(strings.TrimSpace(string(n.Egress.Default))))
+	if def == "" {
+		def = intmodel.EgressDefaultAllow
+	}
+	if def == intmodel.EgressDefaultAllow && len(n.Egress.Allow) == 0 {
+		return nil
+	}
+	rules := make([]intmodel.EgressAllowRule, len(n.Egress.Allow))
+	for i, r := range n.Egress.Allow {
+		ports := slices.Clone(r.Ports)
+		slices.Sort(ports)
+		rules[i] = intmodel.EgressAllowRule{
+			Host:  strings.TrimSpace(r.Host),
+			CIDR:  strings.TrimSpace(r.CIDR),
+			Ports: ports,
+		}
+	}
+	slices.SortFunc(rules, compareEgressRule)
+	return &intmodel.EgressPolicy{Default: def, Allow: rules}
+}
+
+func compareEgressRule(a, b intmodel.EgressAllowRule) int {
+	if c := strings.Compare(a.CIDR, b.CIDR); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Host, b.Host); c != 0 {
+		return c
+	}
+	return slices.Compare(a.Ports, b.Ports)
+}
+
+func egressRuleEqual(a, b intmodel.EgressAllowRule) bool {
+	return compareEgressRule(a, b) == 0
 }
 
 // DiffStack compares desired and actual stack states.

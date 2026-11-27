@@ -59,14 +59,11 @@ majordomo (`internal/webui/frontend/tests/onboarding.spec.mjs`, started by
 No vendor login happens: the test fakes the login marker in the agent
 template's state volume. Plain `make e2e` skips the test.
 
-By default the daemon runs under a temporary run path, like the rest of the
-e2e suite, and the test stops before **Enable majordomo**: majordomo's Config
-bind-mounts the standard host paths (`/opt/kukeon/bin/client`,
-`/run/kukeon/kukeond`), which only a daemon in the standard layout provides.
-CI runs `make e2e-onboarding KUKEON_E2E_HOST_LAYOUT=1`, which bootstraps the
-daemon at `/opt/kukeon` and `/run/kukeon/kukeond.sock` and runs every step.
-Use it only on a host with no kukeon runtime; the test refuses to start when
-it finds one.
+The daemon runs under a temporary run path, like the rest of the e2e suite,
+in CI too. Majordomo's Config bind-mounts the daemon's socket directory and
+its staged `kuke` client, which kukeond resolves to its own run path and
+socket when it renders the cell, so the test enables majordomo and checks
+that its cell mounts them from the test's run path.
 
 ## `make fmt-check`
 

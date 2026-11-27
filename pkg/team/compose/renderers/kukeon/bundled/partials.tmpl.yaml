@@ -4,25 +4,29 @@
   Host-mount volumes of one selector. The daemon socket and the kuke binary
   are replaced on the host (daemon restart, rebuild), so they are mounted
   through directories: a single-file bind pins the replaced inode (#1483).
-  kukeond-socket: the daemon hard-links its socket into /run/kukeon/kukeond/
+  The sources name the rendering daemon's own paths through the reserved
+  ${KUKEON_RUN_PATH} and ${KUKEOND_SOCKET_DIR} variables, which kukeond
+  expands when it renders the cell (cellblueprint.ExpandHostPaths, #1710);
+  the in-cell targets are the standard layout on every host.
+  kukeond-socket: the daemon hard-links its socket into <socket dir>/kukeond/
   on every start; KUKEON_HOST points the in-cell client at it.
-  kuke-binary: `kuke init` stages the client under /opt/kukeon/bin/client/;
+  kuke-binary: `kuke init` stages the client under <run path>/bin/client/;
   /usr/local/bin/kuke is a constant, never-replaced shim that execs it.
 */ -}}
 {{- define "host_mounts" -}}
 {{- if eq . "kukeond-socket" }}
-          - source: /run/kukeon/kukeond
+          - source: ${KUKEOND_SOCKET_DIR}/kukeond
             target: /run/kukeon/kukeond
             readOnly: true
 {{- else if eq . "kuke-binary" }}
-          - source: /opt/kukeon/bin/client
+          - source: ${KUKEON_RUN_PATH}/bin/client
             target: /.kukeon/client
             readOnly: true
-          - source: /opt/kukeon/bin/kuke-shim
+          - source: ${KUKEON_RUN_PATH}/bin/kuke-shim
             target: /usr/local/bin/kuke
             readOnly: true
 {{- else if eq . "kukeon-install" }}
-          - source: /opt/kukeon
+          - source: ${KUKEON_RUN_PATH}
             target: /opt/kukeon
             readOnly: true
 {{- end -}}

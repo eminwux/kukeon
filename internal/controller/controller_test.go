@@ -990,6 +990,9 @@ func setupTestController(t *testing.T, mockRunner runner.Runner) *controller.Exe
 	opts := controller.Options{
 		RunPath:          "/test/run/path",
 		ContainerdSocket: "/test/containerd.sock",
+		// PruneImages removes <BuildCacheBaseDir>/<namespace>; keep tests
+		// away from the host's /var/lib/kukebuild.
+		BuildCacheBaseDir: t.TempDir(),
 	}
 	return controller.NewControllerExecForTesting(ctx, logger, opts, mockRunner)
 }

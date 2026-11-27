@@ -20,11 +20,14 @@ package controller_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -346,6 +349,98 @@ func TestPruneImages_Success(t *testing.T) {
 	}
 	if res.LeasesRetained != 2 {
 		t.Errorf("LeasesRetained = %d, want 2", res.LeasesRetained)
+	}
+}
+
+// TestPruneImages_DropsBuildCache pins #1705: the leases the prune releases
+// hold the snapshots kukebuild's cache.db points at, so the namespace's
+// kukebuild state directory goes with them. Kept, the next `kuke build` into
+// the realm picks a cached parent whose snapshot is gone ("parent snapshot
+// ... does not exist"). Other namespaces' caches are left alone.
+func TestPruneImages_DropsBuildCache(t *testing.T) {
+	ns := consts.RealmNamespace("kuke-system")
+	other := consts.RealmNamespace("default")
+	base := t.TempDir()
+	for _, dir := range []string{ns, other} {
+		if err := os.MkdirAll(filepath.Join(base, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(base, dir, "cache.db"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("kuke-system", ns), nil
+		},
+		PruneImagesFn: func(string) (ctr.PruneResult, error) {
+			return ctr.PruneResult{LeasesDeleted: 47}, nil
+		},
+	}
+	ctrl := controller.NewControllerExecForTesting(
+		t.Context(), setupTestLogger(t),
+		controller.Options{RunPath: "/test/run/path", BuildCacheBaseDir: base},
+		mock,
+	)
+
+	res, err := ctrl.PruneImages("kuke-system")
+	if err != nil {
+		t.Fatalf("PruneImages: %v", err)
+	}
+	want := filepath.Join(base, ns)
+	if res.BuildCache.Path != want || !res.BuildCache.Existed || !res.BuildCache.Removed {
+		t.Errorf("BuildCache = %+v, want existed and removed at %s", res.BuildCache, want)
+	}
+	if _, statErr := os.Stat(want); !os.IsNotExist(statErr) {
+		t.Errorf("build cache %s still present (stat err %v)", want, statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(base, other, "cache.db")); statErr != nil {
+		t.Errorf("another namespace's build cache was touched: %v", statErr)
+	}
+
+	// Idempotent: a second prune finds no cache and reports nothing removed.
+	res, err = ctrl.PruneImages("kuke-system")
+	if err != nil {
+		t.Fatalf("second PruneImages: %v", err)
+	}
+	if res.BuildCache.Existed || res.BuildCache.Removed {
+		t.Errorf("second prune BuildCache = %+v, want nothing removed", res.BuildCache)
+	}
+}
+
+// TestPruneImages_BuildCacheRemoveErrorKeepsCounts: a cache directory that
+// cannot be removed fails the prune, but the result still carries the lease
+// counts, since the leases are already released.
+func TestPruneImages_BuildCacheRemoveErrorKeepsCounts(t *testing.T) {
+	ns := consts.RealmNamespace("default")
+	// A base that is a regular file makes the stat of <base>/<ns> fail
+	// with ENOTDIR, which is not "does not exist".
+	base := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(base, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("default", ns), nil
+		},
+		PruneImagesFn: func(string) (ctr.PruneResult, error) {
+			return ctr.PruneResult{LeasesDeleted: 3, LeasesRetained: 1}, nil
+		},
+	}
+	ctrl := controller.NewControllerExecForTesting(
+		t.Context(), setupTestLogger(t),
+		controller.Options{RunPath: "/test/run/path", BuildCacheBaseDir: base},
+		mock,
+	)
+	res, err := ctrl.PruneImages("default")
+	if !errors.Is(err, errdefs.ErrPruneImages) {
+		t.Fatalf("expected ErrPruneImages, got %v", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(base, ns)) {
+		t.Errorf("error should name the cache path; got %q", err.Error())
+	}
+	if res.LeasesDeleted != 3 || res.LeasesRetained != 1 || res.Namespace != ns {
+		t.Errorf("result = %+v, want counts 3/1 and namespace %s", res, ns)
 	}
 }
 

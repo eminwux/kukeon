@@ -315,9 +315,10 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		"conf",
 		confPath,
 	)
-	// Re-apply egress policy on every Ensure so a daemon restart (or a
-	// manual `kuke apply` with a changed policy) converges the host
-	// firewall to the spec. iptables rules are idempotent via ensureRule.
+	// Re-apply egress policy on every Ensure so a daemon restart converges
+	// the host firewall to the stored spec. iptables rules are idempotent via
+	// ensureRule. A `kuke apply` with a changed policy goes through
+	// ReconcileSpace → UpdateSpace, which installs the new policy itself.
 	if policyErr := r.applySpaceEgressPolicy(space); policyErr != nil {
 		return intmodel.Space{}, policyErr
 	}

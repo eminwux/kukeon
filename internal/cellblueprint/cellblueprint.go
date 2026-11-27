@@ -266,6 +266,11 @@ func MaterializeWithName(
 	// exists, so a 1:N binding mints a distinct private Volume per stamped cell
 	// (#1017).
 	ExpandPerCellVolumes(cellName, containers)
+	// An inline blueprint is materialized by the client, which does not know
+	// the daemon's paths: the host-path variables take the standard layout,
+	// which is what team blueprints carried literally before #1710. A Config
+	// render in the daemon expands them to its own paths instead.
+	ExpandHostPaths(HostPaths{}, containers)
 
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,

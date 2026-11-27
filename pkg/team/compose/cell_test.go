@@ -41,6 +41,16 @@ const (
 // without modes.
 func renderCell(t *testing.T, pair compose.Pair, mode string, params map[string]string) api.CellDoc {
 	t.Helper()
+	return renderCellAt(t, pair, mode, params, cellblueprint.HostPaths{})
+}
+
+// renderCellAt is renderCell on a daemon with the given run path and socket:
+// the daemon's render expands the blueprint's host-path variables to them
+// (#1710).
+func renderCellAt(
+	t *testing.T, pair compose.Pair, mode string, params map[string]string, paths cellblueprint.HostPaths,
+) api.CellDoc {
+	t.Helper()
 	flat, err := cellblueprint.Flatten(*pair.Blueprint, cellblueprint.FlattenOptions{
 		Components: pair.Config.Spec.Components, Mode: mode,
 	})
@@ -91,6 +101,7 @@ func renderCell(t *testing.T, pair compose.Pair, mode string, params map[string]
 	if err != nil {
 		t.Fatalf("materialize %s in mode %q: %v", cfg.Metadata.Name, mode, err)
 	}
+	cellblueprint.ExpandHostPaths(paths, doc.Spec.Containers)
 	return doc
 }
 
