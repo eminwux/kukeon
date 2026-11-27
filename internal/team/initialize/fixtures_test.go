@@ -67,9 +67,35 @@ spec:
     - { name: tick, schedule: "*/5 * * * *", suspend: true }
 `
 
+// fixtureOrchestratorYAML stands in for the agents repository's orchestrator
+// role, which declares the claude harness only.
+const fixtureOrchestratorYAML = `apiVersion: v1beta1
+kind: Role
+metadata: { name: orchestrator }
+spec:
+  skills: [orchestrator/skills/dispatch, orchestrator/skills/status]
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+  connectors: [github]
+  needs:
+    repos: [agents]
+    mounts: [kuke-binary, kukeond-socket]
+    params:
+      - AGENT_NAME
+      - { name: AGENTS_REPO, default: "${ROLE_SOURCE_REPO}" }
+`
+
 // fixtureAgentsTree is the eminwux/agents roles both fixtures name.
 func fixtureAgentsTree() fstest.MapFS {
-	tree := fstest.MapFS{"pipeline/role.yaml": &fstest.MapFile{Data: []byte(fixturePipelineYAML)}}
+	tree := fstest.MapFS{
+		"pipeline/role.yaml":                       &fstest.MapFile{Data: []byte(fixturePipelineYAML)},
+		"orchestrator/role.yaml":                   &fstest.MapFile{Data: []byte(fixtureOrchestratorYAML)},
+		"orchestrator/AGENTS.md":                   &fstest.MapFile{Data: []byte("# orchestrator\n")},
+		"orchestrator/config/claude.settings.json": &fstest.MapFile{Data: []byte("{}\n")},
+		"orchestrator/skills/dispatch/SKILL.md":    &fstest.MapFile{Data: []byte("# dispatch\n")},
+		"orchestrator/skills/status/SKILL.md":      &fstest.MapFile{Data: []byte("# status\n")},
+	}
 	for _, role := range []string{"dev", "pm", "pr-reviewer", "meta-dev", "meta-reviewer", "meta-pm"} {
 		tree[role+"/role.yaml"] = &fstest.MapFile{Data: fmt.Appendf(nil, fixtureRoleYAML, role)}
 		tree[role+"/AGENTS.md"] = &fstest.MapFile{Data: []byte("# " + role + "\n")}
