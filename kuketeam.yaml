@@ -14,6 +14,15 @@ spec:
     - { name: dev, source: agents, path: dev, needs: { image: [go, root] } }
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
+    # Pinned to claude, the one harness the role declares today: the team
+    # renders kukeon-orchestrator-claude alone, even if the role later adds
+    # codex.
+    - {
+        name: orchestrator,
+        source: agents,
+        path: orchestrator,
+        harness: claude,
+      }
     - {
         name: pipeline,
         source: agents,

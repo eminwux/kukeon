@@ -25,6 +25,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/compose"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -388,10 +389,32 @@ spec:
     - { name: tick, schedule: "*/5 * * * *", suspend: true }
 `
 
-// TestKukeonTeamRunsThePipeline composes this repository's own kuketeam.yaml
-// (issue #1542): the agent roles pair with claude and codex only, and the
-// pipeline role, pinned to script, renders its tick switched on.
-func TestKukeonTeamRunsThePipeline(t *testing.T) {
+// orchestratorYAML stands in for the agents repository's orchestrator role: a
+// model role on claude only that reaches the daemon through the socket and the
+// kuke binary.
+const orchestratorYAML = `apiVersion: v1beta1
+kind: Role
+metadata: { name: orchestrator }
+spec:
+  skills:
+    - orchestrator/skills/dispatch
+    - orchestrator/skills/status
+  harnesses:
+    claude:
+      settings: config/claude.settings.json
+  connectors: [github]
+  needs:
+    repos: [agents]
+    mounts: [kuke-binary, kukeond-socket]
+    params:
+      - AGENT_NAME
+      - { name: AGENTS_REPO, default: "${ROLE_SOURCE_REPO}" }
+`
+
+// composeKukeonTeam composes this repository's own kuketeam.yaml over stand-ins
+// for the agents repository's roles.
+func composeKukeonTeam(t *testing.T) *compose.Result {
+	t.Helper()
 	f, err := os.Open("../../../kuketeam.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +427,14 @@ func TestKukeonTeamRunsThePipeline(t *testing.T) {
 	team.Spec.ProjectSource = &config.Source{
 		Name: "project", URL: "git@github.com:eminwux/kukeon", Branch: "main", ClonePath: "/home/user/kukeon",
 	}
-	agents := fstest.MapFS{"pipeline/role.yaml": &fstest.MapFile{Data: []byte(pipelineYAML)}}
+	agents := fstest.MapFS{
+		"pipeline/role.yaml":                       &fstest.MapFile{Data: []byte(pipelineYAML)},
+		"orchestrator/role.yaml":                   &fstest.MapFile{Data: []byte(orchestratorYAML)},
+		"orchestrator/AGENTS.md":                   &fstest.MapFile{Data: []byte("# orchestrator\n")},
+		"orchestrator/config/claude.settings.json": &fstest.MapFile{Data: []byte("{}\n")},
+		"orchestrator/skills/dispatch/SKILL.md":    &fstest.MapFile{Data: []byte("# dispatch\n")},
+		"orchestrator/skills/status/SKILL.md":      &fstest.MapFile{Data: []byte("# status\n")},
+	}
 	for _, role := range []string{"dev", "pm", "pr-reviewer"} {
 		agents[role+"/role.yaml"] = &fstest.MapFile{Data: []byte(fmt.Sprintf(agentRoleYAML, role))}
 		agents[role+"/AGENTS.md"] = &fstest.MapFile{Data: []byte("# " + role + "\n")}
@@ -416,13 +446,11 @@ func TestKukeonTeamRunsThePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{
-		"dev/claude", "dev/codex", "pm/claude", "pm/codex",
-		"pr-reviewer/claude", "pr-reviewer/codex", "pipeline/script",
-	}
-	if got := pairList(result); !slices.Equal(got, want) {
-		t.Fatalf("pairs = %v, want %v", got, want)
-	}
+	return result
+}
+
+// configNames lists every pair and task config a composition renders.
+func configNames(result *compose.Result) []string {
 	var configs []string
 	for _, pair := range result.Pairs {
 		configs = append(configs, pair.Config.Metadata.Name)
@@ -430,6 +458,22 @@ func TestKukeonTeamRunsThePipeline(t *testing.T) {
 			configs = append(configs, task.Metadata.Name)
 		}
 	}
+	return configs
+}
+
+// TestKukeonTeamRunsThePipeline composes this repository's own kuketeam.yaml
+// (issue #1542): the agent roles pair with claude and codex only, and the
+// pipeline role, pinned to script, renders its tick switched on.
+func TestKukeonTeamRunsThePipeline(t *testing.T) {
+	result := composeKukeonTeam(t)
+	want := []string{
+		"dev/claude", "dev/codex", "pm/claude", "pm/codex",
+		"pr-reviewer/claude", "pr-reviewer/codex", "orchestrator/claude", "pipeline/script",
+	}
+	if got := pairList(result); !slices.Equal(got, want) {
+		t.Fatalf("pairs = %v, want %v", got, want)
+	}
+	configs := configNames(result)
 	for _, absent := range []string{
 		"kukeon-pipeline-claude", "kukeon-pipeline-codex",
 		"kukeon-dev-script", "kukeon-pm-script", "kukeon-pr-reviewer-script",
@@ -452,5 +496,36 @@ func TestKukeonTeamRunsThePipeline(t *testing.T) {
 	}
 	if tick.Spec.Schedule == nil || tick.Spec.Schedule.Cron != "*/5 * * * *" || tick.Spec.Schedule.Suspend {
 		t.Fatalf("tick schedule = %+v, want the role's cadence, unsuspended", tick.Spec.Schedule)
+	}
+}
+
+// TestKukeonTeamRunsTheOrchestrator covers issue #1534: kukeon's team renders
+// the orchestrator on claude alone, and its cell reaches the daemon through the
+// socket and the kuke binary.
+func TestKukeonTeamRunsTheOrchestrator(t *testing.T) {
+	result := composeKukeonTeam(t)
+	configs := configNames(result)
+	for _, absent := range []string{"kukeon-orchestrator-codex", "kukeon-orchestrator-script"} {
+		if slices.Contains(configs, absent) {
+			t.Fatalf("configs %v include %s", configs, absent)
+		}
+	}
+	orchestrator := pairFor(t, result, "orchestrator", "claude")
+	if got, want := orchestrator.Config.Metadata.Name, "kukeon-orchestrator-claude"; got != want {
+		t.Fatalf("orchestrator config = %q, want %q", got, want)
+	}
+
+	container := workOf(t, renderCellAt(t, orchestrator, interactive, nil, cellblueprint.HostPaths{}))
+	got := map[string]hostMount{}
+	for _, volume := range container.Volumes {
+		got[volume.Target] = hostMount{volume.Source, volume.ReadOnly}
+	}
+	for target, want := range mergeMounts(socketMounts, binaryMounts) {
+		if got[target] != want {
+			t.Fatalf("mount %s = %+v, want %+v (all: %v)", target, got[target], want, got)
+		}
+	}
+	if !slices.Contains(container.Env, "KUKEON_HOST=unix:///run/kukeon/kukeond/kukeond.sock") {
+		t.Fatalf("KUKEON_HOST missing: %v", container.Env)
 	}
 }

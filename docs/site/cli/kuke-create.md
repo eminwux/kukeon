@@ -437,6 +437,12 @@ spec:
     - { name: pm, source: agents, path: pm }
     - { name: pr-reviewer, source: agents, path: pr-reviewer }
     - {
+        name: orchestrator,
+        source: agents,
+        path: orchestrator,
+        harness: claude,
+      }
+    - {
         name: pipeline,
         source: agents,
         path: pipeline,
