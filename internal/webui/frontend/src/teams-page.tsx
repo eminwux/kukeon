@@ -223,8 +223,8 @@ function ExportPage({ name, revision }: { name: string; revision: number }) {
     <div className="panel-body">
       <p className="description">The team as a repository's <code>kuketeam.yaml</code>, the output of <code>kuke team export {name}</code>. Commit it to the project repository to create the team from it again.</p>
       <div className="connector-actions">
-        <label className="schema-check"><input type="checkbox" checked={hostFields} onChange={event => { setHostFields(event.target.checked); setCopied(false); }} />Keep host fields (<code>--host-fields</code>): realm, stored Source names, refs, git identities and secret bindings</label>
-        <label className="schema-check"><input type="checkbox" checked={explicit} onChange={event => { setExplicit(event.target.checked); setCopied(false); }} />Write inherited lists out (<code>--explicit-defaults</code>)</label>
+        <label className="schema-check"><input type="checkbox" checked={hostFields} onChange={event => { setHostFields(event.target.checked); setCopied(false); }} /><span>Keep host fields (<code>--host-fields</code>): realm, stored Source names, refs, git identities and secret bindings</span></label>
+        <label className="schema-check"><input type="checkbox" checked={explicit} onChange={event => { setExplicit(event.target.checked); setCopied(false); }} /><span>Write inherited lists out (<code>--explicit-defaults</code>)</span></label>
       </div>
       {exported.error && <ErrorNotice error={exported.error} kind="Team" />}
       {exported.loading && !exported.data && <p role="status">Exporting…</p>}
