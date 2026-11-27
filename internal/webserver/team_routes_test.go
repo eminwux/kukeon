@@ -18,14 +18,19 @@ package webserver
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/team/initialize"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
+	"github.com/eminwux/kukeon/pkg/team/connector/connectortest"
 )
 
 func draftOf(t *testing.T, h http.Handler, body map[string]any) draftView {
@@ -59,6 +64,11 @@ func TestTeamDraft(t *testing.T) {
 	if _, err := config.DecodeTeamDeclaration(strings.NewReader(draft.Declaration)); err != nil {
 		t.Fatalf("declaration: %v\n%s", err, draft.Declaration)
 	}
+	// A new team's roles start with every per-role connector on (#1745).
+	if switches := draft.Form.Roles.Items[0].Connectors; len(switches) == 0 ||
+		slices.ContainsFunc(switches, func(item formRoleConnector) bool { return !item.Enabled }) {
+		t.Fatalf("draft switches = %+v", switches)
+	}
 	// The defaults apply when the file is ignored; a stored Source is named
 	// by its name.
 	c.storeSource(t, "proj", config.SourceSpec{URL: teamProjectURL, Branch: "main"})
@@ -78,6 +88,13 @@ func TestTeamCreateFromForm(t *testing.T) {
 	draft := draftOf(t, h, map[string]any{"source": teamProjectURL, "branch": "main", "name": "proj"})
 	on := false
 	form := draft.Form
+	// The draft turns on every connector of the fixture's catalog; compose
+	// knows only the built-in ones, as the server's own catalog does.
+	for i := range form.Roles.Items[0].Connectors {
+		if item := &form.Roles.Items[0].Connectors[i]; item.Name == connectortest.Name {
+			item.Enabled = false
+		}
+	}
 	form.Roles.Items[0].Tasks = formTasks{Items: []formTask{{Name: "health-sweep", Suspend: &on, Schedule: "@daily"}}}
 	form.Roles.Items[0].Image = []string{"go"}
 	body := map[string]any{
@@ -91,9 +108,40 @@ func TestTeamCreateFromForm(t *testing.T) {
 	if preview.Plan.Origin.Kind != initialize.OriginFile || !strings.Contains(preview.Plan.Declaration, "@daily") {
 		t.Fatalf("plan = %+v", preview.Plan)
 	}
+	if preview.Connectors == nil || len(*preview.Connectors) != 0 || len(c.rendered) == 0 {
+		t.Fatalf("preview connectors = %v, rendered %v", preview.Connectors, c.rendered)
+	}
+	// The preview carries what each composed Config resolves (#1745), from a
+	// draft render: before the team is stored, so Resolves to is filled. A
+	// Config that does not render is a note.
+	c.rendered = nil
+	c.preview = func(req kukeonv1.CellFromConfigRequest) (kukeonv1.PreviewCellFromConfigResult, error) {
+		if req.Draft == nil || req.Draft.Metadata.Labels[v1beta1.LabelTeam] != "proj" {
+			return kukeonv1.PreviewCellFromConfigResult{}, fmt.Errorf("not a draft of team proj: %+v", req.Draft)
+		}
+		if req.Draft.Metadata.Labels[v1beta1.LabelTask] != "" {
+			return kukeonv1.PreviewCellFromConfigResult{}, errors.New("blueprint not stored")
+		}
+		return kukeonv1.PreviewCellFromConfigResult{Connectors: []v1beta1.ConnectorStatus{{
+			Connector: "github", Method: "token", State: v1beta1.ConnectorUnresolved, Required: true,
+		}}}, nil
+	}
+	w = connectorRequest(t, h, http.MethodPost, "/api/teams/preview", jsonBody(t, body))
+	preview = decodeBody[teamOutcomeView](t, w)
+	if w.Code != http.StatusOK || c.writes != 0 || preview.Connectors == nil {
+		t.Fatalf("preview: %d %s", w.Code, w.Body)
+	}
+	rows := *preview.Connectors
+	if len(rows) == 0 || rows[0].Role != "lead" || rows[0].Connector != "github" || rows[0].Fill != "MISSING" ||
+		!strings.HasPrefix(rows[0].Config, "proj-lead-") {
+		t.Fatalf("preview rows = %+v", rows)
+	}
+	if len(preview.ConnectorNotes) == 0 || !strings.Contains(preview.ConnectorNotes[0], "blueprint not stored") {
+		t.Fatalf("preview notes = %q", preview.ConnectorNotes)
+	}
 	w = connectorRequest(t, h, http.MethodPost, "/api/teams", jsonBody(t, body))
 	if got := decodeBody[teamOutcomeView](t, w); w.Code != http.StatusOK || got.Result == nil ||
-		got.Result.Team != "proj" {
+		got.Result.Team != "proj" || got.Connectors != nil {
 		t.Fatalf("add: %d %s", w.Code, w.Body)
 	}
 	team, err := config.DecodeTeam(bytes.NewReader(c.teams["proj"]))
@@ -106,6 +154,10 @@ func TestTeamCreateFromForm(t *testing.T) {
 		team.Spec.ProjectSource.Stored != "proj" ||
 		c.sources["proj"] == nil {
 		t.Fatalf("stored team = %+v", team.Spec)
+	}
+	// The switches the draft turned on are stored in the role entry.
+	if _, ok = team.Spec.Roles[0].Connectors["github"]; !ok {
+		t.Fatalf("stored role connectors = %+v", team.Spec.Roles[0].Connectors)
 	}
 	// A second add asks for force, as kuke create team does.
 	w = connectorRequest(t, h, http.MethodPost, "/api/teams", jsonBody(t, body))

@@ -277,6 +277,12 @@ type teamResultView struct {
 type teamOutcomeView struct {
 	Plan   planView        `json:"plan"`
 	Result *teamResultView `json:"result,omitempty"`
+	// Connectors, on a dry run only, is what each composed Config would
+	// resolve per connector (#1745): the team page's Connectors rows before
+	// anything is stored. ConnectorNotes names the Configs that did not
+	// render, with the reason.
+	Connectors     *[]initialize.RoleConnector `json:"connectors,omitempty"`
+	ConnectorNotes []string                    `json:"connectorNotes,omitempty"`
 }
 
 func (a *teamAPI) applyTeam(ctx context.Context, client kukeonv1.Client, r *http.Request, dryRun bool) (any, error) {
@@ -317,7 +323,7 @@ func (a *teamAPI) applyTeam(ctx context.Context, client kukeonv1.Client, r *http
 	if err != nil {
 		return nil, err
 	}
-	return outcomeView(outcome)
+	return a.outcomeView(ctx, client, outcome)
 }
 
 // formFileName names a form's declaration in plans and messages.
@@ -362,7 +368,7 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 		if err != nil {
 			return nil, err
 		}
-		return outcomeView(outcome)
+		return a.outcomeView(ctx, previewerOf(opts.Client), outcome)
 	}
 	if name == "" {
 		return nil, fmt.Errorf("%w: name the team the form edits", errdefs.ErrInvalidTeam)
@@ -391,7 +397,7 @@ func (a *teamAPI) applyForm(ctx context.Context, opts initialize.Options, req te
 	if err != nil {
 		return nil, err
 	}
-	return outcomeView(outcome)
+	return a.outcomeView(ctx, previewerOf(opts.Client), outcome)
 }
 
 // draftRequest is what the wizard's Project step reads: create team's
@@ -457,6 +463,13 @@ func (a *teamAPI) draftTeam(ctx context.Context, client kukeonv1.Client, r *http
 		Origin: draft.Origin, Name: draft.Name, Form: formOf(draft.Team, a.catalog), Declaration: declaration,
 		Sources: make([]draftSourceView, 0, len(draft.Sources)), Notes: nonNil(draft.Notes),
 	}
+	// A new team gives each of its roles every connector a team can give
+	// (#1745): the switches start on, and the request body carries them.
+	for i := range view.Form.Roles.Items {
+		for j := range view.Form.Roles.Items[i].Connectors {
+			view.Form.Roles.Items[i].Connectors[j].Enabled = true
+		}
+	}
 	for _, source := range draft.Sources {
 		view.Sources = append(view.Sources, draftSourceView{
 			Alias: source.Alias, Stored: source.Stored, URL: source.URL, Ref: source.Ref,
@@ -508,7 +521,7 @@ func (a *teamAPI) reapplyTeam(ctx context.Context, client kukeonv1.Client, r *ht
 	if err != nil {
 		return nil, err
 	}
-	return outcomeView(outcome)
+	return a.outcomeView(ctx, client, outcome)
 }
 
 // initTeamView is one system team kuke team init applied: what was stored,
@@ -579,7 +592,19 @@ func initTeamOf(applied initialize.Outcome) initTeamView {
 	return view
 }
 
-func outcomeView(outcome initialize.Outcome) (teamOutcomeView, error) {
+// previewerOf is the daemon client's draft render, when it has one: the
+// web server's client always does.
+func previewerOf(client initialize.Client) initialize.ConfigPreviewer {
+	previewer, _ := client.(initialize.ConfigPreviewer)
+	return previewer
+}
+
+// outcomeView is a team application as the browser sees it. A dry run (no
+// result) also carries the connector rows of its composed Configs, rendered
+// by kukeond as drafts.
+func (a *teamAPI) outcomeView(
+	ctx context.Context, client initialize.ConfigPreviewer, outcome initialize.Outcome,
+) (teamOutcomeView, error) {
 	var view teamOutcomeView
 	if outcome.Plan != nil {
 		declaration, err := encodeYAML(outcome.Plan.Team)
@@ -587,6 +612,10 @@ func outcomeView(outcome initialize.Outcome) (teamOutcomeView, error) {
 			return view, err
 		}
 		view.Plan = planView{Plan: outcome.Plan, Declaration: declaration}
+		if outcome.Result == nil {
+			rows, notes := outcome.Plan.RoleConnectors(ctx, client, a.catalog)
+			view.Connectors, view.ConnectorNotes = &rows, notes
+		}
 	}
 	if res := outcome.Result; res != nil {
 		view.Result = &teamResultView{
