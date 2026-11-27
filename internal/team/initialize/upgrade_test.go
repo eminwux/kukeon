@@ -156,7 +156,7 @@ func TestUpgradeConvertsLegacyState(t *testing.T) {
 		t.Fatalf("apply stream kinds = %v", kinds)
 	}
 	if got := storedDefaults(t, f).Spec.Defaults; got.Sources != nil ||
-		!slices.Equal(got.Harnesses, config.MajordomoHarnesses()) {
+		!slices.Equal(got.Harnesses, config.InitialHarnesses()) {
 		t.Fatalf("converted defaults = %+v", got)
 	}
 	if got := storedSource(t, f, config.KukeonSourceName); got.URL != config.KukeonSourceURL || got.Commit != commitB {

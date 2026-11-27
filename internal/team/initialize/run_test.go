@@ -21,14 +21,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/team/teamtest"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	api "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/eminwux/kukeon/pkg/team/config"
@@ -76,7 +79,7 @@ func TestInitAppliesTheKukeTeamAndCreatesDefaults(t *testing.T) {
 	}
 	defaults := storedDefaults(t, f)
 	d := defaults.Spec.Defaults
-	if d.Sources != nil || d.Roles != nil || !slices.Equal(d.Harnesses, config.MajordomoHarnesses()) {
+	if d.Sources != nil || d.Roles != nil || !slices.Equal(d.Harnesses, config.InitialHarnesses()) {
 		t.Fatalf("initial defaults = %+v", d)
 	}
 	// The kukeon Source is stored beside them, at the build's revision
@@ -426,5 +429,66 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	if len(out.Also) != 1 || out.Also[0].Result != nil || out.Also[0].Plan == nil ||
 		!slices.Equal(out.Also[0].Plan.Create, []string{"default-agent-claude", "default-agent-codex"}) {
 		t.Fatalf("default team plan = %+v", out.Also)
+	}
+}
+
+// programRoleTeam is a project team that omits harnesses and selects an
+// agent role (claude and codex) and the pipeline program role (script only,
+// unpinned), from the agents fixture tree.
+const programRoleTeam = `apiVersion: v1beta1
+kind: Team
+metadata: { name: app }
+spec:
+  sources:
+    - { name: agents, url: git@github.com:eminwux/agents, branch: main, clonePath: /home/user/agents }
+  roles:
+    - { name: dev, source: agents, path: dev }
+    - { name: pipeline, source: agents, path: pipeline }
+`
+
+// addProgramRoleTeam composes programRoleTeam, dry-run, over defaults.
+func addProgramRoleTeam(t *testing.T, defaults *config.TeamDefaults) (Outcome, error) {
+	t.Helper()
+	kukeon, err := teamtest.PlainSource("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFake()
+	f.storeSource(config.KukeonSourceName, config.KukeonSourceSpec())
+	storeDefaults(t, f, defaults)
+	sources := map[string]fs.FS{"kukeon": kukeon, "agents": fixtureAgentsTree(), "project": fstest.MapFS{}}
+	return Add(t.Context(), AddOptions{
+		Options: Options{Client: f, Sources: sources, DryRun: true},
+		Name:    "app", Source: "git@github.com:acme/app", Branch: "main",
+		File: []byte(programRoleTeam), FileName: "app.yaml",
+	})
+}
+
+// TestInitialDefaultsRunAProgramRole is #1728: a team inheriting the
+// TeamDefaults init creates composes a script-only role's script pair, while
+// its agent role renders only its codex and claude pairs. Over the old
+// codex/claude seed the same team fails to compose.
+func TestInitialDefaultsRunAProgramRole(t *testing.T) {
+	out, err := addProgramRoleTeam(t, InitialDefaults(config.DefaultRealm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pairs, configs []string
+	for _, pair := range out.Plan.composed.Pairs {
+		pairs = append(pairs, pair.Role+"/"+pair.Harness)
+		configs = append(configs, pair.Config.Metadata.Name)
+	}
+	if want := []string{"dev/codex", "dev/claude", "pipeline/script"}; !slices.Equal(pairs, want) {
+		t.Fatalf("pairs = %v, want %v", pairs, want)
+	}
+	if want := []string{"app-dev-codex", "app-dev-claude", "app-pipeline-script"}; !slices.Equal(configs, want) {
+		t.Fatalf("configs = %v, want %v", configs, want)
+	}
+
+	legacy := config.EmptyDefaults(config.DefaultRealm)
+	legacy.Spec.Defaults = config.Defaults{Harnesses: config.MajordomoHarnesses()}
+	if _, err = addProgramRoleTeam(t, legacy); err == nil ||
+		!strings.Contains(err.Error(), `role "pipeline" declares none of the team's harnesses`) {
+		t.Fatalf("over codex/claude defaults: err = %v, want the pipeline role to pair with none", err)
 	}
 }

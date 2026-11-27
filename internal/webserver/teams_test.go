@@ -606,7 +606,7 @@ func TestTeamDefaults(t *testing.T) {
 	if w.Code != http.StatusOK || change.Action != "updated" || strings.Join(change.Inheriting, ",") != "proj" {
 		t.Fatalf("set: %d %s", w.Code, w.Body)
 	}
-	if d := c.storedDefaults(t).Spec.Defaults; len(d.Roles) != 1 || d.Roles[0].Name != "lead" || len(d.Harnesses) != 2 {
+	if d := c.storedDefaults(t).Spec.Defaults; len(d.Roles) != 1 || d.Roles[0].Name != "lead" || len(d.Harnesses) != 3 {
 		t.Fatalf("defaults = %+v", d)
 	}
 	doc := c.storedDefaults(t)

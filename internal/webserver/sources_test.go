@@ -36,11 +36,11 @@ func TestSourcesListCreateInspectDelete(t *testing.T) {
 	w := connectorRequest(t, h, http.MethodGet, "/api/sources", "")
 	list := decodeBody[sourcesListView](t, w)
 	if w.Code != http.StatusOK || len(list.Sources) != 2 || list.Sources[0].Name != "kukeon" ||
-		len(list.DefaultHarnesses) != 2 || list.DefaultRoles == nil {
+		len(list.DefaultHarnesses) != 3 || list.DefaultRoles == nil {
 		t.Fatalf("list: %d %s", w.Code, w.Body)
 	}
 	kukeon, proj := list.Sources[0], list.Sources[1]
-	if len(kukeon.DefaultHarnesses) != 2 || len(kukeon.DefaultRoles) != 0 || proj.Name != "proj" {
+	if len(kukeon.DefaultHarnesses) != 3 || len(kukeon.DefaultRoles) != 0 || proj.Name != "proj" {
 		t.Fatalf("sources = %+v", list.Sources)
 	}
 	uses := map[string]string{}
@@ -99,7 +99,7 @@ func TestSourcesListCreateInspectDelete(t *testing.T) {
 		}
 	}
 	tasks := strings.Join(scheduled, ",")
-	if defaults != 2 || !strings.Contains(tasks, "health-sweep@@hourly") {
+	if defaults != 3 || !strings.Contains(tasks, "health-sweep@@hourly") {
 		t.Fatalf("defaults marked = %d, tasks = %q: %s", defaults, tasks, w.Body)
 	}
 	w = connectorRequest(t, h, http.MethodPost, "/api/sources/inspect", jsonBody(t, map[string]any{

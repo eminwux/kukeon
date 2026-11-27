@@ -150,7 +150,7 @@ func TestDefaultsSet(t *testing.T) {
 		}
 	}
 	d := h.store.storedDefaults(t).Spec.Defaults
-	if len(d.Roles) != 1 || d.Roles[0].Name != "lead" || len(d.Harnesses) != 2 {
+	if len(d.Roles) != 1 || d.Roles[0].Name != "lead" || len(d.Harnesses) != 3 {
 		t.Fatalf("defaults = %+v", d)
 	}
 	if _, err = h.run(t, "defaults", "set", "--harness", "codex"); err != nil {

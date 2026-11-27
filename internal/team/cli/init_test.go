@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,8 +53,8 @@ func TestInitStoresTheKukeTeamAndInitialDefaults(t *testing.T) {
 		t.Fatalf("stored kuke Team: %v %+v", err, team)
 	}
 	defaults := h.store.storedDefaults(t)
-	if defaults.Spec.Defaults.Sources != nil ||
-		len(defaults.Spec.Defaults.Harnesses) != 2 || defaults.Spec.Defaults.Roles != nil {
+	if d := defaults.Spec.Defaults; d.Sources != nil || d.Roles != nil ||
+		!slices.Equal(d.Harnesses, config.InitialHarnesses()) {
 		t.Fatalf("initial TeamDefaults: %+v", defaults.Spec.Defaults)
 	}
 	// The kukeon Source is a stored document of its own (#1643).

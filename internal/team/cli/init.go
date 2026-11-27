@@ -39,8 +39,9 @@ func newInitCommand(deps Deps) *cobra.Command {
 			"A stored kuke team stops init; --force replaces it with the initial majordomo declaration and " +
 			"--reapply recomposes it from the stored Team (kuke team apply kuke).\n" +
 			"Init stores the Source kukeon (kuke get sources) when none is stored. When the realm has no " +
-			"TeamDefaults, init creates one with the claude and codex harnesses of that Source, so a project " +
-			"team needs only roles. An existing TeamDefaults is never changed, except by --upgrade.\n" +
+			"TeamDefaults, init creates one with the codex, claude and script harnesses of that Source, so a " +
+			"project team needs only roles; an agent role skips script, a program role runs on it. An " +
+			"existing TeamDefaults is never changed, except by --upgrade.\n" +
 			"--upgrade re-pins the stored Source kukeon to the revision this kuke was built from, converts a " +
 			"TeamDefaults or kuke team stored before Sources were a kind, and recomposes the kuke team, keeping " +
 			"every other field (spec.secrets included). It never creates the kuke team, leaves a Source kukeon " +

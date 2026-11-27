@@ -62,8 +62,10 @@ again from the initial declaration.
 In the same apply, init stores the [Source](../manifests/source.md) `kukeon`
 (`github.com/eminwux/kukeon` at the revision below) unless one of that name is
 stored, and, when the `default` realm has no `TeamDefaults`, creates one with
-the `codex` and `claude` harnesses of that Source and no default roles, so a
-project team needs only roles. The `TeamDefaults` holds no sources: the sources
+the `codex`, `claude` and `script` harnesses of that Source and no default
+roles, so a project team needs only roles. An agent role pairs only with the
+harnesses it declares, so it skips `script`; a program role (one that declares
+only `script`) runs on it. The `TeamDefaults` holds no sources: the sources
 its harnesses name are stored Sources (`kuke get sources`). An existing
 `TeamDefaults` is never changed, with or without `--force`, except by
 `--upgrade`. See
