@@ -77,6 +77,7 @@ var kindToSentinel = map[string]error{
 	"BlueprintNotFound":       errdefs.ErrBlueprintNotFound,
 	"CellAlreadyExists":       errdefs.ErrCellAlreadyExists,
 	"RenderDigestMismatch":    errdefs.ErrRenderDigestMismatch,
+	"CellNotFromConfig":       errdefs.ErrCellNotFromConfig,
 	"DaemonLogUnavailable":    errdefs.ErrDaemonLogUnavailable,
 	"ContainerLogUnavailable": errdefs.ErrContainerLogUnavailable,
 	"SecretInUse":             errdefs.ErrSecretInUse,

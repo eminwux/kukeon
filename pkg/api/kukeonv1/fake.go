@@ -66,6 +66,10 @@ func (FakeClient) CreateCellFromConfig(context.Context, CellFromConfigRequest) (
 	return CreateCellFromConfigResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) DiffCellFromConfig(context.Context, v1beta1.CellDoc) (DiffCellFromConfigResult, error) {
+	return DiffCellFromConfigResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) CreateConfig(context.Context, v1beta1.CellConfigDoc) (CreateConfigResult, error) {
 	return CreateConfigResult{}, ErrUnexpectedCall
 }

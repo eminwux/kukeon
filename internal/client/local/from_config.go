@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // PreviewCellFromConfig delegates to the controller's daemon-side CellConfig
@@ -58,6 +59,29 @@ func (c *Client) CreateCellFromConfig(
 		CreateCellResult: created,
 		Digest:           res.Digest,
 		Values:           res.Values,
+	}, nil
+}
+
+// DiffCellFromConfig delegates to the controller's on-demand drift diff
+// (#1768).
+func (c *Client) DiffCellFromConfig(
+	_ context.Context, doc v1beta1.CellDoc,
+) (kukeonv1.DiffCellFromConfigResult, error) {
+	internal, _, err := apischeme.NormalizeCell(doc)
+	if err != nil {
+		return kukeonv1.DiffCellFromConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.DiffCellFromConfig(internal)
+	if err != nil {
+		return kukeonv1.DiffCellFromConfigResult{}, err
+	}
+	return kukeonv1.DiffCellFromConfigResult{
+		Live:        res.Live,
+		Desired:     res.Desired,
+		ConfigFound: res.ConfigFound,
+		Reasons:     res.Reasons,
+		Paths:       res.Paths,
+		ChangeType:  res.ChangeType,
 	}, nil
 }
 

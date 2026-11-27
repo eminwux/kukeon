@@ -339,6 +339,8 @@ func apiErrorStatus(err error) (int, string) {
 	case errors.Is(err, errdefs.ErrSecretInUse),
 		errors.Is(err, errdefs.ErrVolumeInUse):
 		status, code = http.StatusConflict, "in_use"
+	case errors.Is(err, errdefs.ErrCellNotFromConfig):
+		status, code = http.StatusConflict, "not_from_config"
 	case errors.Is(err, fs.ErrPermission):
 		status, code = http.StatusForbidden, "permission_denied"
 	case errors.Is(err, errdefs.ErrBlueprintNotFound),

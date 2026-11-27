@@ -1511,6 +1511,114 @@ test("cell status cards and container observations expose reported runtime state
   await expect(status.getByText("Degraded", { exact: true })).toBeVisible();
 });
 
+// Issue #1768: the drift diff of a Config-made cell, the reported case. A blueprint content change alters
+// containers[work].env; the masked env lines and the blueprint-revision annotation show as changed.
+const driftManifest = (revision, mode) => [
+  "apiVersion: v1beta1", "kind: Cell", "metadata:", "  name: api", "  labels:", "    kukeon.io/config: claude",
+  "  annotations:", `    kukeon.io/render-blueprint-revision: claude-host@${revision}`, "    kukeon.io/render-digest: sha256:live",
+  "spec:", "  realmId: prod", "  spaceId: shared", "  stackId: services", "  containers:",
+  ...Array.from({ length: 4 }, (_, i) => [`    - id: side-${i}`, `      image: side:${i}`]).flat(),
+  "    - id: work", "      image: claude:1", "      env:", `        - MODE=${mode}`, "        - KEEP=++++++++",
+  ...Array.from({ length: 12 }, (_, i) => `      # filler ${i}`),
+].join("\n") + "\n";
+const driftBody = { live: driftManifest("aaa", "++++++++"), desired: driftManifest("bbb", "++++++++++++"), configFound: true, reasons: ["blueprint claude-host changed", "spec differs at containers[work].env"], paths: ["containers[work].env"], changeType: "compatible" };
+const driftedCell = (status) => ({ json: { ...doc(["prod", "shared", "services", "api"]), metadata: { name: "api", labels: { "kukeon.io/config": "claude" } }, status: { state: "Ready", ...status } } });
+const cellPath = "/api/realms/prod/spaces/shared/stacks/services/cells/api";
+
+test("an out-of-sync cell shows a side-by-side manifest diff with masked env", async ({ page }) => {
+  let driftReads = 0;
+  await mock(page, path => {
+    if (path === cellPath) return driftedCell({ outOfSync: true, outOfSyncReason: "blueprint claude-host changed; spec differs at containers[work].env" });
+    if (path === `${cellPath}/drift`) { driftReads++; return { json: driftBody }; }
+  });
+  await page.goto(`${server.url}#/resource/prod/shared/services/api`);
+  const status = page.getByRole("region", { name: "Cell status" });
+  await expect(status.getByText("Configuration out of sync")).toBeVisible();
+  const toggle = status.locator(".drift-diff summary");
+  await expect(toggle).toHaveText(/Show diff/);
+  // The diff loads only when opened.
+  expect(driftReads).toBe(0);
+  await toggle.click();
+  const grid = status.getByLabel("Manifest diff");
+  await expect(grid.locator(".drift-head")).toHaveText(["Running cell", "From Config"]);
+  expect(driftReads).toBe(1);
+  await expect(status.getByText("Restart will update in place")).toBeVisible();
+
+  // Changed lines carry -/+ markers, not colour alone.
+  const removed = grid.locator(".drift-left.drift-removed");
+  const added = grid.locator(".drift-right.drift-added");
+  await expect(removed).toHaveCount(2);
+  await expect(added).toHaveCount(2);
+  await expect(removed.locator(".drift-mark")).toHaveText(["-", "-"]);
+  await expect(added.locator(".drift-mark")).toHaveText(["+", "+"]);
+  await expect(removed.locator("code")).toHaveText(["    kukeon.io/render-blueprint-revision: claude-host@aaa", "        - MODE=++++++++"]);
+  await expect(added.locator("code")).toHaveText(["    kukeon.io/render-blueprint-revision: claude-host@bbb", "        - MODE=++++++++++++"]);
+  // Equal env values mask the same on both sides and are not marked.
+  await expect(grid.locator(".drift-left:not(.drift-removed) code", { hasText: "KEEP=++++++++" })).toHaveCount(1);
+
+  // Collapsed by default: unchanged runs fold, a fold opens on click, Full manifest shows everything.
+  const folds = grid.locator(".drift-fold.drift-left");
+  await expect(folds).toHaveText(["4 unchanged lines", "11 unchanged lines", "10 unchanged lines"]);
+  await folds.nth(1).click();
+  await expect(folds).toHaveText(["4 unchanged lines", "10 unchanged lines"]);
+  await expect(grid.locator(".drift-left code", { hasText: "image: side:2" })).toHaveCount(1);
+  const full = status.getByRole("switch", { name: "Full manifest" });
+  await expect(full).toHaveAttribute("aria-checked", "false");
+  await full.click();
+  await expect(full).toHaveAttribute("aria-checked", "true");
+  await expect(folds).toHaveCount(0);
+  await expect(grid.locator(".drift-cell.drift-left")).toHaveCount(driftBody.live.split("\n").length - 1);
+  // Back to the compact view, the fold opened by hand stays open.
+  await full.click();
+  await expect(folds).toHaveText(["4 unchanged lines", "10 unchanged lines"]);
+
+  // At phone width the two columns stack, left above right, with no horizontal page scroll.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(grid.locator(".drift-head.drift-right")).toBeVisible();
+  const layout = await page.evaluate(() => {
+    const grid = document.querySelector(".drift-grid");
+    const top = selector => grid.querySelector(selector).getBoundingClientRect().top;
+    const lefts = [...grid.querySelectorAll(".drift-cell.drift-left")].map(el => el.getBoundingClientRect().bottom);
+    return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, rightHead: top(".drift-head.drift-right"), lastLeft: Math.max(...lefts), leftHead: top(".drift-head.drift-left") };
+  });
+  expect(layout.overflow).toBeLessThanOrEqual(0);
+  expect(layout.rightHead).toBeGreaterThanOrEqual(layout.lastLeft - 1);
+  expect(layout.leftHead).toBeLessThan(layout.rightHead);
+});
+
+test("the drift diff stays away from cells it cannot compare", async ({ page }) => {
+  let cellStatus = { outOfSyncError: "resolve blueprint \"claude-host\": blueprint not found" };
+  let driftReply = { json: driftBody };
+  await mock(page, path => {
+    if (path === cellPath) return driftedCell(cellStatus);
+    if (path === `${cellPath}/drift`) return driftReply;
+  });
+  // A render failure shows the comparison error and no diff toggle.
+  await page.goto(`${server.url}#/resource/prod/shared/services/api`);
+  const status = page.getByRole("region", { name: "Cell status" });
+  await expect(status.getByText("Configuration comparison failed")).toBeVisible();
+  await expect(status.getByText('resolve blueprint "claude-host": blueprint not found')).toBeVisible();
+  await expect(status.locator(".drift-diff")).toHaveCount(0);
+
+  // A deleted Config shows its reason and no diff toggle.
+  cellStatus = { outOfSync: true, outOfSyncReason: "lineage Config deleted" };
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(status.getByText("lineage Config deleted")).toBeVisible();
+  await expect(status.locator(".drift-diff")).toHaveCount(0);
+
+  // A cell the daemon finds is not from a Config, or whose Config went away since the last tick, says so.
+  cellStatus = { outOfSync: true, outOfSyncReason: "config changed" };
+  driftReply = { status: 409, json: { error: { code: "not_from_config", message: "cell \"api\": cell was not created from a config" } } };
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await status.locator(".drift-diff summary").click();
+  await expect(status.getByRole("alert").filter({ hasText: "cell was not created from a config" })).toBeVisible();
+  await expect(status.getByLabel("Manifest diff")).toHaveCount(0);
+  driftReply = { json: { live: driftBody.live, configFound: false, reasons: ["lineage Config deleted"], paths: [] } };
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(status.locator(".drift-body")).toHaveText("lineage Config deleted");
+  await expect(status.getByLabel("Manifest diff")).toHaveCount(0);
+});
+
 test("container status shows restarts, terminal exit and setup failures without JSON", async ({ page }) => {
   await mock(page, path => path.endsWith("/containers/web") ? { json: { ...doc(["prod", "shared", "services", "api", "web"]), status: { state: "Stopped", restartCount: 3, exitCode: 7, finishTime: "2026-01-02T03:04:05Z", repos: [{ name: "source", state: "failed", error: "Repository unavailable" }], stages: [{ index: 0, state: "done" }] } } } : undefined);
   await page.goto(`${server.url}#/resource/prod/shared/services/api/web`);
