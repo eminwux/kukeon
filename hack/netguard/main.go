@@ -19,8 +19,8 @@
 // over netlink, so the cell needs no iproute2.
 //
 //	netguard check [--server-configuration PATH] [--run-path PATH]
-//	    Exit 1 when a pod subnet the run can use overlaps the cell's
-//	    interface networks, routes or gateways. There is no override.
+//	    Exit 1 when a space subnet range the run can use overlaps the
+//	    cell's interface networks, routes or gateways. There is no override.
 //	netguard snapshot --out FILE
 //	    Record the cell's uplink (default routes, their links and
 //	    addresses) and whether each gateway answers ICMP.
@@ -129,11 +129,17 @@ func (g guard) check(ctx context.Context, args []string) (int, error) {
 	for _, c := range res.Candidates {
 		conflicts := hostnet.Conflicts(c.Subnet, st, own)
 		if len(conflicts) == 0 {
-			fmt.Fprintf(g.stdout, "netguard: pod subnet %s (%s) is clear of this cell's network\n", c.Subnet, c.Source)
+			fmt.Fprintf(g.stdout, "netguard: space subnet range %s (%s) is clear of this cell's network\n",
+				c.Subnet, c.Source)
 			continue
 		}
 		failed = true
-		fmt.Fprintf(g.stderr, "netguard: pod subnet %s (%s) overlaps this cell's network:\n", c.Subnet, c.Source)
+		fmt.Fprintf(
+			g.stderr,
+			"netguard: space subnet range %s (%s) overlaps this cell's network:\n",
+			c.Subnet,
+			c.Source,
+		)
 		for _, conflict := range conflicts {
 			fmt.Fprintf(g.stderr, "    %s\n", conflict)
 		}

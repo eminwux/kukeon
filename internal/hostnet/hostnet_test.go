@@ -31,7 +31,7 @@ func pfx(s string) netip.Prefix { return netip.MustParsePrefix(s) }
 func addr(s string) netip.Addr { return netip.MustParseAddr(s) }
 
 // parentCell is the network state inside a kukeon-dev-root cell whose parent
-// uses the default 10.88.0.0/16 pod subnet.
+// uses the default 10.88.0.0/16 space subnet range.
 func parentCell() State {
 	return State{
 		Links: []Link{
@@ -58,7 +58,7 @@ func TestConflicts(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "parent pod subnet reused",
+			name:   "parent space subnet range reused",
 			subnet: "10.88.0.0/16",
 			st:     parentCell(),
 			want: []string{

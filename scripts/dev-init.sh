@@ -109,14 +109,14 @@ if [ -e "${NESTED_PROBE}" ]; then
     echo "Routing the nested kukeond through ${NESTED_SOCKET_PATH} (per-nest socket)."
     echo "Parent host's /run/kukeon/tty bind is left untouched; verified on exit."
 
-    # The pod subnet this run would use is checked against this cell's
-    # network before anything touches it (the netguard steps below, issue
-    # #1382). There is no flag to skip that check: a nested run whose subnet
+    # The space subnet range this run would use is checked against this
+    # cell's network before anything touches it (the netguard steps below,
+    # issue #1382). There is no flag to skip that check: a nested run whose subnet
     # overlaps the parent cell's addresses, routes or gateway fails closed.
     # KUKEON_PROFILE=dev is the usual fix, but it is not taken as proof —
     # the resolved configuration is what gets checked.
     if [ "${KUKEON_PROFILE}" != "dev" ]; then
-        echo "KUKEON_PROFILE is not 'dev'; the default 10.88.0.0/16 pod subnet usually overlaps the parent cell."
+        echo "KUKEON_PROFILE is not 'dev'; the default 10.88.0.0/16 space subnet range usually overlaps the parent cell."
     fi
 
     # Snapshot the parent's per-container attach plumbing so the EXIT trap
@@ -202,15 +202,15 @@ NETGUARD_DIR=""
 NETGUARD=""
 UPLINK_BASELINE=""
 
-# netguard_check fails the script when any pod subnet this run can put on a
-# bridge overlaps this cell's interface networks, routes or gateways: the
+# netguard_check fails the script when any space subnet range this run can
+# put on a bridge overlaps this cell's interface networks, routes or gateways: the
 # env/YAML values kuke init and the kukeond it starts resolve, plus every
 # persisted space's subnet. This instance's own space bridges are exempt, so a
 # rerun passes. It runs under the same sudo environment as the kuke commands
 # it guards, so it resolves the same configuration they do.
 netguard_check() {
     [ -n "${NETGUARD}" ] || return 0
-    step "Network guard: pod subnets vs this cell's network ($1)"
+    step "Network guard: space subnets vs this cell's network ($1)"
     sudo --preserve-env="${PRESERVE_ENV_ADMIN}" "${NETGUARD}" check "${SERVER_CONFIG_FLAGS[@]}"
 }
 

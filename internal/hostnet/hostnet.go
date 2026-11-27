@@ -15,7 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package hostnet reads the IPv4 links, addresses and routes of the current
-// network namespace over rtnetlink, and checks a pod subnet against them.
+// network namespace over rtnetlink, and checks a space subnet against them.
 // No iproute2 executable is needed, so the checks also work inside
 // development cells that do not ship `ip`.
 //

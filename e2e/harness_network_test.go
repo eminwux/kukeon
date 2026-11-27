@@ -237,7 +237,7 @@ func validateNetworkPool(pool netip.Prefix, st hostnet.State) error {
 	for i, c := range conflicts {
 		parts[i] = c.String()
 	}
-	return fmt.Errorf("pod pool %s overlaps %s", pool, strings.Join(parts, "; "))
+	return fmt.Errorf("space subnet pool %s overlaps %s", pool, strings.Join(parts, "; "))
 }
 
 func checkNetworkPool(pool netip.Prefix) error {

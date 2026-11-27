@@ -34,8 +34,8 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
-// candidate is one pod subnet a kukeon process started by dev-init can put on
-// a bridge, with where it comes from.
+// candidate is one space subnet range a kukeon process started by dev-init
+// can put on a bridge, with where it comes from.
 type candidate struct {
 	Subnet netip.Prefix
 	Source string

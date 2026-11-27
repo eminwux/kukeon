@@ -29,7 +29,7 @@ const (
 	ConflictGateway = "gateway"
 )
 
-// Conflict is one piece of host network state a pod subnet overlaps.
+// Conflict is one piece of host network state a space subnet overlaps.
 type Conflict struct {
 	Kind string
 	// Link is the interface the address or route is on; empty for a

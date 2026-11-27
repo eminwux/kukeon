@@ -39,7 +39,7 @@ The knob is plumbed exactly like `cgroupRoot`: `ServerConfiguration.spec.podSubn
 
 `scripts/dev-init.sh` builds `hack/netguard` up front and runs it as root, under the same `sudo --preserve-env` list as the kuke admin commands, so it sees the same environment they do. It reads the cell's links, addresses and routes over netlink: the cell needs no `ip` (iproute2) or any other new tool, only the Go toolchain the build already uses.
 
-**Subnet check (`netguard check`).** This runs before the build, again right before the first-pass `kuke init`, before `kuke daemon reset`, and before the final `kuke init`. The script fails if any pod subnet the run can put on a bridge overlaps this cell's interface networks (all links, including down ones), its routes (every table), or a route's gateway, including the default gateway. The subnets checked are:
+**Subnet check (`netguard check`).** This runs before the build, again right before the first-pass `kuke init`, before `kuke daemon reset`, and before the final `kuke init`. The script fails if any space subnet range the run can put on a bridge overlaps this cell's interface networks (all links, including down ones), its routes (every table), or a route's gateway, including the default gateway. The subnets checked are:
 
 - `KUKEON_POD_SUBNET_CIDR`, when it survives the sudo boundary (`kuke init` reads it in-process);
 - `podSubnetCIDR` from the server configuration `kuke init` and the kukeond it starts read: `--server-configuration` (the dev profile's `kukeond-dev.yaml`), else `KUKEOND_CONFIGURATION`, else `/etc/kukeon/kukeond.yaml`. When that file has no `podSubnetCIDR`, the compiled-in default `10.88.0.0/16` is checked;
@@ -51,7 +51,7 @@ Bridges this instance already owns are exempt: the bridge named in a persisted s
 A rejection names each overlapping subnet, where it came from, and every conflicting entry, then says how to fix it:
 
 ```
-netguard: pod subnet 10.88.0.0/16 (compiled-in default; no podSubnetCIDR in /etc/kukeon/kukeond.yaml) overlaps this cell's network:
+netguard: space subnet range 10.88.0.0/16 (compiled-in default; no podSubnetCIDR in /etc/kukeon/kukeond.yaml) overlaps this cell's network:
     gateway 10.88.0.1 dev eth0
     interface address 10.88.0.15/24 dev eth0
     route 10.88.0.0/24 dev eth0
