@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/rpc"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -126,16 +127,22 @@ func activityScopes(values []string) ([][]string, error) {
 	}
 	scopes := make([][]string, 0, len(values))
 	for _, value := range values {
-		scope := strings.Split(value, "/")
-		if len(scope) != scopeSegments {
+		parts := strings.Split(value, "/")
+		if len(parts) != scopeSegments {
 			return nil, fmt.Errorf("%w: cell %q is not realm/space/stack/cell", errdefs.ErrConfig, value)
 		}
-		for _, segment := range scope {
-			if segment == "" || !safePathSegment(segment) {
-				return nil, fmt.Errorf("%w: cell %q has an invalid segment %q", errdefs.ErrConfig, value, segment)
-			}
+		// Each segment is guarded inline (not through a loop or helper) and the
+		// scope is built only from the checked values, so the filepath.IsLocal
+		// check visibly dominates them for static path-injection analysis, like
+		// scopedefaults.CheckScope.
+		realm, space, stack, cell := parts[0], parts[1], parts[2], parts[3]
+		if realm == "" || !filepath.IsLocal(realm) || !safePathSegment(realm) ||
+			space == "" || !filepath.IsLocal(space) || !safePathSegment(space) ||
+			stack == "" || !filepath.IsLocal(stack) || !safePathSegment(stack) ||
+			cell == "" || !filepath.IsLocal(cell) || !safePathSegment(cell) {
+			return nil, fmt.Errorf("%w: cell %q has an invalid segment", errdefs.ErrConfig, value)
 		}
-		scopes = append(scopes, scope)
+		scopes = append(scopes, []string{realm, space, stack, cell})
 	}
 	return scopes, nil
 }
