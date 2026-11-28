@@ -123,9 +123,8 @@ the catalog are re-read, so the page updates without a reload.
 The grid shows one tile per active cell: its name, scope, state badge, drift
 badge and the last 12 non-blank rows of its terminal screen as plain text,
 clipped on the right and never wrapped (no colours, no terminal instance per
-tile). A tile opens the cell's terminal; a tile for a cell docked in the
-[majordomo panel](#docked-panel) opens the panel instead and does not
-navigate. Above the tiles the grid has its own **Search grid** field and
+tile). A tile always opens the cell's terminal in the main view, also for a
+cell that is in the [side panel](#docked-panel). Above the tiles the grid has its own **Search grid** field and
 **Group grid by** select, separate from the sidebar's: text typed in one list
 never filters the other, and each list keeps its own grouping. Settings →
 Profile → **Show search in grid** and **Show Group by in grid** (both on by
@@ -224,11 +223,14 @@ Against each [activity reading](#read-only-api):
 - A cell reported `unavailable` (any value) is not marked, and its marker is
   kept.
 
-A cell is **being read** while its terminal screen is open, the session shown
-on it is attached, and the browser tab is visible; every reading of it moves
-the marker to `bytesOut`, and it is never marked. Leaving it (another page or
-cell, or hiding the tab) reads it once more and moves the marker, so output seen
-in the last seconds before leaving is not reported as unread. That reading is
+A cell is **being read** while the browser tab is visible and its attached
+session is shown in the main cell screen, or is the active tab of the open
+[side panel](#docked-panel); more than one cell can be read at once, one per
+view. Every reading of a cell being read moves its marker to `bytesOut`, and it
+is never marked. Leaving it in every view that showed it (another page or cell,
+closing the panel, switching the panel's tab, removing the cell from the panel,
+or hiding the tab) reads it once more and moves the marker, so output seen in
+the last seconds before leaving is not reported as unread. That reading is
 the one activity request made outside the Workbench or while the tab is hidden.
 Markers of cells no longer in the inventory are removed when a complete
 inventory loads, and other tabs of the same browser pick up marker changes at
@@ -541,23 +543,26 @@ the panel.
 - **Stopped cell**: the panel shows its state and a **Start** button.
 - **Running cell**: the panel attaches.
 
-Every interactive majordomo cell is docked in the panel — one created by hand
-from another harness Config as well. With more than one, the panel shows one tab
-per cell under its header, labelled with the Config the cell came from (by cell
-name when two cells share a Config; the full scope is its tooltip) and a state
-dot; arrow keys, `Home` and `End` move between tabs, and focus stays on the tab
-rather than moving into the terminal. Cells are ordered by creation time, then scope. The active tab is stored
-in this browser (`kukeon-majordomo-active`) and changes only when you change it:
-another cell appearing, starting or sorting first never takes the panel. If the
-active cell is gone, the panel falls back to the first Ready one. Switching tabs
-detaches nothing: a tab's session attaches the first time it is shown and stays
-attached afterwards.
+Every interactive majordomo cell is in the panel by default — one created by
+hand from another harness Config as well — and any other cell can be added (see
+[Panel cells](#panel-cells)). With more than one cell, or one that is not a
+majordomo cell, the panel shows one tab per cell under its header with a state
+dot: a majordomo cell is labelled with the Config it came from (by cell name
+when two cells share a Config), any other cell with its name; the full scope is
+the tooltip. Arrow keys, `Home` and `End` move between tabs, and focus stays on
+the tab rather than moving into the terminal. Majordomo cells come first,
+ordered by creation time, then scope; added cells follow in the order added.
+The active tab is stored in this browser (`kukeon-majordomo-active`) and changes
+only when you change it: another cell appearing, starting or sorting first never
+takes the panel. If the active cell is gone from the panel, the panel falls back
+to the first Ready one. Switching tabs detaches nothing: a tab's session
+attaches the first time it is shown and stays attached afterwards.
 
-With at least one majordomo cell and at least one majordomo Config that has no
-cell, the header's **Add majordomo** button shows the setup form restricted to
-those Configs, with **Cancel**. It creates and starts a cell named after the
+Whenever a majordomo Config has no cell, the header's **Add majordomo** button
+shows the setup form restricted to those Configs, with **Cancel** — also while
+the panel shows other cells. It creates and starts a cell named after the
 chosen Config (the first cell is still `majordomo`) and makes it the active
-tab. No limit is enforced; the layout is designed for three tabs, and more wrap.
+tab. No limit is enforced; the layout is designed for four tabs, and more wrap.
 
 ### Harness login
 
@@ -596,9 +601,53 @@ the toolbar button; the toolbar button also hides it.
   **Reconnect** attaches again in one click. **Detach** closes the session
   until you reconnect.
 
-The terminal screen of every docked majordomo cell (`#/workspace/…/<cell>`)
-points at the panel instead of opening a second terminal for the same session.
-**Ask majordomo** pastes into the active tab.
+A cell in the panel also opens in the main view: its terminal screen
+(`#/workspace/…/<cell>`) behaves like any other cell's, with its terminal, logs,
+Exec and lifecycle controls, and attaches per **Auto-attach terminals**. The
+panel and the main view each hold their own attach, over their own WebSocket:
+**Detach**, **Reconnect** and automatic reattach in one view leave the other
+view's session alone, and a cell attached in both counts as two connections
+against the web UI's limits (20 connections, 20 sessions). A lifecycle action on
+the cell (stop, restart, delete) interrupts or closes its sessions in both
+views.
+
+The terminal has one size, shared by every attach, and the last size sent wins.
+Each view sends its terminal's size when it attaches, when its own layout
+changes, when it becomes the shown terminal (a tab switch, the panel opened,
+the cell screen opened) and when its terminal takes focus; the last two send it
+even when it has not changed. The other view keeps working, but while the same
+cell is visible in both views at different widths, the view that did not send
+the last size shows output laid out for the other one.
+
+**Ask majordomo** pastes into a majordomo cell only, never into another cell:
+with another cell's tab active it switches to a majordomo tab, and if the
+majordomo cell was removed from the panel it adds it back first.
+
+### Panel cells
+
+The panel holds any cell. Majordomo cells are in it by default; you add any
+other cell and remove any cell, majordomo cells included.
+
+- **Add cell** in the panel header picks one of the inventory's cells that are
+  not in the panel (by scope). The cell gets a tab, becomes the active tab and
+  attaches per **Auto-attach terminals**. **Add cell** and **Add majordomo** are
+  separate controls.
+- **Open in side panel** in a cell screen's terminal toolbar, for a cell that is
+  not in the panel, adds it, opens the panel and makes it the active tab.
+- **Remove `<cell>` from the side panel** in the panel header takes the active
+  tab's cell out, also when it is the only one. It closes the panel's session
+  only; the cell and its main-view session are untouched. A removed majordomo
+  cell stays out across reloads until **Add cell** adds it back, and removing it
+  never makes **Add majordomo** offer its Config again.
+- A panel cell that is not running shows its state and **Start**.
+- With every cell removed (and a majordomo cell to add back) the panel shows an
+  empty state with **Add cell**.
+
+The added and removed cells are stored in this browser
+(`kukeon-panel-cells`: `{ "added": [...], "removed": [...] }`, cell keys in the
+order added) and survive a reload; entries for cells that are no longer in a
+complete inventory are pruned. The sidebar's **Majordomo** entry and rail
+button keep reporting majordomo cells only.
 
 ### Ask majordomo
 

@@ -33,6 +33,9 @@ const glyphs = {
   // An agent, a Config whose cells are its instances (#1686): a robot head with an antenna.
   agent: <><rect x="4.5" y="8.5" width="15" height="11" rx="2.5" /><path d="M12 8.5V5" /><circle cx="12" cy="4" r="1" /><path d="M9.5 13v1.5M14.5 13v1.5" /></>,
   pending: <path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5" />,
+  // The side panel (#1777): a window with its right column filled in, and a cross to take a cell out.
+  sidePanel: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M15 4.5v15" /><path d="M17.5 8.5v7" /></>,
+  remove: <path d="m6.5 6.5 11 11M17.5 6.5l-11 11" />,
 } satisfies Record<string, ReactNode>;
 export type IconName = keyof typeof glyphs;
 
