@@ -1032,22 +1032,24 @@ Secrets tagged with a connector and the
 [login identities](site/concepts/connectors.md#login-identities) — the Volumes
 a harness keeps its login in, a team's own state volumes included. It reads
 `GET /api/catalog/secrets` and `GET /api/connectors/logins`, with the Config
-catalog for the Configs using a Secret. Each row has:
+catalog for the Configs using a Secret. Each identity is one row; the detail
+— fields, roles, the Configs using it — is on its page (below):
 
-| Column        | Content                                                                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name          | links to the Secret or the Volume (a state volume no cell created yet says **Not created yet**; a running login says **Login running**)         |
-| Connector     | links to Identities filtered on it                                                                                                              |
-| Method / type | the method (`manual`) for a login identity, else the Secret type and its readable identity fields                                               |
-| Role          | the team roles of the Configs using it, `<team>/<role>` — both roles when two share a login identity                                            |
-| Scope         | realm / space / stack                                                                                                                           |
-| Status        | **Logged in**, **Empty** or **Unknown** for a login identity                                                                                    |
-| Used by       | the Configs using it, linked, with a count of Configs and teams, and the Realm, Space or Stack defaults naming it; **Unused** when nothing does |
-| Actions       | **Log in** / **Log in again** or **Rotate**, and **Delete**                                                                                     |
+| Column        | Content                                                                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Name          | links to the identity's page; badges **System default**, **Not created yet** (a state volume no cell created yet) and **Login running** |
+| Connector     | links to Identities filtered on it                                                                                                      |
+| Method / type | the method (`manual`) for a login identity, else the Secret type                                                                        |
+| Scope         | realm / space / stack                                                                                                                   |
+| Status        | **Logged in**, **Empty** or **Unknown** for a login identity                                                                            |
+| Used by       | a count, `103 Configs · 5 teams`; the Realm, Space or Stack defaults naming it when no Config uses it; **Unused** when nothing does     |
+| Action        | **Log in** / **Log in again** for a login identity                                                                                      |
 
 **Connector** filters the table on one connector
-(`#/identities?connector=<name>`). Values and logins are write-only: only
-names, scopes, types, readable fields and whether a login is present are shown.
+(`#/identities?connector=<name>`). **Search** narrows the rows below the pinned
+ones by name, and they are listed 25 a page. Values and logins are
+write-only: only names, scopes, types, readable fields and whether a login is
+present are shown.
 
 **System defaults** are pinned first, one row per connector × method: for a
 method that keeps its login in the state volume, the login identity of the
@@ -1055,7 +1057,8 @@ method that keeps its login in the state volume, the login identity of the
 (`default-agent-<harness>-state`), marked **System default**, with **Log in**;
 for a token or key method, and a git-delivered connector, the Realm default of
 the `default` realm — or **Not set up** with **Create one**, which opens the
-connector's New identity page on that realm. They show while the `default`
+connector's New identity page on that realm. An identity pinned there is not
+listed again below. They show while the `default`
 realm exists; `kuke init` creates it. On a realm right after `kuke team init`
 the login rows are the two `default-agent-…-state` login identities, `Empty`
 until someone logs in. A System default is a fallback a Config reaches only by
@@ -1099,14 +1102,14 @@ several secret types are a described choice) and **Make this the default**,
 on when no default resolves at that scope. On a connector that advertises
 `tokenForGit` (GitHub) the form also has **Also use this token for git on
 github.com**, on by default, with an optional **Commit author** and
-**Username**. **Rotate** opens
+**Username**. **Rotate**, on a Secret identity's page, opens
 `#/identities/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
 which replaces the value stored under that name. New login identity asks for a
 name and a scope (Realm, Space or Stack) and offers **Create and log in** and
 **Create without logging in**. Each returns to Identities, filtered on the
 connector, on success or Cancel.
 
-**Log in** on a login identity's row (**Log in again** once it holds a login):
+**Log in** on a login identity's row or page (**Log in again** once it holds a login):
 the server creates the Volume if needed, starts an identity cell that mounts
 only that Volume and runs the harness login, and the browser opens that cell's
 terminal. The cell deletes itself when the login ends; while a session runs
@@ -1115,10 +1118,11 @@ second click opens the same session instead of starting another. The rows are
 re-read every few seconds while a session runs, so the status follows when it
 ends.
 
-**Delete** uses the same confirmation as the catalog: a Secret through the
-Secret delete route, refused while a cell references it; a login identity's
-Volume, with its login, through the Volume delete route. Rows are selected
-together and deleted in one batch; a row in `kuke-system` is skipped.
+**Delete**, on an identity's page, uses the same confirmation as the catalog:
+a Secret through the Secret delete route, refused while a cell references it;
+a login identity's Volume, with its login, through the Volume delete route.
+On the list, rows — pinned ones included — are selected together and deleted
+in one batch; a row in `kuke-system` is skipped.
 
 A connector with Configs that resolve to no identity is listed under **Needs a
 default** with a **Set a default** link that opens the connector on the first

@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
-import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, identityPageLink, levelLabel, newIdentityLink, newLoginIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure } from "./connector-ui";
+import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, identityPageLink, levelLabel, newIdentityLink, newLoginIdentityLink, sendJSON, startLogin, toFailure } from "./connector-ui";
 import { Disclosure } from "@kukeon/ui";
 import { connectorSetUp, notSetUpText } from "./onboarding.mjs";
 import {
@@ -12,9 +11,9 @@ import {
   listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, sharedLoginNote, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
-import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
+import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow, type Selection } from "./bulk-ui";
 import { navigate, routeHref } from "./router";
-import { defaultRole, defaultTeam, filterRows, findRow, identityRows, kindLogin, loginMethodOf, markDefaults, pageKind, pageLogin, pageSecret, pinnedFor, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
+import { defaultRole, defaultTeam, filterRows, findRow, identityRows, kindLogin, loginMethodOf, markDefaults, pageKind, pageLogin, pageOf, pageSecret, pinnedFor, scopeLabel, searchRows, systemDefaults, unpinnedRows, usedBySummary } from "./identities.mjs";
 import type { IdentityRow, SystemDefault } from "./identities.mjs";
 import { AssignmentsTab } from "./assignments-tab";
 import { IdentityDetailPage } from "./identity-page";
@@ -99,31 +98,21 @@ const identityNoun = countNoun("identity", "identities");
 function deleteKind(row: IdentityRow): "secrets" | "volumes" { return row.kind === kindLogin ? "volumes" : "secrets"; }
 function rowNoun(row: IdentityRow): string { return `${row.title} ${row.kind === kindLogin ? "login identity" : "identity"}`; }
 
-// UsedBy names the Configs using an identity — linked, with their team role — and the scope defaults
-// naming it; an identity nothing uses says Unused.
+// UsedBy sums up who uses an identity — "103 Configs · 5 teams", or the defaults naming it when no
+// Config does — or says Unused. The Configs themselves are listed on the identity's page (#1805).
 function UsedBy({ row }: { row: IdentityRow }) {
-  const { configs, teams } = usedByCount(row);
   if (row.unused) return <span className="badge identity-unused" title="No Config and no default uses it: it can be deleted.">Unused</span>;
-  return <div className="identity-used-by">
-    {configs > 0 && <span className="description">{configs} {configs === 1 ? "Config" : "Configs"}{teams.length > 0 && <> · {teams.length} {teams.length === 1 ? "team" : "teams"}</>}</span>}
-    {row.usedBy.map(config => <a className="badge label-badge" key={configLink(config)} href={configLink(config)} title={config.role ? `Role ${config.role}` : undefined}>{config.name}</a>)}
-    {row.defaults.map(item => <span className="badge" key={`${item.level}:${item.scope.join("/")}:${item.slot}`}>{`${item.level[0].toUpperCase()}${item.level.slice(1)} default`} {item.scope.join(" / ")}</span>)}
-  </div>;
+  return <span className="description">{usedBySummary(row)}</span>;
 }
 
-function Roles({ roles }: { roles: string[] }) {
-  return roles.length ? <>{roles.map(role => <span className="badge label-badge" key={role}>{role}</span>)}</> : <span className="description">—</span>;
-}
-
-// IdentityCells are the cells of one identity's row after its name: connector, method or type, role,
-// scope, status and users.
+// IdentityCells are the cells of one identity's row after its name: connector, method or type, scope,
+// status and users. One line per identity: the detail lives on its page (#1805).
 function IdentityCells({ row }: { row: IdentityRow }) {
   return <>
     <td><a href={identitiesLink(row.connector)}>{row.title}</a></td>
-    <td><code>{row.kind === kindLogin ? row.method : row.type}</code>{Object.entries(row.fields).flatMap(([name, value]) => [" ", <span className="badge label-badge" key={name}>{name}: {value}</span>])}</td>
-    <td><Roles roles={row.roles} /></td>
+    <td><code>{row.kind === kindLogin ? row.method : row.type}</code></td>
     <td className="scope-cell">{scopeLabel(row)}</td>
-    <td>{row.kind === kindLogin ? <><LoginStateBadge state={row.status} />{row.since && <span className="description"> since {new Date(row.since).toLocaleString()}</span>}</> : <span className="description">—</span>}</td>
+    <td>{row.kind === kindLogin ? <LoginStateBadge state={row.status} /> : <span className="description">—</span>}</td>
     <td><UsedBy row={row} /></td>
   </>;
 }
@@ -135,25 +124,24 @@ function IdentityName({ row }: { row: IdentityRow }) {
     {row.session && <> <span className="badge">Login running</span></>}</>;
 }
 
-function RowActions({ row, target, pending, onDelete, onChanged }: { row: IdentityRow; target: Scope | undefined; pending: boolean; onDelete: (row: IdentityRow) => void; onChanged: () => void }) {
-  const label = `${rowNoun(row)} ${refLabel(row.ref)}`;
+// RowActions is Log in / Log in again for a login identity. Rotate and Delete are on the identity's page.
+function RowActions({ row, onChanged }: { row: IdentityRow; onChanged: () => void }) {
   return <td className="connector-row-actions">
-    {row.kind === kindLogin ? <LoginButton connector={row.connector} title={row.title} volume={row.ref} state={row.status} running={!!row.session} method={row.method || undefined} onStarted={onChanged} />
-      : <a className="subtle-button" href={rotateIdentityLink(row.connector, row.ref, target)} aria-label={`Rotate ${label}`}>Rotate</a>}
-    {row.exists && <button type="button" className="subtle-button danger-action" aria-label={`Delete ${label}`} disabled={pending} onClick={() => onDelete(row)}>{pending ? "Deleting…" : "Delete"}</button>}
+    {row.kind === kindLogin && <LoginButton connector={row.connector} title={row.title} volume={row.ref} state={row.status} running={!!row.session} method={row.method || undefined} onStarted={onChanged} />}
   </td>;
 }
 
 // SystemDefaultRow is a pinned row: the identity a connector × method falls back to on a fresh realm —
-// the default team's agent login identity, or the default realm's Realm default — or Not set up.
-function SystemDefaultRow({ item, connector, target, pending, onDelete, onChanged }: { item: SystemDefault; connector: Connector | undefined; target: Scope | undefined; pending: (row: IdentityRow) => boolean; onDelete: (row: IdentityRow) => void; onChanged: () => void }) {
+// the default team's agent login identity, or the default realm's Realm default — or Not set up. An
+// identity pinned here is not listed again below.
+function SystemDefaultRow({ item, connector, selection, onChanged }: { item: SystemDefault; connector: Connector | undefined; selection: Selection; onChanged: () => void }) {
   const row = item.row;
   const label = `System default for ${item.title}${item.method ? ` ${item.method}` : ""}`;
   if (row) return <tr className="system-default" aria-label={label}>
-    <td className="bulk-column" />
+    <td className="bulk-column">{row.exists && <SelectRowBox selection={selection} rowKey={row.key} label={`Select ${rowNoun(row)} ${refLabel(row.ref)}`} />}</td>
     <td><IdentityName row={row} /> <span className="badge system-default-badge">System default</span></td>
     <IdentityCells row={row} />
-    <RowActions row={row} target={target} pending={pending(row)} onDelete={onDelete} onChanged={onChanged} />
+    <RowActions row={row} onChanged={onChanged} />
   </tr>;
   const login = item.kind === kindLogin;
   return <tr className="system-default" aria-label={label}>
@@ -161,7 +149,6 @@ function SystemDefaultRow({ item, connector, target, pending, onDelete, onChange
     <td>{login && connector?.harness ? <span className="resource-name">{`${defaultTeam}-${defaultRole}-${connector.harness}-state`}</span> : <span className="description">Not set up</span>} <span className="badge system-default-badge">System default</span></td>
     <td><a href={identitiesLink(item.connector)}>{item.title}</a></td>
     <td><code>{item.method || (login && loginMethodOf(connector)) || "—"}</code></td>
-    <td>{login ? <span className="badge label-badge">{`${defaultTeam}/${defaultRole}`}</span> : <span className="description">—</span>}</td>
     <td className="scope-cell">{defaultScopeName}</td>
     <td>{login ? <span className="description">The default team is not applied: <code>kuke team init</code> applies it.</span> : <span className="description">No Realm default</span>}</td>
     <td><span className="description">—</span></td>
@@ -169,21 +156,20 @@ function SystemDefaultRow({ item, connector, target, pending, onDelete, onChange
   </tr>;
 }
 
-// IdentitiesTable is every identity in one table — the tagged Secrets and the login identities — with
-// the system defaults pinned first. Rotate, Log in, Delete and bulk delete are row actions; creating one
-// is a page of its own.
-function IdentitiesTable({ label, rows, pinned, connectors, target, error, revision, inventory, onChanged }: {
+// IdentitiesTable is every identity in one table, one line each — the tagged Secrets and the login
+// identities — with the system defaults pinned first and the rest searched by name and paged. Log in and
+// bulk delete are the row actions; an identity's name opens its page, where Rotate and Delete are (#1805),
+// and creating one is a page of its own.
+function IdentitiesTable({ label, rows, pinned, connectors, error, onChanged }: {
   label: string;
   rows: IdentityRow[];
   pinned: SystemDefault[];
   connectors: Connector[];
-  target: Scope | undefined;
   error: string;
-  revision: number;
-  inventory: InventoryResource;
   onChanged: () => void;
 }) {
-  const [confirming, setConfirming] = useState<IdentityRow>();
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
   // The identities being deleted, and the failed deletes still shown: a batch deletes several at once (#1745).
   const [pending, setPending] = useState<Set<string>>(() => new Set());
   const [failures, setFailures] = useState<{ target: string; message: string }[]>([]);
@@ -208,10 +194,16 @@ function IdentitiesTable({ label, rows, pinned, connectors, target, error, revis
       onChanged();
     }
   }
+  // The rows below the pinned ones: an identity pinned as a System default is listed once.
+  const below = unpinnedRows(rows, pinned);
+  const matching = searchRows(below, query);
+  const shown = pageOf(matching, page);
+  const pinnedRows = pinned.flatMap(item => item.row ? [item.row] : []);
   // Row selection and bulk delete (#1745); a login identity not created yet has nothing to delete.
   const deletable = rows.filter(row => row.exists);
   const byKey = new Map(deletable.map(row => [row.key, row]));
   const selection = useSelection([...byKey.keys()], !error);
+  const selectable = [...pinnedRows, ...matching].filter(row => row.exists).map(row => row.key);
   type SelectedRow = BulkRow & { row: IdentityRow };
   const selectedRows: SelectedRow[] = deletable.filter(row => selection.has(row.key)).map(row => ({ key: row.key, scope: [...row.scope, row.name], label: refLabel(row.ref), row }));
   const bulkDelete: BulkAction<SelectedRow>[] = [{ name: "delete", verb: "Delete", danger: true,
@@ -226,17 +218,21 @@ function IdentitiesTable({ label, rows, pinned, connectors, target, error, revis
       {error && <p className="stale">{error}</p>}
       {failures.map(failure => <div key={failure.target} className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>)}
       <BulkActions rows={selectedRows} actions={bulkDelete} noun={identityNoun} selection={selection} run={item => remove(item.row, true)} />
-      {rows.length || pinned.length ? <div className="table-scroll"><table aria-label={label}><thead><tr><th scope="col" className="bulk-column"><SelectAllBox selection={selection} matching={[...byKey.keys()]} label={`Select all ${identityNoun(byKey.size)}`} /></th><th scope="col">Name</th><th scope="col">Connector</th><th scope="col">Method / type</th><th scope="col">Role</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Used by</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
-        {pinned.length > 0 && <tbody className="system-defaults" aria-label="System defaults">{pinned.map(item => <SystemDefaultRow key={item.key} item={item} connector={find(item.connector)} target={target} pending={row => pending.has(row.key)} onDelete={setConfirming} onChanged={onChanged} />)}</tbody>}
-        <tbody>{rows.map(row => <tr key={row.key}>
-          <td className="bulk-column">{row.exists && <SelectRowBox selection={selection} rowKey={row.key} label={`Select ${rowNoun(row)} ${refLabel(row.ref)}`} />}</td>
-          <td><IdentityName row={row} /></td>
-          <IdentityCells row={row} />
-          <RowActions row={row} target={target} pending={pending.has(row.key)} onDelete={setConfirming} onChanged={onChanged} />
-        </tr>)}</tbody>
-      </table></div> : <p>No identities are stored.</p>}
+      {rows.length || pinned.length ? <>
+        <div className="list-controls"><label className="search-field">Search<input type="search" aria-label="Search identities" value={query} placeholder="Search identities…" onChange={event => { setQuery(event.target.value); setPage(0); }} /></label><span className="result-count">{matching.length} {matching.length === 1 ? "result" : "results"}</span></div>
+        <div className="table-scroll"><table aria-label={label}><thead><tr><th scope="col" className="bulk-column"><SelectAllBox selection={selection} matching={selectable} label={`Select all ${identityNoun(selectable.length)}`} /></th><th scope="col">Name</th><th scope="col">Connector</th><th scope="col">Method / type</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Used by</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
+          {pinned.length > 0 && <tbody className="system-defaults" aria-label="System defaults">{pinned.map(item => <SystemDefaultRow key={item.key} item={item} connector={find(item.connector)} selection={selection} onChanged={onChanged} />)}</tbody>}
+          <tbody>{shown.items.map(row => <tr key={row.key}>
+            <td className="bulk-column">{row.exists && <SelectRowBox selection={selection} rowKey={row.key} label={`Select ${rowNoun(row)} ${refLabel(row.ref)}`} />}</td>
+            <td><IdentityName row={row} /></td>
+            <IdentityCells row={row} />
+            <RowActions row={row} onChanged={onChanged} />
+          </tr>)}</tbody>
+        </table></div>
+        {!matching.length && below.length > 0 && <div className="empty-state"><h3>No matching identities</h3></div>}
+        {matching.length > shown.items.length && <div className="pagination"><span>{`${shown.first}–${shown.end} of ${shown.total}`}</span><button type="button" disabled={!shown.page} onClick={() => setPage(shown.page - 1)}>Previous</button><button type="button" disabled={shown.page >= shown.last} onClick={() => setPage(shown.page + 1)}>Next</button></div>}
+      </> : <p>No identities are stored.</p>}
     </div>
-    {confirming && <CatalogDeleteConfirmation kind={deleteKind(confirming)} doc={{ metadata: { name: confirming.ref.name, realm: confirming.ref.realm, ...(confirming.ref.space ? { space: confirming.ref.space } : {}), ...(confirming.ref.stack ? { stack: confirming.ref.stack } : {}) } }} revision={revision} inventory={inventory} onCancel={() => setConfirming(undefined)} onConfirm={() => { const row = confirming; setConfirming(undefined); void remove(row); }} />}
   </section>;
 }
 
@@ -547,7 +543,7 @@ export function IdentitiesPage({ connector: filter, section, target, action, ide
     </div>}
     {unknown && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {filter} is defined. <a href={identitiesLink()}>Show every identity</a></p></div>}
     {connector && secrets.data && logins.data && !connectorSetUp(connector, secrets.data, logins.data) && <p className="connector-not-set-up" role="note">{notSetUpText(connector)}</p>}
-    {catalog.data && !unknown && <IdentitiesTable label={connector ? `${title} identities` : "Identities"} rows={filterRows(rows, connector?.name)} pinned={pinned} connectors={connectors} target={scope} error={errors} revision={revision} inventory={inventory} onChanged={onChanged} />}
+    {catalog.data && !unknown && <IdentitiesTable label={connector ? `${title} identities` : "Identities"} rows={filterRows(rows, connector?.name)} pinned={pinned} connectors={connectors} error={errors} onChanged={onChanged} />}
     {connector ? <>
       <NeedsDefault connector={connector} missing={usageFor(usage.data, connector.name).missing} />
       <DefaultsPanel key={`defaults:${scopeParts(scope).join("/")}`} connector={connector} identities={identitiesFor(secrets.data, connector.name)} revision={revision} inventory={inventory} initialScope={scope} onChanged={onChanged} />

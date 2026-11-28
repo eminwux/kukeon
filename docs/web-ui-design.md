@@ -91,6 +91,15 @@ the Cells instantiated through them. Relationship lookup uses scoped references
 and Cell lineage, not generated names; incomplete inventory and failed resource
 reads remain visible as partial or stale results.
 
+Identities follow the same shape (#1805). The Identities list has one line per
+identity — name, connector, method or type, scope, login status and a count of
+its users — with name search and pages of 25 below the pinned System defaults,
+and an identity listed once even when it is pinned. Its name opens the
+identity's page, the overview: its details, readable fields, the defaults and
+roles naming it, and a paged table of the Configs using it, with Log in,
+Rotate and Delete. A Secret and a login identity of the same name and scope
+are two pages.
+
 Teams are created and edited through a wizard, not a YAML box (#1644). New
 team (`#/new-team`, opened from the Teams list) steps through Project, Other
 sources, Roles and harnesses, Tasks and schedules, Credentials and Review;
