@@ -475,8 +475,19 @@ make install-dev
 # +<ctrl> write so the EOPNOTSUPP cgroup-namespace trap is distinguished
 # from "kernel does not support". Idempotent on a healthy host (write is
 # a no-op when the controller is already in subtree_control).
+#
+# The dev profile must carry KUKE_CONFIGURATION across sudo (issue #1775):
+# sudo resets HOME, so without it kuke loads the operator's
+# ~/.kuke/kuke.yaml instead of ./kuke-dev.yaml, and a stale key there
+# (e.g. the retired subnet key) aborts the bootstrap here. The host-root
+# check never contacts the daemon, so KUKEON_HOST is not needed. The
+# default profile keeps reading the user config, as before.
 step "Pre-flight: host cgroup controller delegation"
-sudo ./kuke doctor cgroups --probe
+if [ "${KUKEON_PROFILE}" = "dev" ]; then
+    sudo --preserve-env=KUKE_CONFIGURATION ./kuke doctor cgroups --probe
+else
+    sudo ./kuke doctor cgroups --probe
+fi
 
 # Pre-flight: catch a missing standalone containerd BEFORE the multi-minute
 # kuke build (kukebuild dials the same /run/containerd/containerd.sock), and
