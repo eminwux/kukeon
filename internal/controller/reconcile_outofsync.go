@@ -96,19 +96,26 @@ type cellOutOfSync struct {
 	// BlueprintRevision, when non-empty, back-fills the cell's render
 	// blueprint-revision annotation on a Synced cell rendered before the
 	// annotation existed, so a later blueprint change is named for it too
-	// (issue #1569).
+	// (issue #1569), or one whose blueprint changed without changing the
+	// render (issue #1772).
 	BlueprintRevision string
 
 	// ConfigRevision, when non-empty, back-fills the cell's render
 	// config-revision annotation on a Synced cell that carries none or the
 	// pre-#1569 form (legacyConfigRevision), so a later schedule edit is not
-	// mistaken for a Config change.
+	// mistaken for a Config change. Like BlueprintRevision, it also records
+	// a new revision whose edit left the render unchanged (issue #1772).
 	ConfigRevision string
+
+	// ValuesHash, when non-empty, back-fills the cell's render values-hash
+	// annotation on a Synced cell whose fill changed without changing the
+	// render (issue #1772).
+	ValuesHash string
 }
 
 // hasBackfill reports whether the verdict carries an annotation back-fill.
 func (o cellOutOfSync) hasBackfill() bool {
-	return o.ImageDigests != "" || o.BlueprintRevision != "" || o.ConfigRevision != ""
+	return o.ImageDigests != "" || o.BlueprintRevision != "" || o.ConfigRevision != "" || o.ValuesHash != ""
 }
 
 // lineageDiff is one render of a Config-lineage cell from its lineage Config,
@@ -123,7 +130,9 @@ type lineageDiff struct {
 	Desired intmodel.Cell
 	// Diff is apply.DiffCell(Desired, live).
 	Diff apply.CellDiffResult
-	// Drift is the render provenance drift (renderProvenanceDriftKeys).
+	// Drift is the render provenance drift (renderProvenanceDriftKeys),
+	// without the drift that only records a new revision of an unchanged
+	// render (dropMetadataOnlyDrift).
 	Drift []provenanceDrift
 }
 
@@ -157,12 +166,60 @@ func renderLineageDiff(r runner.Runner, cell intmodel.Cell, configName string) (
 		return lineageDiff{}, materializeErr
 	}
 
+	diff := apply.DiffCell(desired, cell)
 	return lineageDiff{
 		ConfigFound: true,
 		Desired:     desired,
-		Diff:        apply.DiffCell(desired, cell),
-		Drift:       renderProvenanceDriftKeys(desired, cell, legacyConfigRevision(cfg)),
+		Diff:        diff,
+		Drift: dropMetadataOnlyDrift(
+			renderProvenanceDriftKeys(desired, cell, legacyConfigRevision(cfg)), desired, cell, diff),
 	}, nil
+}
+
+// isMetadataOnlyDriftKey reports whether key is a render input whose drift is
+// only a record when the cell it renders is unchanged (issue #1772): a
+// blueprint or Config document edit, or a fill change, that leaves the render
+// as it was.
+func isMetadataOnlyDriftKey(key string) bool {
+	switch key {
+	case cellconfig.AnnotationRenderBlueprintRevision,
+		cellconfig.AnnotationRenderConfigRevision,
+		cellconfig.AnnotationRenderValuesHash:
+		return true
+	}
+	return false
+}
+
+// dropMetadataOnlyDrift removes blueprint, config and values drift from drift
+// when the fresh render is the cell as it runs: apply.DiffCell reports no
+// changes and the render digest (identity, labels, spec and realm image
+// digests, cellDigest) equals the live cell's. The new revisions are then
+// back-filled on the Synced cell (desiredCellOutOfSync) instead of marking it
+// OutOfSync, which only a restart would clear and which would restart a
+// workload for a change that alters nothing (issue #1772).
+//
+// Defaults and image drift are kept: a level the cell depends on moving is
+// reported even when the render is unchanged, and a rebuilt image changes
+// the render digest anyway. A live cell without a render digest (rendered
+// before #1418) keeps all its drift, since nothing shows its render is the
+// same.
+func dropMetadataOnlyDrift(
+	drift []provenanceDrift, desired, live intmodel.Cell, diff apply.CellDiffResult,
+) []provenanceDrift {
+	if len(drift) == 0 || diff.HasChanges {
+		return drift
+	}
+	liveDigest := live.Metadata.Annotations[cellconfig.AnnotationRenderDigest]
+	if liveDigest == "" || liveDigest != desired.Metadata.Annotations[cellconfig.AnnotationRenderDigest] {
+		return drift
+	}
+	var kept []provenanceDrift
+	for _, d := range drift {
+		if !isMetadataOnlyDriftKey(d.Key) {
+			kept = append(kept, d)
+		}
+	}
+	return kept
 }
 
 // desiredCellOutOfSync computes the OutOfSync verdict the live cell
@@ -185,6 +242,7 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 			ImageDigests:      backfill,
 			BlueprintRevision: backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderBlueprintRevision),
 			ConfigRevision:    backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderConfigRevision),
+			ValuesHash:        backfillStamp(desiredCell, cell, cellconfig.AnnotationRenderValuesHash),
 		}
 	}
 	return cellOutOfSync{
@@ -230,10 +288,12 @@ func backfillImageDigests(desired, live intmodel.Cell) string {
 
 // backfillStamp returns the fresh render's value of a provenance annotation
 // when the live cell's differs from it — absent (rendered before the stamp
-// existed) or in an older form — or "" when they already agree (issue #1569).
-// The caller only back-fills a Synced cell, for which renderProvenanceDrift
-// reported no drift, so the recorded value is the one the cell's spec
-// actually reflects. A live cell with no render provenance at all (rendered
+// existed), in an older form, or a revision whose change left the render as it
+// was (dropMetadataOnlyDrift, issue #1772) — or "" when they already agree
+// (issue #1569). The caller only back-fills a Synced cell, for which the drift
+// left after dropMetadataOnlyDrift is empty and apply.DiffCell reports no
+// changes, so the recorded value is the one the cell's spec actually reflects.
+// A live cell with no render provenance at all (rendered
 // before #1418) is left alone, as backfillImageDigests leaves it: nothing
 // compares its stamps.
 func backfillStamp(desired, live intmodel.Cell, key string) string {
@@ -707,6 +767,9 @@ func persistCellOutOfSync(
 			}
 			if desired.ConfigRevision != "" {
 				annotations[cellconfig.AnnotationRenderConfigRevision] = desired.ConfigRevision
+			}
+			if desired.ValuesHash != "" {
+				annotations[cellconfig.AnnotationRenderValuesHash] = desired.ValuesHash
 			}
 			fresh.Metadata.Annotations = annotations
 		}
