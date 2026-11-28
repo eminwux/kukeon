@@ -40,13 +40,16 @@ guarantee that a terminal process survives reconnection or page reload.
 
 Manage replaces the cell list in the sidebar with one flat vertical list:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
-Connectors, Teams, Sources, Images and Daemon. A new kind adds one line, never a link to
+Identities, Teams, Sources, Images and Daemon. A new kind adds one line, never a link to
 a row that wraps. The Overview leads with the cells needing attention, then the
 summary counts and a Health card for the newest sweep report. Health is a tab
-of the Daemon page, next to Status (the connectivity check) and Logs. The
+of the Daemon page, next to Status (the connectivity check), Logs and
+Connectors. The connector catalog is a server capability — read-only data
+embedded in `kuke` — so it is a Daemon tab; the credentials an operator manages
+day to day, the identities, have the Identities page (#1790). The
 Manage side of the switch shows a dot when the daemon, the version pair or an
 unseen report with findings needs a look. Containers remain accessible from
-their cell details. Historical resource, catalog and `#/health` URLs still
+their cell details. Historical resource, catalog, `#/connectors` and `#/health` URLs still
 open their pages, and browser Back/Forward retains the view, scope and document
 mode. Connection success does not imply workload health.
 

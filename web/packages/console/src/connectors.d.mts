@@ -65,6 +65,7 @@ export type RegistryEntry = { server: string; username: string; secret?: SecretR
 type StatusCarrier = unknown;
 
 export function takesIdentity(delivery: string | undefined): boolean;
+export function deliveryText(item: { delivery?: string; envName?: string; mountPath?: string } | undefined): string;
 export function secretRef(value: Partial<SecretRef> | undefined | null): SecretRef | undefined;
 export function refKey(value: Partial<SecretRef> | undefined | null): string;
 export function sameRef(a: Partial<SecretRef> | undefined | null, b: Partial<SecretRef> | undefined | null): boolean;

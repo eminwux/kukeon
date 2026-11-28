@@ -149,7 +149,7 @@ an author-only identity (`git-author`). It turns signing on only when
 
 #### New git identity in the web UI
 
-On the Connectors page, the `git` connector's **New identity** page starts with
+On the Identities page, the `git` connector's **New identity** page starts with
 three choices:
 
 - **Import from this machine**: the import below.
@@ -413,7 +413,7 @@ team-dev-codex        ...  codex=login, git=bot-key (config), github=MISSING
 A required connector with no identity at any level is **unresolved**. Previewing
 or creating a cell from that Config fails with an error naming the connector;
 the web UI shows a _Needs connector_ badge on the Config, counts the affected
-Configs on the Connectors page, and disables _Create_ until a default is set or
+Configs on the Identities page, and disables _Create_ until a default is set or
 an identity is picked. A named identity that is missing, tagged for another
 connector or of the wrong type is an error even for an optional connector.
 
@@ -685,8 +685,8 @@ spec:
 ```
 
 With that file the connector appears in `kuke create secret --connector`, team
-`connectors`, `kuke create cell --connector`, and the web UI's Connectors page
-and pickers.
+`connectors`, `kuke create cell --connector`, the web UI's connector catalog
+(the Daemon page's Connectors tab), its Identities page and its pickers.
 
 | Field                     | Meaning                                                                                                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

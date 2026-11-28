@@ -32,20 +32,33 @@ export async function sendJSON<T>(path: string, body: unknown): Promise<T> {
 export function connectorAPI(connector: string, action: "defaults" | "identities" | "import" | "logins" | "login"): string {
   return `/connectors/${encodeURIComponent(connector)}/${action}`;
 }
-export function connectorsLink(connector?: string, scope?: Partial<Scope>): string {
+// connectorCatalogLink opens the connector catalog, the Daemon page's Connectors tab (#1790), or one
+// connector's read-only entry in it.
+export function connectorCatalogLink(connector?: string): string {
+  return routeHref("/daemon/connectors" + (connector ? `/${encodeURIComponent(connector)}` : ""));
+}
+// identitiesLink opens the Identities page (#1790), filtered on a connector when one is named; scope
+// opens that connector's scope-default editor on the scope.
+export function identitiesLink(connector?: string, scope?: Partial<Scope>): string {
   const parts = scopeParts(scope);
-  return routeHref("/connectors" + (connector ? `/${encodeURIComponent(connector)}` : "") + (connector && parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
+  const query = [connector ? `connector=${encodeURIComponent(connector)}` : "", connector && parts.length ? `scope=${encodeURIComponent(JSON.stringify(parts))}` : ""].filter(Boolean).join("&");
+  return routeHref("/identities" + (query ? `?${query}` : ""));
 }
 // newIdentityLink opens a connector's New identity page, storing on the given scope.
 export function newIdentityLink(connector: string, scope?: Partial<Scope>): string {
   const parts = scopeParts(scope);
-  return routeHref(`/connectors/${encodeURIComponent(connector)}/new-identity` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
+  return routeHref(`/identities/${encodeURIComponent(connector)}/new-identity` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
-// rotateIdentityLink opens the Rotate page of one stored identity; scope is the connector page's to return to.
+// newLoginIdentityLink opens a connector's New login identity page (#1790), storing on the given scope.
+export function newLoginIdentityLink(connector: string, scope?: Partial<Scope>): string {
+  const parts = scopeParts(scope);
+  return routeHref(`/identities/${encodeURIComponent(connector)}/new-login` + (parts.length ? `?scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
+}
+// rotateIdentityLink opens the Rotate page of one stored identity; scope is the Identities page's to return to.
 export function rotateIdentityLink(connector: string, identity: Partial<SecretRef>, scope?: Partial<Scope>): string {
   const ref = secretRef(identity);
   const parts = scopeParts(scope);
-  return routeHref(`/connectors/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
+  return routeHref(`/identities/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
 function levelTitle(level: string): string { return `${level[0].toUpperCase()}${level.slice(1)}`; }
 export function levelLabel(level: string, scope: Partial<Scope>): string { return `${levelTitle(level)} — ${scopeParts(scopeAt(scope, level)).join(" / ")}`; }
@@ -530,7 +543,7 @@ export function ConnectorFixes({ status, connector, config, identities, logins =
       <div className="connector-actions">
         {identity && <LoginButton connector={status.connector} title={title} volume={identity} state={known?.state ?? status.login?.state} running={!!known?.session} method={status.method} onStarted={onChanged} />}
         {!team && <button type="button" aria-expanded={open === "pick"} aria-label={`Pick ${title} login identity for this Config`} onClick={() => setOpen(open === "pick" ? "" : "pick")}>Pick a login identity</button>}
-        <a className="document-action" href={connectorsLink(status.connector, targetScope(config))}>Manage {title} login identities</a>
+        <a className="document-action" href={identitiesLink(status.connector, targetScope(config))}>Manage {title} login identities</a>
       </div>
       {open === "pick" && !team && <PickForConfig status={status} config={config} identities={identities} logins={logins} onChanged={onChanged} onClose={() => setOpen("")} />}
     </div>;

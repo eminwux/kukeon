@@ -4,7 +4,7 @@ import { configRoute, newTeamRoute, sourcesRoute, teamsRoute } from "./teams.mjs
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[]; state?: string; extension?: string; extensionPath?: string };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[]; state?: string; connector?: string; section?: string; extension?: string; extensionPath?: string };
 
 // Home is the Workbench grid (#1635); the Overview, the first Manage page, lives at #/resources.
 const HOME = (): Route => ({ view: "workbench", scope: [], parent: [], document: false });
@@ -39,17 +39,28 @@ export function readRoute(): Route {
     if (parts[0] === "agents" && parts[1] === "new" && parts.length === 2) return { view: "new-agent", scope: [], parent: [], document: false };
     // #/new-secret opens the New Secret page.
     if (parts[0] === "new-secret") return { view: "new-secret", scope: [], parent: [], document: false };
-    // #/connectors lists the connector catalog; #/connectors/<name>?scope=[realm, space, stack] opens one
-    // connector with its scope pickers on that scope.
-    if (parts[0] === "connectors") {
+    // The identity routes (#1790): #/identities lists every identity, ?connector=<name> filters it and
+    // ?scope=[realm, space, stack] opens that connector's scope-default editor on a scope;
+    // #/identities/assignments is the Assignments tab; #/identities/<name>/new-identity?scope=[…],
+    // …/new-login?scope=[…] and …/rotate-identity?identity=[realm, space?, stack?, name] are the identity forms.
+    // The connector catalog is the Daemon page's Connectors tab: #/daemon/connectors and
+    // #/daemon/connectors/<name>. The historical #/connectors routes open the matching new page.
+    if (parts[0] === "identities" || parts[0] === "connectors") {
       let target: unknown;
       try { target = JSON.parse(params.get("scope") ?? "null"); } catch { target = null; }
-      // #/connectors/<name>/new-identity?scope=[…] and #/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]
-      // are the identity pages.
       let identity: unknown;
       try { identity = JSON.parse(params.get("identity") ?? "null"); } catch { identity = null; }
-      const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" ? parts[2] : undefined;
-      return { view: "connectors", scope: parts.slice(1, 2), parent: [], document: false, target: Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined, action, identity: action && Array.isArray(identity) && identity.length >= 2 && identity.every(value => typeof value === "string") ? identity.slice(0, 4) : undefined };
+      const scope = Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined;
+      const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" || (parts[0] === "identities" && parts[2] === "new-login") ? parts[2] : undefined;
+      const identities = (connector: string | undefined, section?: string): Route => ({ view: "identities", scope: action && connector ? [connector] : [], parent: [], document: false, target: scope, action, identity: action && Array.isArray(identity) && identity.length >= 2 && identity.every(value => typeof value === "string") ? identity.slice(0, 4) : undefined, ...(connector && !action ? { connector } : {}), ...(section ? { section } : {}) });
+      if (parts[0] === "connectors") {
+        // #/connectors/<name>/new-identity, …/rotate-identity, and a connector page opened on a scope (the
+        // historical "Set a default" link) are identity pages now; the rest is the catalog.
+        if (parts[1] && (action || scope)) return identities(parts[1]);
+        return { view: "daemon-connectors", scope: parts.slice(1, 2), parent: [], document: false };
+      }
+      if (parts[1] === "assignments" && !parts[2]) return identities(undefined, "assignments");
+      return identities(params.get("connector") || (action ? parts[1] : parts[1] || undefined));
     }
     // #/teams lists the stored teams; #/teams/<name> opens one team, #/teams/<name>/edit and
     // #/teams/<name>/export its Edit team and Export screens (#1644).
@@ -59,8 +70,10 @@ export function readRoute(): Route {
     // #/sources lists the stored Sources; #/sources/<name> opens one.
     if (parts[0] === "sources") return { view: "sources", scope: parts.slice(1, 2), parent: [], document: false };
     // The Daemon page's tabs: #/daemon (Status, the connectivity check), #/daemon/health (Health,
-    // majordomo's sweep reports and schedule) and #/daemon/logs. #/health is the historical Health route.
+    // majordomo's sweep reports and schedule), #/daemon/logs and #/daemon/connectors (the connector catalog,
+    // #1790). #/health is the historical Health route.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };
+    if (parts[0] === "daemon" && parts[1] === "connectors") return { view: "daemon-connectors", scope: parts.slice(2, 3), parent: [], document: false };
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : parts[1] === "health" ? "health" : "daemon", scope: [], parent: [], document: false };
     // #/ext/<extension id>/<path> is a console extension's route (#1754).
     if (parts[0] === "ext") return { view: "extension", scope: [], parent: [], document: false, extension: parts[1] ?? "", extensionPath: parts.slice(2).join("/") };
@@ -111,7 +124,7 @@ export function settingsLink(): string {
 export function healthLink(): string {
   return routeHref("/daemon/health");
 }
-export function daemonLink(section?: "logs"): string {
+export function daemonLink(section?: "logs" | "connectors"): string {
   return routeHref("/daemon" + (section ? `/${section}` : ""));
 }
 export function imagesLink(realm?: string, ref?: string): string {

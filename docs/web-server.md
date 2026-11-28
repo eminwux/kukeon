@@ -266,10 +266,10 @@ and report `unsupported`: they are never marked until they are restarted.
 
 On a Manage page the sidebar is one flat list, the **Manage navigation**:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
-Connectors, Teams, Sources, Images and Daemon. The current page's link is marked: the
+Identities, Teams, Sources, Images and Daemon. The current page's link is marked: the
 kind's link on its list and detail pages, Configs on New Config, Secrets on New
-Secret, Teams on New team and on a team's Edit team and Export screens, Daemon
-on its Status, Health and Logs tabs. No page has a horizontal
+Secret, Identities on its identity forms, Teams on New team and on a team's Edit
+team and Export screens, Daemon on its Status, Health, Logs and Connectors tabs. No page has a horizontal
 navigation row. The breadcrumb root is **Overview** on Manage pages and
 **Workbench** on Workbench pages.
 
@@ -986,30 +986,51 @@ errors use the standard notices and never repeat the submitted token.
 Every realm response (`/api/realms`, `/api/realms/{name}`, and its **View
 document** view) returns registry credentials with an empty `password`.
 
-## Connectors
+## Connectors and identities
 
-**Connectors** in the sidebar lists the [connectors](site/concepts/connectors.md)
-the `kuke` binary embeds: the kinds of access a cell needs. Nothing on the page
-is written per connector — it renders what `GET /api/connectors` returns, so a
-connector added as one `connector.yaml` appears here with its identity form,
-its methods and its defaults.
+The [connectors](site/concepts/connectors.md) the `kuke` binary embeds — the
+kinds of access a cell needs — are a server capability: the catalog is
+read-only data, listed on the [Daemon](#daemon-health) page's **Connectors**
+tab (`#/daemon/connectors`). The credentials that fill them, the
+**identities**, are managed on the **Identities** page (`#/identities`) in the
+sidebar. Nothing on either page is written per connector — both render what
+`GET /api/connectors` returns, so a connector added as one `connector.yaml`
+appears with its identity form, its methods and its defaults.
+
+The historical routes keep working: `#/connectors` and `#/connectors/<name>`
+open the Daemon tab, and `#/connectors/<name>/new-identity` and
+`…/rotate-identity` open the same forms under Identities. A connector page
+opened on a scope (`#/connectors/<name>?scope=[…]`, the old **Set a default**
+link) opens that connector's scope-default editor on Identities.
+
+### Connectors tab
+
+The catalog lists, per connector, how it is delivered (one line per method),
+the Secret types and fields it accepts (and a login identity for a method that
+keeps its login in the harness state directory), the levels it can be defaulted
+at, the harness it authenticates, and how many identities are stored — a link
+to Identities filtered on it. `#/daemon/connectors/<name>` shows one
+connector the same way, with **Manage … identities**. Nothing is created,
+rotated or deleted there. A connector with no identity to use — no Secret
+tagged with it, and no login identity that exists and holds a login — is marked
+**Not set up — recommended**, and its entry says **Not set up — recommended
+for …**, worded from the connector's description. A team's state volume that
+no cell created yet, or that nobody logged in to, does not count.
 
 The list leaves out a connector delivered as a registry credential (no methods,
-`delivery: registry`): opening its page shows a notice linking to the
-[Images](#images) page, where registry credentials are managed. The UI decides
-this by the delivery handler only, never by a connector's name.
+`delivery: registry`): its entry shows a notice linking to the
+[Images](#images) page, where registry credentials are managed, and Identities
+does not list it. The UI decides this by the delivery handler only, never by a
+connector's name.
 
-The list shows, per connector, how it is delivered (one line per method), how
-many identities are stored, how many Configs require it, and how many of those
-have no identity. A connector with no identity to use — no Secret tagged with
-it, and no login identity that exists and holds a login — is marked
-**Not set up — recommended** there, and its page says **Not set up —
-recommended for …**, worded from the connector's description. A team's state
-volume that no cell created yet, or that nobody logged in to, does not count. A connector with such Configs carries a **Needs a default**
-badge and a **Set a default** link that opens the connector on the first
-affected Config's scope.
+### Identities page
 
-A connector's page (`#/connectors/<name>`) has:
+Identities lists each connector's identities; **Connector** filters it on one
+(`#/identities?connector=<name>`). A connector with Configs that resolve to no
+identity carries a **Needs a default** badge and a **Set a default** link that
+opens the connector on the first affected Config's scope
+(`#/identities?connector=<name>&scope=[realm, space, stack]`). Filtered on a
+connector, the page has:
 
 - **Default identity** — for a chosen scope and each method that takes an
   identity, the identity that resolves there and the level it comes from, or
@@ -1022,7 +1043,7 @@ A connector's page (`#/connectors/<name>`) has:
   says so on the others.
 - **Identities** — the Secrets tagged with the connector: name, scope, type and
   the readable identity fields. Values are write-only and never returned to the
-  browser. **New identity** opens `#/connectors/<name>/new-identity`. For a
+  browser. **New identity** opens `#/identities/<name>/new-identity`. For a
   connector that imports from the host (git) it starts with three cards:
   **Import from this machine** (the import form), **Use a … token** (shown when
   a connector advertises `tokenForGit`; it opens that connector's form) and
@@ -1036,9 +1057,9 @@ A connector's page (`#/connectors/<name>`) has:
   connector that advertises `tokenForGit` (GitHub) the form also has **Also use
   this token for git on github.com**, on by default, with an optional **Commit
   author** and **Username**. **Rotate** opens
-  `#/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
-  which replaces the value stored under that name. Both return to the connector
-  page on success or Cancel. **Delete** uses the same confirmation as the
+  `#/identities/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
+  which replaces the value stored under that name. Both return to Identities,
+  filtered on the connector, on success or Cancel. **Delete** uses the same confirmation as the
   Secrets catalog, and a Secret still referenced by a cell is refused.
 - **Needs a default** — the Configs that require the connector and resolve to
   no identity, each with a link that opens the defaults on that Config's scope.

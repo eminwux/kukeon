@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useResource } from "./request";
 import type { InventoryResource } from "./inventory";
 import type { Connector } from "./connectors.mjs";
-import { LoginButton, connectorsLink, newIdentityLink } from "./connector-ui";
+import { LoginButton, identitiesLink, newIdentityLink } from "./connector-ui";
 import { InitializePrompt } from "./initialize";
 import { newAgentLink } from "./routes";
 import { useSettings } from "./settings";
@@ -74,10 +74,10 @@ export function GetStarted({ revision, inventory, configs, majordomoCells, onOpe
           {harnesses.map(({ connector, login }) => { const title = connector.title || connector.name; return <div className="get-started-harness" key={connector.name} role="group" aria-label={title}>
             <span className="get-started-harness-name">{title}</span>
             {login ? <LoginButton connector={connector.name} title={title} volume={login.volume} state={login.state} running={!!login.session} method={login.method || undefined} onStarted={onChanged} /> : <span className="description">{initialized ? "uses a token" : "after Initialize"}</span>}
-            <a className="document-action" href={connectorsLink(connector.name)} aria-label={`Use a token for ${title}`}>Use a token</a>
+            <a className="document-action" href={identitiesLink(connector.name)} aria-label={`Use a token for ${title}`}>Use a token</a>
           </div>; })}
         </StepRow>
-        <StepRow step={step(stepGit)}>{git ? <a className="document-action" href={newIdentityLink(git.name)}>New {git.title || git.name} identity</a> : <a className="document-action" href={connectorsLink()}>Connectors</a>}</StepRow>
+        <StepRow step={step(stepGit)}>{git ? <a className="document-action" href={newIdentityLink(git.name)}>New {git.title || git.name} identity</a> : <a className="document-action" href={identitiesLink()}>Identities</a>}</StepRow>
         <StepRow step={step(stepMajordomo)}><button type="button" onClick={onOpenMajordomo}>Enable majordomo</button></StepRow>
         <StepRow step={step(stepAgent)}><a className="header-action" href={newAgentLink()}>New agent</a></StepRow>
       </ol>
