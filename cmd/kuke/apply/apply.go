@@ -192,6 +192,7 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 		if structured {
 			result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
 				Kind: string(v1beta1.KindTeam), Name: out.Result.Team, Action: "applied",
+				Warnings: out.Result.Warnings,
 			})
 			continue
 		}

@@ -210,6 +210,7 @@ func commit(ctx context.Context, client Client, plan *Plan) (Result, error) {
 		if r.Action == actionPruned && r.Kind == string(api.KindCellConfig) {
 			result.Pruned = append(result.Pruned, r.Name)
 		}
+		result.Warnings = append(result.Warnings, r.Warnings...)
 	}
 	return result, nil
 }

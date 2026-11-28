@@ -138,6 +138,9 @@ type Result struct {
 	// Notes are operator-facing remarks: settings that no longer have an
 	// effect, a missing git identity, renamed blueprints.
 	Notes []string
+	// Warnings are the risks kukeond reported for resources it still applied,
+	// such as a login identity another role's Config uses (issue #1789).
+	Warnings []string
 	// Plan is the plan that was committed.
 	Plan *Plan
 }

@@ -1179,8 +1179,9 @@ or role entry):
 
 - `identity` with `method: login` names another login identity for the pair
   instead of the team's own Volume. One that a Config of another role uses is
-  accepted with a warning naming both roles: sharing is at the operator's risk
-  (see
+  accepted with a warning naming both roles, which `kuke team apply` prints
+  under `Warnings` (`kuke apply -o json` in the Team's `warnings`): sharing is
+  at the operator's risk (see
   [Sharing login volumes across roles](connectors.md#sharing-login-volumes-across-roles)).
 - `state: ephemeral` with a token method mounts no state volume at all: the
   state directory lives and dies with each cell. `persistent` is the default.
