@@ -56,8 +56,12 @@ type Dial func(context.Context) (kukeonv1.Client, error)
 
 // Run binds the --listen address, applies the --url access policy, and
 // prints the bound URL only after a successful bind.
+//
+// A non-nil link also keeps the cloud link up (issue #1755); nil serves
+// the local listener only.
 func Run(
 	ctx context.Context, listen, browserURL, endpoint string, dial Dial, out, errOut io.Writer,
+	link *CloudLink,
 ) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -77,6 +81,12 @@ func Run(
 	handler, err := buildHandler(policy, endpoint, dial, catalog, auth)
 	if err != nil {
 		return err
+	}
+	var prepared *preparedLink
+	if link != nil {
+		if prepared, err = prepareCloudLink(ctx, link, endpoint, dial, catalog, errOut); err != nil {
+			return err
+		}
 	}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", target.bind)
 	if err != nil {
@@ -105,6 +115,15 @@ func Run(
 	if !target.loopback {
 		_, _ = fmt.Fprintln(errOut, "WARNING: this address serves plain HTTP. The password and the "+
 			"session cookie cross the network unencrypted; put a TLS proxy in front of kuke serve.")
+	}
+	if prepared != nil {
+		waitLink, linkErr := prepared.start(ctx, out)
+		if linkErr != nil {
+			return linkErr
+		}
+		// Run's deferred cancel stops the link; wait for it after the server.
+		defer waitLink()
+		defer cancel()
 	}
 	done := make(chan struct{})
 	go func() {
@@ -168,6 +187,25 @@ func buildHandler(
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(assets))
+	registerAPIRoutes(mux, endpoint, dial, catalog)
+	var api http.Handler = mux
+	if auth != nil {
+		auth.registerSessionRoutes(mux)
+		api = auth.gate(mux)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w)
+		if !policy.allows(r) {
+			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)
+			return
+		}
+		api.ServeHTTP(w, r)
+	}), nil
+}
+
+// registerAPIRoutes adds every /api route except the session routes. The
+// local server and the cloud link serve the same set.
+func registerAPIRoutes(mux *http.ServeMux, endpoint string, dial Dial, catalog *connector.Catalog) {
 	mux.HandleFunc("GET /api/connection", connectionHandler(endpoint, dial))
 	registerCapabilitiesRoute(mux)
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
@@ -177,22 +215,14 @@ func buildHandler(
 	registerConnectorRoutes(mux, dial, catalog)
 	registerTeamRoutes(mux, dial, catalog)
 	registerDaemonRoutes(mux, endpoint, dial)
-	var api http.Handler = mux
-	if auth != nil {
-		auth.registerSessionRoutes(mux)
-		api = auth.gate(mux)
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().
-			Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
-		if !policy.allows(r) {
-			http.Error(w, "unexpected Host or Origin", http.StatusForbidden)
-			return
-		}
-		api.ServeHTTP(w, r)
-	}), nil
+}
+
+// setSecurityHeaders sets the headers every response carries.
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().
+		Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
 }
 
 // connectionInfo reports the web server build and, when kukeond answers,
