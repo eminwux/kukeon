@@ -1,8 +1,11 @@
 import type { InventoryResource } from "./inventory";
 import { clearGroupings } from "./cell-filter";
 import { configLabel, groupingKeys } from "./cells.mjs";
-import { cellListStyleLabels, cellListStyles, profileGroups, settingDefinitions, themeLabels, themes, useSettings, type SettingName, type SwitchName } from "./settings";
-import { parseRefreshSeconds, refreshIntervals } from "./settings-values.mjs";
+import { cellListStyleLabels, cellListStyles, profileGroups, settingDefinitions, themeLabels, themes, useSettings, type SettingName, type Settings, type SwitchName } from "./settings";
+import {
+  gridScreenIntervals, parseGridScreenSeconds, parseRefreshSeconds, parseUnreadPollSeconds, parseUnreadQuietSeconds,
+  refreshIntervals, unreadPollIntervals, unreadQuietOptions,
+} from "./settings-values.mjs";
 
 function Note({ id, text }: { id: string; text?: string }) {
   return text ? <small className="settings-note" id={id}>{text}</small> : null;
@@ -26,6 +29,18 @@ export function SettingsPage({ inventory }: { inventory: InventoryResource }) {
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
         <span className="switch-text" aria-hidden="true">{on ? "On" : "Off"}</span>
       </button>
+    </div>;
+  };
+  // A select of seconds. parse returns undefined for anything not offered; 0 (Off) is a value, so the
+  // check is against undefined, not truthiness.
+  type SecondsName = "refreshSeconds" | "unreadPollSeconds" | "gridScreenSeconds" | "unreadQuietSeconds";
+  const secondsRow = <K extends SecondsName>(name: K, offered: readonly Settings[K][], parse: (raw: string) => Settings[K] | undefined) => {
+    const { label, note } = settingDefinitions[name];
+    return <div className="settings-select" key={name}>
+      <span className="settings-label"><label htmlFor={`setting-${name}`}>{label}</label><Note id={`setting-${name}-note`} text={note} /></span>
+      <select id={`setting-${name}`} value={settings[name]} aria-describedby={note ? `setting-${name}-note` : undefined} onChange={event => { const value = parse(event.target.value); if (value !== undefined) set(name, value); }}>
+        {offered.map(value => <option key={value} value={value}>{value === 0 ? "Off" : `${value} s`}</option>)}
+      </select>
     </div>;
   };
   const control = (name: SettingName) => {
@@ -52,12 +67,10 @@ export function SettingsPage({ inventory }: { inventory: InventoryResource }) {
           {keys.map(key => <option key={key} value={key}>{key}</option>)}
         </select>
       </div>;
-      case "refreshSeconds": return <div className="settings-select" key={name}>
-        <span className="settings-label"><label htmlFor="setting-refreshSeconds">{settingDefinitions.refreshSeconds.label}</label><Note id="setting-refreshSeconds-note" text="How often the inventory is read while this tab is visible." /></span>
-        <select id="setting-refreshSeconds" value={settings.refreshSeconds} aria-describedby="setting-refreshSeconds-note" onChange={event => { const value = parseRefreshSeconds(event.target.value); if (value) set("refreshSeconds", value); }}>
-          {refreshIntervals.map(value => <option key={value} value={value}>{value} s</option>)}
-        </select>
-      </div>;
+      case "refreshSeconds": return secondsRow(name, refreshIntervals, parseRefreshSeconds);
+      case "unreadPollSeconds": return secondsRow(name, unreadPollIntervals, parseUnreadPollSeconds);
+      case "gridScreenSeconds": return secondsRow(name, gridScreenIntervals, parseGridScreenSeconds);
+      case "unreadQuietSeconds": return secondsRow(name, unreadQuietOptions, parseUnreadQuietSeconds);
       default: return switchRow(name);
     }
   };

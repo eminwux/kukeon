@@ -141,7 +141,8 @@ screen**. With no active cell the grid shows an empty state with **New Cell**.
 
 Thumbnails come from [`GET …/cells/{cell}/screenshot`](#read-only-api). The
 grid reads them only while it is the current page and the browser tab is
-visible, only for the tiles on screen, every five seconds, with at most four
+visible, only for the tiles on screen, at Settings → Profile → **Thumbnail
+refresh interval** (5 s by default; see [Settings](#settings)), with at most four
 requests in flight; a tick is skipped while the previous pass is still
 running, and cells in a state with no live terminal are never requested. A
 failed refresh keeps the last screen and marks the tile **Stale**. A screenshot
@@ -201,7 +202,10 @@ unread message: in the sidebar its name is bold and an accent dot follows it;
 an agent row is marked when any of its instances is, collapsed or not; on the
 collapsed rail the cell dot, and the agent glyph, get an accent ring; on the
 grid the tile shows an **Unread** badge. The accessible name of each marked
-link gains ", unread output". The mark is a shape as well as a colour. It works
+link gains ", unread output". The dot, the rail ring and the agent glyph's ring
+pulse softly (a slow opacity or ring fade that never drops out of sight); with
+`prefers-reduced-motion: reduce` they stay still. The mark is a shape as well as
+a colour, so it never depends on motion alone. It works
 for terminals this browser is attached to in the background and for terminals
 nobody is attached to.
 
@@ -230,16 +234,20 @@ Markers of cells no longer in the inventory are removed when a complete
 inventory loads, and other tabs of the same browser pick up marker changes at
 once.
 
-Raw bytes are not messages: an agent TUI redraws while it works, and typed
-input is echoed. So a cell is marked only once its unread output has gone
-quiet: when the terminal has produced nothing for three seconds
-(`unreadQuietMs` in `src/unread.mjs`; `0` marks on any new byte). While output
-keeps arriving the cell is not marked.
+By default a cell is marked on its first new unread byte. Raw bytes are not
+messages, though: an agent TUI redraws while it works, and typed input is
+echoed. Settings → Profile → **Mark unread after quiet for** (Off by default;
+1, 3, 5 or 10 s) marks a cell only once its unread output has gone quiet, when
+the terminal has produced nothing for that long; while output keeps arriving
+the cell is not marked.
 
 The browser asks for the activity of the cells the sidebar lists, in one
-request of up to 100 cells, at once and then every five seconds, while the
-Workbench is the current view and the tab is visible; a tick is skipped while a
-request is in flight. No request is made on Manage or Settings pages.
+request of up to 100 cells, at once and then at Settings → Profile → **Unread
+check interval** (2 s by default), while the Workbench is the current view and
+the tab is visible; a tick is skipped while a request is in flight, so a slow
+daemon stretches the interval instead of piling up requests. That one poll
+feeds the sidebar, the collapsed rail and the grid tile badges. No request is
+made on Manage or Settings pages.
 
 With Settings → Profile → **Show unread bytes** on, each mark also shows the
 amount of unread output (`1.2 KiB`): after the dot in a sidebar row, the sum of
@@ -1440,6 +1448,10 @@ or unreadable value reads as the default. Nothing is stored in kukeond.
 
 | Group          | Setting                         | Default            | Storage key                           |
 | -------------- | ------------------------------- | ------------------ | ------------------------------------- |
+| Refresh        | Refresh interval                | 10 s               | `kukeon-refresh-seconds`              |
+| Refresh        | Unread check interval           | 2 s                | `kukeon-unread-poll-seconds`          |
+| Refresh        | Thumbnail refresh interval      | 5 s                | `kukeon-grid-screen-seconds`          |
+| Refresh        | Mark unread after quiet for     | Off                | `kukeon-unread-quiet-seconds`         |
 | Cell list      | Cell list style                 | Agent              | `kukeon-cell-list-style`              |
 | Cell list      | Default Group by                | `kukeon.io/config` | `kukeon-default-group-by`             |
 | Sidebar        | Show cell scope in sidebar      | on                 | `kukeon-sidebar-show-scope`           |
@@ -1450,6 +1462,18 @@ or unreadable value reads as the default. Nothing is stored in kukeond.
 | Workbench grid | Show search in grid             | on                 | `kukeon-grid-show-search`             |
 | Workbench grid | Show Group by in grid           | on                 | `kukeon-grid-show-group-by`           |
 
+- **Refresh interval** (5, 10, 30 or 60 s): how often the inventory is read
+  while the tab is visible.
+- **Unread check interval** (1, 2, 5, 10 or 30 s): how often the unread marks
+  are checked; see [Unread terminal output](#unread-terminal-output).
+- **Thumbnail refresh interval** (2, 5, 10 or 30 s): how often the Workbench
+  grid's terminal thumbnails are read.
+- **Mark unread after quiet for** (Off, 1, 3, 5 or 10 s; Off is stored as `0`):
+  how long a terminal must be quiet before new output marks its cell. Off
+  marks it on the first new byte.
+- Each interval is its own setting: none follows Refresh interval, and a
+  change applies to the next request without a reload. A stored value that is
+  not offered reads as the default.
 - **Cell list style**: **Agent** or **Default**; see
   [Agents and instances](#agents-and-instances).
 - **Default Group by** and the two **Show Group by** switches apply to the

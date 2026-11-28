@@ -1011,11 +1011,42 @@ test("the inventory refreshes at the Profile's interval, 10 s by default", async
   await after(1_100, start + 1);
   // 30 s from the Profile: the new interval applies at once, without a reload.
   const settings = await openSettings(page);
-  await settings.getByLabel("Refresh interval").selectOption("30");
+  await settings.getByLabel("Refresh interval", { exact: true }).selectOption("30");
   await expect(page.locator("main footer")).toContainText("Refreshes every 30 s.");
   const before = realmReads;
   await after(20_000, before);
   await after(10_100, before + 1);
+});
+
+test("the unread check and the grid thumbnails poll at their own Profile intervals, 2 s and 5 s by default", async ({ page }) => {
+  await page.clock.install();
+  let screenReads = 0;
+  await mock(page, path => { if (path.endsWith("/screenshot")) { screenReads++; return screen("$ "); } });
+  const activity = await mockActivity(page, { "dev/shared/services/api": counters(1), "prod/shared/services/api": counters(1) });
+  await page.goto(server.url);
+  for (const scope of ["dev / shared / services / api", "prod / shared / services / api"]) await expect(tile(page, scope).locator("pre")).toHaveText("$");
+  await expect.poll(() => activity.answered()).toBeGreaterThan(0);
+  const reads = () => ({ activity: activity.answered(), screens: screenReads });
+  const after = async (ms, expected) => { await page.clock.fastForward(ms); await expect.poll(reads).toEqual(expected); };
+  let start = reads();
+  // Defaults: the unread check every 2 s, a pass of both thumbnails every 5 s.
+  await after(2_100, { activity: start.activity + 1, screens: start.screens });
+  await after(2_100, { activity: start.activity + 2, screens: start.screens });
+  await after(2_100, { activity: start.activity + 3, screens: start.screens + 2 });
+  // 10 s and 30 s from the Profile: back on the Workbench, both follow the new intervals.
+  const settings = await openSettings(page);
+  await settings.getByLabel("Unread check interval").selectOption("10");
+  await settings.getByLabel("Thumbnail refresh interval").selectOption("30");
+  await page.goto(`${server.url}#/`);
+  await expect.poll(() => screenReads).toBeGreaterThanOrEqual(start.screens + 4);
+  await expect.poll(() => activity.answered()).toBeGreaterThan(start.activity + 3);
+  start = reads();
+  await after(8_500, start);
+  await after(1_600, { activity: start.activity + 1, screens: start.screens });
+  await page.clock.fastForward(18_500);
+  await expect.poll(() => screenReads).toBe(start.screens);
+  await page.clock.fastForward(2_000);
+  await expect.poll(() => screenReads).toBe(start.screens + 2);
 });
 
 test("initial inventory failure is distinct from an empty inventory", async ({ page }) => {
@@ -6509,8 +6540,20 @@ test("Profile shows every setting in its groups with their defaults; each applie
   await expect(settings.getByRole("heading", { level: 2 })).toHaveText(["Profile"]);
   await expect(settings.getByRole("heading", { level: 3 })).toHaveText(["Appearance", "Terminal", "Refresh", "Workbench", "Cell list", "Sidebar", "Workbench grid"]);
   await expect(settings.getByRole("region", { name: "Appearance" }).getByRole("radio", { name: "System" })).toBeChecked();
-  await expect(settings.getByLabel("Refresh interval")).toHaveValue("10");
-  await expect(settings.getByLabel("Refresh interval").locator("option")).toHaveText(["5 s", "10 s", "30 s", "60 s"]);
+  await expect(settings.getByLabel("Refresh interval", { exact: true })).toHaveValue("10");
+  await expect(settings.getByLabel("Refresh interval", { exact: true }).locator("option")).toHaveText(["5 s", "10 s", "30 s", "60 s"]);
+  // Every Workbench timer sits in Refresh (#1770), each with its own values and default.
+  const timers = { "Refresh interval": ["10", ["5 s", "10 s", "30 s", "60 s"]], "Unread check interval": ["2", ["1 s", "2 s", "5 s", "10 s", "30 s"]], "Thumbnail refresh interval": ["5", ["2 s", "5 s", "10 s", "30 s"]], "Mark unread after quiet for": ["0", ["Off", "1 s", "3 s", "5 s", "10 s"]] };
+  const refresh = settings.getByRole("region", { name: "Refresh" });
+  await expect(refresh.getByRole("combobox")).toHaveCount(4);
+  for (const [index, [name, [value, options]]] of Object.entries(timers).entries()) {
+    await expect(refresh.getByRole("combobox").nth(index), name).toHaveAccessibleName(name);
+    await expect(settings.getByLabel(name, { exact: true }), name).toHaveValue(value);
+    await expect(settings.getByLabel(name, { exact: true }).locator("option"), name).toHaveText(options);
+  }
+  await expect(settings.getByLabel("Mark unread after quiet for").locator("option:checked")).toHaveText("Off");
+  await expect(settings.getByLabel("Unread check interval")).toHaveAccessibleDescription(/sidebar, the collapsed rail and the grid tile badges/);
+  for (const group of ["Sidebar", "Workbench grid"]) await expect(settings.getByRole("region", { name: group, exact: true }).getByRole("combobox")).toHaveCount(0);
   const switches = { "Auto-attach terminals": true, "Show Get started": true, "Show cell scope in sidebar": true, "Show terminal status in sidebar": true, "Show unread bytes": false, "Show search in sidebar": false, "Show Group by in sidebar": false, "Show search in grid": true, "Show Group by in grid": true };
   const keys = { "Auto-attach terminals": "kukeon-terminal-auto-attach", "Show Get started": "kukeon-get-started", "Show cell scope in sidebar": "kukeon-sidebar-show-scope", "Show terminal status in sidebar": "kukeon-sidebar-show-terminal-status", "Show unread bytes": "kukeon-show-unread-bytes", "Show search in sidebar": "kukeon-sidebar-show-search", "Show Group by in sidebar": "kukeon-sidebar-show-group-by", "Show search in grid": "kukeon-grid-show-search", "Show Group by in grid": "kukeon-grid-show-group-by" };
   await expect(settings.getByRole("region", { name: "Terminal" }).getByRole("switch")).toHaveCount(1);
@@ -6544,7 +6587,10 @@ test("Profile shows every setting in its groups with their defaults; each applie
   await page.keyboard.press("ArrowRight");
   await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
   await settings.getByLabel("Default Group by").selectOption("team");
-  await settings.getByLabel("Refresh interval").selectOption("30");
+  await settings.getByLabel("Refresh interval", { exact: true }).selectOption("30");
+  await settings.getByLabel("Unread check interval").selectOption("10");
+  await settings.getByLabel("Thumbnail refresh interval").selectOption("30");
+  await settings.getByLabel("Mark unread after quiet for").selectOption("3");
   for (const [index, name] of Object.keys(switches).entries()) {
     await settings.getByRole("switch", { name }).focus();
     await page.keyboard.press(index % 2 ? "Enter" : "Space");
@@ -6553,13 +6599,24 @@ test("Profile shows every setting in its groups with their defaults; each applie
   await page.reload();
   await expect(settings.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
   await expect(settings.getByLabel("Default Group by")).toHaveValue("team");
-  await expect(settings.getByLabel("Refresh interval")).toHaveValue("30");
+  await expect(settings.getByLabel("Refresh interval", { exact: true })).toHaveValue("30");
   for (const [name, on] of Object.entries(switches)) await expect(settings.getByRole("switch", { name }), name).toHaveAttribute("aria-checked", String(!on));
-  expect(await page.evaluate(() => [localStorage.getItem("kukeon-cell-list-style"), localStorage.getItem("kukeon-default-group-by"), localStorage.getItem("kukeon-refresh-seconds")])).toEqual(["default", "team", "30"]);
-  // An interval outside the offered values reads as 10 s.
-  await page.evaluate(() => localStorage.setItem("kukeon-refresh-seconds", "7"));
+  await expect(settings.getByLabel("Unread check interval")).toHaveValue("10");
+  await expect(settings.getByLabel("Thumbnail refresh interval")).toHaveValue("30");
+  await expect(settings.getByLabel("Mark unread after quiet for")).toHaveValue("3");
+  expect(await page.evaluate(() => ["kukeon-cell-list-style", "kukeon-default-group-by", "kukeon-refresh-seconds", "kukeon-unread-poll-seconds", "kukeon-grid-screen-seconds", "kukeon-unread-quiet-seconds"].map(key => localStorage.getItem(key)))).toEqual(["default", "team", "30", "10", "30", "3"]);
+  // Off is a value: choosing it stores 0, which reads back as Off.
+  await settings.getByLabel("Mark unread after quiet for").selectOption({ label: "Off" });
+  expect(await page.evaluate(() => localStorage.getItem("kukeon-unread-quiet-seconds"))).toBe("0");
   await page.reload();
-  await expect(settings.getByLabel("Refresh interval")).toHaveValue("10");
+  await expect(settings.getByLabel("Mark unread after quiet for")).toHaveValue("0");
+  // An interval outside the offered values, or garbage, reads as the default.
+  await page.evaluate(() => { localStorage.setItem("kukeon-refresh-seconds", "7"); localStorage.setItem("kukeon-unread-poll-seconds", "3"); localStorage.setItem("kukeon-grid-screen-seconds", "soon"); localStorage.setItem("kukeon-unread-quiet-seconds", "2"); });
+  await page.reload();
+  await expect(settings.getByLabel("Refresh interval", { exact: true })).toHaveValue("10");
+  await expect(settings.getByLabel("Unread check interval")).toHaveValue("2");
+  await expect(settings.getByLabel("Thumbnail refresh interval")).toHaveValue("5");
+  await expect(settings.getByLabel("Mark unread after quiet for")).toHaveValue("0");
   expect(await page.evaluate(stored => stored.map(key => localStorage.getItem(key)), Object.values(keys))).toEqual(Object.keys(keys).map(name => String(!switches[name])));
 });
 
@@ -7910,7 +7967,8 @@ async function tick(page, activity) {
 test("unread output marks a cell in the sidebar, rail and grid once quiet, and reading it clears the mark", async ({ page }) => {
   await page.clock.install();
   await mock(page, shellContainers);
-  await defaultStyle(page);
+  // The quiet wait this test exercises is a Profile choice; Off is the default (#1770).
+  await defaultStyle(page, { "kukeon-unread-quiet-seconds": "3" });
   const dev = "dev/shared/services/api";
   const prod = "prod/shared/services/api";
   const counts = { [dev]: counters(100), [prod]: counters(200) };
@@ -7928,7 +7986,7 @@ test("unread output marks a cell in the sidebar, rail and grid once quiet, and r
   await expect(page.locator(".has-unread")).toHaveCount(0);
   await expect(page.locator(".cell-tile-unread")).toHaveCount(0);
 
-  // Output still arriving does not mark the cell; once quiet for three seconds it does.
+  // Output still arriving does not mark the cell; once quiet for the chosen three seconds it does.
   counts[dev] = counters(1329, 1200);
   await tick(page, activity);
   await expect(devRow).not.toHaveClass(/has-unread/);
@@ -8001,6 +8059,44 @@ test("unread output marks a cell in the sidebar, rail and grid once quiet, and r
   await expect(prodRow).toHaveClass(/has-unread/);
 });
 
+test("with nothing stored the first new byte marks a cell, and the mark pulses unless motion is reduced", async ({ page }) => {
+  await page.clock.install();
+  await mock(page, shellContainers);
+  await defaultStyle(page);
+  const dev = "dev/shared/services/api";
+  const counts = { [dev]: counters(100), "prod/shared/services/api": counters(100) };
+  const activity = await mockActivity(page, counts);
+  await page.goto(server.url);
+  await expect.poll(async () => Object.keys(await storedMarkers(page)).length).toBe(2);
+  const cells = page.getByRole("navigation", { name: "Cell navigation" });
+  const devRow = cells.getByRole("link", { name: /^Open dev \/ shared \/ services \/ api/ });
+  const prodRow = cells.getByRole("link", { name: /^Open prod \/ shared \/ services \/ api/ });
+  // Mark unread after quiet for is Off: output that is still arriving marks the cell.
+  counts[dev] = counters(101, 0);
+  await tick(page, activity);
+  await expect(devRow).toHaveClass(/has-unread/);
+  // Every unread mark pulses; only opacity and box-shadow move, and nothing else animates.
+  const animation = locator => locator.evaluate(element => getComputedStyle(element).animationName);
+  const devTile = grid(page).locator(`.cell-tile[data-scope='${cellKey(dev)}']`);
+  expect(await animation(devRow.locator(".unread-dot"))).toBe("unread-pulse");
+  expect(await animation(devTile.locator(".unread-dot"))).toBe("unread-pulse");
+  expect(await animation(prodRow.locator(".state-dot"))).toBe("none");
+  const keyframes = await page.evaluate(() => Object.fromEntries([...document.styleSheets].flatMap(sheet => [...sheet.cssRules]).filter(rule => rule instanceof CSSKeyframesRule && rule.name.startsWith("unread-")).map(rule => [rule.name, [...rule.cssRules].flatMap(frame => [...frame.style])])));
+  expect(Object.keys(keyframes).sort()).toEqual(["unread-glyph-pulse", "unread-pulse", "unread-ring-pulse"]);
+  for (const properties of Object.values(keyframes)) for (const property of properties) expect(property).toMatch(/^(opacity|box-shadow)$/);
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  const rail = page.getByRole("navigation", { name: "Cell shortcuts" });
+  const devDot = rail.getByRole("link", { name: /^Open dev \/ shared \/ services \/ api .*unread output$/ });
+  expect(await animation(devDot.locator(".state-dot"))).toBe("unread-ring-pulse");
+  expect(await animation(rail.getByRole("link", { name: /^Open prod / }).locator(".state-dot"))).toBe("none");
+  // Reduced motion leaves the static mark.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await animation(devDot.locator(".state-dot"))).toBe("none");
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  expect(await animation(devRow.locator(".unread-dot"))).toBe("none");
+  await expect(devRow.locator(".unread-dot")).toBeVisible();
+});
+
 test("activity is polled only on Workbench routes while the tab is visible, one request at a time, and markers of gone cells are pruned", async ({ page }) => {
   await page.clock.install();
   await seed(page, { [seenKey]: JSON.stringify({ [cellKey("dev/shared/services/gone")]: { startedAt: runOne, bytes: 5 }, [cellKey("dev/shared/services/api")]: { startedAt: runOne, bytes: 1 } }) });
@@ -8047,6 +8143,8 @@ test("activity is polled only on Workbench routes while the tab is visible, one 
 
 test("agent style rolls unread output up to agents, and Show unread bytes adds the amount", async ({ page }) => {
   await page.clock.install();
+  // scratch is still busy: with a 3 s quiet wait it stays unmarked.
+  await seed(page, { "kukeon-unread-quiet-seconds": "3" });
   await mock(page, path => shellContainers(path) ?? agentInventory(path));
   const at = cell => `dev/shared/services/${cell}`;
   const counts = { [at("dev-0")]: counters(100), [at("dev-1")]: counters(100), [at("pm-0")]: counters(100), [at("scratch")]: counters(100), "prod/shared/services/dev-9": counters(100) };

@@ -1007,6 +1007,16 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
 .rail-agent-glyph.has-unread { box-shadow: inset 0 0 0 2px var(--accent); }
 .badge.cell-tile-unread { display: inline-flex; align-items: center; gap: 5px; color: var(--text); border-color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge.cell-tile-unread .unread-dot { margin-left: 0; }
+/* The unread mark breathes (#1770): a slow opacity cycle on the dot, and on the rail a fade of the accent ring alone,
+   so the cell's own state colour stays still. Only opacity and box-shadow move, never size or layout, and the low
+   point keeps the mark visible. Reduced motion leaves the static mark. */
+.unread-dot { animation: unread-pulse 1.8s ease-in-out infinite; }
+.rail-cell.has-unread .state-dot { animation: unread-ring-pulse 1.8s ease-in-out infinite; }
+.rail-agent-glyph.has-unread { animation: unread-glyph-pulse 1.8s ease-in-out infinite; }
+@keyframes unread-pulse { 50% { opacity: .45; } }
+@keyframes unread-ring-pulse { 50% { box-shadow: 0 0 0 2px var(--sidebar), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent); } }
+@keyframes unread-glyph-pulse { 50% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .unread-dot, .rail-cell.has-unread .state-dot, .rail-agent-glyph.has-unread { animation: none; } }
 /* Drift diff of a Config-made cell (#1768): the stored cell beside its fresh render, in the out-of-sync box. Rows sit
    in one grid so both sides stay aligned when a long line wraps; below the phone breakpoint the left column stacks
    above the right one. Changed lines carry a -/+ marker, the tint only repeats it. */
