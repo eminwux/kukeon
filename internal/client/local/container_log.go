@@ -35,9 +35,9 @@ import (
 )
 
 // ReadContainerLog implements kukeonv1.Client (issue #1537). It resolves the
-// stream through LogContainer — so the not-found errors and the
-// capture-vs-shim-log choice are LogContainer's — and reads one bounded
-// chunk of it. kukeond serves the RPC through this method, and the
+// stream with resolveContainerStream — the same file LogContainer reports,
+// with the same not-found errors — and reads one bounded chunk of it,
+// decoding an asciicast recording to its terminal output (issue #1783). kukeond serves the RPC through this method, and the
 // KUKEON_NO_DAEMON path calls it directly, so `kuke log` has one code path.
 //
 // req.Stream "supervisor" reads the terminal supervisor's log instead (issue
@@ -69,20 +69,75 @@ func (c *Client) readContainerLogStream(
 			kukeonv1.ContainerLogStreamTerminal, kukeonv1.ContainerLogStreamSupervisor,
 		)
 	}
-	located, err := c.LogContainer(ctx, doc)
+	located, err := c.resolveContainerStream(doc)
 	if err != nil {
 		return kukeonv1.ContainerLogResult{}, err
 	}
-	path := located.HostCapturePath
-	if path == "" {
-		path = located.HostLogPath
+	if located.format == containerlog.FormatAsciicast {
+		return readContainerLogFile(located.path, req, containerlog.ReadAsciicast)
 	}
-	if path == "" {
-		return kukeonv1.ContainerLogResult{}, fmt.Errorf(
-			"%w: no stream path resolved for container %q", errdefs.ErrContainerLogUnavailable, doc.Metadata.Name,
-		)
+	return readContainerLogFile(located.path, req, containerlog.Read)
+}
+
+// containerStream is a container's output stream as resolved on the host:
+// the file and the format it holds.
+type containerStream struct {
+	path       string
+	format     string // containerlog.FormatRaw or containerlog.FormatAsciicast
+	attachable bool
+}
+
+// resolveContainerStream finds the output stream of the container doc names.
+// The format comes from the file chosen, never from its bytes: a runtime log
+// may begin with a JSON object that passes an asciicast header test.
+//
+//   - Attachable: capture.cast (asciicast) when it exists; otherwise the raw
+//     capture a container started before issue #1783 still writes, when it
+//     exists; otherwise capture.cast, so a missing-file error names the file
+//     the container will write.
+//   - Any other container: the runtime shim's log (raw).
+func (c *Client) resolveContainerStream(doc v1beta1.ContainerDoc) (containerStream, error) {
+	internal, _, err := apischeme.NormalizeContainer(doc)
+	if err != nil {
+		return containerStream{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
-	return readContainerLogFile(path, req)
+	res, err := c.ctrl.GetContainer(internal)
+	if err != nil {
+		return containerStream{}, err
+	}
+	if !res.ContainerExists {
+		return containerStream{}, errdefs.ErrContainerNotFound
+	}
+	return pickContainerStream(c.ctrl.RunPath(), res.Container.Spec), nil
+}
+
+// pickContainerStream is resolveContainerStream's choice for a container
+// whose spec is known.
+func pickContainerStream(runPath string, spec intmodel.ContainerSpec) containerStream {
+	if !spec.Attachable {
+		return containerStream{
+			path: fs.ContainerLogPath(
+				runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+			),
+			format: containerlog.FormatRaw,
+		}
+	}
+	cast := fs.ContainerCapturePath(runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID)
+	if !isNotExist(cast) {
+		return containerStream{path: cast, format: containerlog.FormatAsciicast, attachable: true}
+	}
+	raw := fs.ContainerRawCapturePath(runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID)
+	if !isNotExist(raw) {
+		return containerStream{path: raw, format: containerlog.FormatRaw, attachable: true}
+	}
+	return containerStream{path: cast, format: containerlog.FormatAsciicast, attachable: true}
+}
+
+// isNotExist reports whether path is known not to exist. Any other stat
+// error counts as existing, so the read that follows reports it.
+func isNotExist(path string) bool {
+	_, err := os.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // readSupervisorLog reads the terminal supervisor's log of the container doc
@@ -105,7 +160,7 @@ func (c *Client) readSupervisorLog(
 	if err != nil {
 		return kukeonv1.ContainerLogResult{}, err
 	}
-	return readContainerLogFile(path, req)
+	return readContainerLogFile(path, req, containerlog.Read)
 }
 
 // supervisorLogPath resolves the host path of an Attachable container's
@@ -144,8 +199,9 @@ func supervisorLogPath(runPath string, spec intmodel.ContainerSpec) (string, err
 // and keeping permission errors testable with errors.Is(err, fs.ErrPermission).
 func readContainerLogFile(
 	path string, req kukeonv1.ContainerLogRequest,
+	read func(string, kukeonv1.ContainerLogRequest) (kukeonv1.ContainerLogResult, error),
 ) (kukeonv1.ContainerLogResult, error) {
-	result, err := containerlog.Read(path, req)
+	result, err := read(path, req)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return kukeonv1.ContainerLogResult{Source: path}, fmt.Errorf(

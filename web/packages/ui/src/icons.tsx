@@ -25,6 +25,9 @@ const glyphs = {
   terminal: <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5" /><path d="M12.5 15H17" /></>,
   // Exec (#1432): a bare shell prompt, without the terminal glyph's window frame.
   exec: <><path d="m5 7 6 5-6 5" /><path d="M13 17.5h6.5" /></>,
+  // Replay (#1783): a counter-clockwise arrow around a play triangle; pause for its player.
+  replay: <><path d="M4 12a8 8 0 1 0 2.34-5.66" /><path d="M4 4v5h5" /><path d="M10.5 9.5v5l4-2.5Z" /></>,
+  pause: <><path d="M8.5 6v12" /><path d="M15.5 6v12" /></>,
   // Manage, the resource side of the view switch: two sliders.
   manage: <><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9" /><circle cx="15" cy="7.5" r="2" /><circle cx="9" cy="16.5" r="2" /></>,
   create: <path d="M12 5v14M5 12h14" />,

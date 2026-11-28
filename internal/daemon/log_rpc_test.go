@@ -69,7 +69,7 @@ func TestLogContainer_ContainerNotFound_RPCSurfacesSentinel(t *testing.T) {
 }
 
 func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
-	const wantPath = "/opt/kukeon/default/default/default/cellA/work/tty/terminals/main/capture.raw"
+	const wantPath = "/opt/kukeon/default/default/default/cellA/work/tty/terminals/main/capture.cast"
 	core := &logClientFake{result: kukeonv1.LogContainerResult{HostCapturePath: wantPath}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
@@ -174,7 +174,7 @@ func (c *containerLogClientFake) ReadContainerLog(
 
 func TestReadContainerLog_RPCForwardsDocRequestAndResult(t *testing.T) {
 	core := &containerLogClientFake{result: kukeonv1.ContainerLogResult{
-		Source: "/opt/kukeon/r/s/st/c/work/tty/terminals/main/capture.raw",
+		Source: "/opt/kukeon/r/s/st/c/work/tty/terminals/main/capture.cast",
 		Data:   []byte("$ \xff"), Start: 4, Next: 7, Size: 7,
 	}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)

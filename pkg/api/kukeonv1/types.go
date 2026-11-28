@@ -843,10 +843,11 @@ type LogContainerReply struct {
 //     append stdout/stderr to HostLogPath via cio.LogFile.
 type LogContainerResult struct {
 	// HostCapturePath is the host path of the per-container sbsh capture
-	// file. Inside the container the same inode is reachable at
-	// /run/kukeon/tty/terminals/main/capture.raw via the tty directory bind
-	// mount. Set only
-	// when the target container has Attachable=true.
+	// file: the asciicast recording capture.cast, or the raw capture.raw of a
+	// container started before issue #1783 that has not restarted since.
+	// Inside the container the same inode is reachable under
+	// /run/kukeon/tty/terminals/main/ via the tty directory bind mount. Set
+	// only when the target container has Attachable=true.
 	HostCapturePath string
 
 	// HostLogPath is the host path of the per-container log file written
@@ -894,16 +895,27 @@ const (
 
 // ContainerLogResult is one bounded chunk of a container's output stream.
 //
-// Unlike DaemonLogResult, Data is raw bytes, verbatim: an sbsh capture is a
-// terminal byte stream (escape sequences, prompts without a trailing
-// newline, non-UTF-8 input), so nothing is held back waiting for a newline
-// and nothing is re-encoded.
+// Start, Next and Size are always byte offsets into the file read. What Data
+// holds depends on the file's format, which kukeond knows from the file it
+// resolved (issue #1783):
+//
+//   - A raw stream (a non-Attachable container's runtime log, the raw capture
+//     of a container started before #1783, a supervisor log) is returned
+//     verbatim: unlike DaemonLogResult, nothing is held back waiting for a
+//     newline and nothing is re-encoded.
+//   - An asciicast recording (capture.cast) is returned decoded: Data is the
+//     terminal output of the whole event lines in [Start, Next). A line still
+//     being written is held back until it is complete, a line longer than
+//     MaxBytes is still returned whole, and Data may be empty while Next
+//     advances (a chunk of headers and resize events). Output that is not
+//     valid UTF-8 does not survive the recording's JSON encoding.
 type ContainerLogResult struct {
 	// Source is the daemon-side path of the stream read (informational).
 	// It is also set when the stream file does not exist, so callers can
 	// name the missing path.
 	Source string
-	// Data is the chunk's bytes, exactly as stored.
+	// Data is the chunk's bytes: as stored for a raw stream, the decoded
+	// terminal output for an asciicast recording.
 	Data []byte
 	// Start is the byte offset of Data's first byte in the stream.
 	Start int64
@@ -932,6 +944,93 @@ type ReadContainerLogArgs struct {
 // ReadContainerLogReply is the wire reply for ReadContainerLog.
 type ReadContainerLogReply struct {
 	Result ContainerLogResult
+	Err    *APIError
+}
+
+// ---- Recording ----
+
+// Recording formats (issue #1783). An Attachable container's capture is an
+// asciicast v2 recording; one started before #1783 that has not restarted
+// since still writes a raw capture, which has no timing.
+const (
+	RecordingFormatAsciicast = "asciicast"
+	RecordingFormatRaw       = "raw"
+)
+
+// ContainerRecording lists the retained segments of an Attachable
+// container's terminal recording — the capture sbsh rotates and prunes —
+// oldest first, the live segment last. Format is known from the file kukeond
+// resolved, never sniffed from its bytes. A container with no output yet has
+// no segments.
+type ContainerRecording struct {
+	Format   string
+	Segments []RecordingSegment
+}
+
+// RecordingSegment is one retained segment of a recording, as listed.
+type RecordingSegment struct {
+	// Seq orders segments: lower is older. The live segment carries the
+	// sequence number it keeps when sbsh rotates it, so after a rotation the
+	// same Seq names a closed segment.
+	Seq uint64
+	// Size is the stored size in bytes (the gzip size of a compressed
+	// segment) when it was listed. A live segment grows.
+	Size int64
+	// Compressed reports that the stored bytes are gzip.
+	Compressed bool
+	// Live reports the segment sbsh is still appending to.
+	Live bool
+}
+
+// RecordingSegmentRequest selects a byte range of one segment's stored
+// bytes. Offset is a byte offset into the stored (possibly compressed) bytes;
+// MaxBytes has ReadContainerLog's default and bounds
+// (ContainerLogDefaultMaxBytes, ContainerLogMaxBytes).
+type RecordingSegmentRequest struct {
+	Seq      uint64
+	Offset   int64
+	MaxBytes int
+}
+
+// RecordingSegmentResult is one bounded chunk of a segment's bytes, as
+// stored: kukeond neither decompresses nor parses them.
+//
+// Live is false once the segment has rotated, which is how a client
+// following the live segment by offset learns of the rotation: it then
+// re-reads the segment, now closed and possibly compressed, from 0. An Offset
+// beyond Size returns no data and leaves Next at Offset.
+type RecordingSegmentResult struct {
+	Data       []byte
+	Start      int64
+	Next       int64
+	Size       int64
+	More       bool
+	Compressed bool
+	Live       bool
+}
+
+// ListContainerRecordingArgs is the wire request for ListContainerRecording.
+type ListContainerRecordingArgs struct {
+	Doc v1beta1.ContainerDoc
+}
+
+// ListContainerRecordingReply is the wire reply for ListContainerRecording.
+type ListContainerRecordingReply struct {
+	Result ContainerRecording
+	Err    *APIError
+}
+
+// ReadContainerRecordingSegmentArgs is the wire request for
+// ReadContainerRecordingSegment.
+type ReadContainerRecordingSegmentArgs struct {
+	Doc     v1beta1.ContainerDoc
+	Request RecordingSegmentRequest
+}
+
+// ReadContainerRecordingSegmentReply is the wire reply for
+// ReadContainerRecordingSegment.
+type ReadContainerRecordingSegmentReply struct {
+	Result RecordingSegmentResult
 	Err    *APIError
 }
 

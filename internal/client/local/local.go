@@ -1429,7 +1429,9 @@ func guardAttachableTaskLiveness(container intmodel.Container) error {
 // model:
 //
 //   - Attachable containers are sbsh-wrapped, so stdout/stderr land in
-//     the sbsh capture file at HostCapturePath (current behavior).
+//     the sbsh capture file at HostCapturePath: the asciicast recording,
+//     or the raw capture of a container started before issue #1783 (see
+//     resolveContainerStream).
 //   - Non-Attachable containers (including kukeond) have the runtime
 //     shim write stdout/stderr to HostLogPath via cio.LogFile. The
 //     file is shim-owned; kuke just hands the path back so `kuke log`
@@ -1437,32 +1439,14 @@ func guardAttachableTaskLiveness(container intmodel.Container) error {
 //
 // Bytes never traverse this RPC — the caller opens the returned path.
 func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
-	internal, _, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.LogContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.GetContainer(internal)
+	stream, err := c.resolveContainerStream(doc)
 	if err != nil {
 		return kukeonv1.LogContainerResult{}, err
 	}
-	if !res.ContainerExists {
-		return kukeonv1.LogContainerResult{}, errdefs.ErrContainerNotFound
+	if stream.attachable {
+		return kukeonv1.LogContainerResult{HostCapturePath: stream.path}, nil
 	}
-	spec := res.Container.Spec
-	if spec.Attachable {
-		return kukeonv1.LogContainerResult{
-			HostCapturePath: fs.ContainerCapturePath(
-				c.ctrl.RunPath(),
-				spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
-			),
-		}, nil
-	}
-	return kukeonv1.LogContainerResult{
-		HostLogPath: fs.ContainerLogPath(
-			c.ctrl.RunPath(),
-			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
-		),
-	}, nil
+	return kukeonv1.LogContainerResult{HostLogPath: stream.path}, nil
 }
 
 // resolveAttachable normalizes doc, looks up the container, and returns

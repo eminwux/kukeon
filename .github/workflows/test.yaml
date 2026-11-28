@@ -92,8 +92,10 @@ jobs:
                 *) lint=true ;;
               esac
               case "$f" in
-                # This workflow and its caller: run everything.
-                .github/workflows/test.yaml|.github/workflows/edge.yaml)
+                # This workflow: run everything. Its caller, edge.yaml, is not
+                # listed: a pull request run never executes it, and on main
+                # every job runs anyway, so a change to it is only linted (#1804).
+                .github/workflows/test.yaml)
                   lint=true go=true e2e=true webui=true harnesses=true installer=true onboarding=true ;;
                 # Makefile holds the recipes of the Go, web UI and installer jobs.
                 Makefile)

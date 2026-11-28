@@ -175,7 +175,8 @@ func TestContainerFileLayout(t *testing.T) {
 		{"main terminal dir", fs.ContainerMainTerminalDir(run, r, sp, st, c, co), base + "/tty/terminals/main"},
 		{"terminal dir", fs.ContainerTerminalDir(run, r, sp, st, c, co, "t2"), base + "/tty/terminals/t2"},
 		{"socket", fs.ContainerSocketPath(run, r, sp, st, c, co), base + "/tty/terminals/main/control.sock"},
-		{"capture", fs.ContainerCapturePath(run, r, sp, st, c, co), base + "/tty/terminals/main/capture.raw"},
+		{"capture", fs.ContainerCapturePath(run, r, sp, st, c, co), base + "/tty/terminals/main/capture.cast"},
+		{"raw capture", fs.ContainerRawCapturePath(run, r, sp, st, c, co), base + "/tty/terminals/main/capture.raw"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/containerlog"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	kfs "github.com/eminwux/kukeon/internal/util/fs"
@@ -35,7 +36,7 @@ import (
 func TestReadContainerLogFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "capture")
 
-	res, err := readContainerLogFile(path, kukeonv1.ContainerLogRequest{})
+	res, err := readContainerLogFile(path, kukeonv1.ContainerLogRequest{}, containerlog.Read)
 	if !errors.Is(err, errdefs.ErrContainerLogUnavailable) || !strings.Contains(err.Error(), path) {
 		t.Fatalf("missing: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestReadContainerLogFile(t *testing.T) {
 	if err = os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res, err = readContainerLogFile(path, kukeonv1.ContainerLogRequest{})
+	res, err = readContainerLogFile(path, kukeonv1.ContainerLogRequest{}, containerlog.Read)
 	if err != nil || !bytes.Equal(res.Data, content) || res.Source != path {
 		t.Fatalf("read: %+v %v", res, err)
 	}
@@ -59,10 +60,58 @@ func TestReadContainerLogFile(t *testing.T) {
 		if err = os.Chmod(path, 0); err != nil {
 			t.Fatal(err)
 		}
-		_, err = readContainerLogFile(path, kukeonv1.ContainerLogRequest{})
+		_, err = readContainerLogFile(path, kukeonv1.ContainerLogRequest{}, containerlog.Read)
 		if !errors.Is(err, fs.ErrPermission) || kukeonv1.KindFromError(err) != "PermissionDenied" {
 			t.Fatalf("permission: %v", err)
 		}
+	}
+}
+
+// TestPickContainerStream pins which file, and which format, `kuke log` and
+// the web log view read for a container (issue #1783). The format follows the
+// file chosen: a runtime log whose first line is a JSON object stays raw.
+func TestPickContainerStream(t *testing.T) {
+	runPath := t.TempDir()
+	attachable := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r", SpaceName: "s", StackName: "st", CellName: "c", Attachable: true,
+	}
+	plain := attachable
+	plain.Attachable = false
+	cast := kfs.ContainerCapturePath(runPath, "r", "s", "st", "c", "work")
+	raw := kfs.ContainerRawCapturePath(runPath, "r", "s", "st", "c", "work")
+	runtimeLog := kfs.ContainerLogPath(runPath, "r", "s", "st", "c", "work")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(name string, spec intmodel.ContainerSpec, wantPath, wantFormat string) {
+		t.Helper()
+		got := pickContainerStream(runPath, spec)
+		if got.path != wantPath || got.format != wantFormat || got.attachable != spec.Attachable {
+			t.Fatalf("%s: got %+v, want %s (%s)", name, got, wantPath, wantFormat)
+		}
+	}
+
+	if filepath.Base(cast) != "capture.cast" || filepath.Base(raw) != "capture.raw" ||
+		filepath.Dir(cast) != filepath.Dir(raw) {
+		t.Fatalf("capture paths %s, %s", cast, raw)
+	}
+	check("nothing written yet", attachable, cast, containerlog.FormatAsciicast)
+	write(raw, "$ ls\r\n")
+	check("started before the change", attachable, raw, containerlog.FormatRaw)
+	write(cast, `{"version":2,"width":80,"height":24}`+"\n")
+	check("restarted since", attachable, cast, containerlog.FormatAsciicast)
+
+	write(runtimeLog, `{"version":2,"width":80,"height":24}`+"\n"+`[0.1,"o","x"]`+"\n")
+	check("runtime log starting with JSON", plain, runtimeLog, containerlog.FormatRaw)
+	res, err := readContainerLogFile(runtimeLog, kukeonv1.ContainerLogRequest{}, containerlog.Read)
+	if err != nil || !strings.HasPrefix(string(res.Data), `{"version":2`) {
+		t.Fatalf("runtime log: %q, %v", res.Data, err)
 	}
 }
 

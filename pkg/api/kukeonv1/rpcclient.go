@@ -722,6 +722,36 @@ func (c *UnixClient) LogContainer(
 	return reply.Result, nil
 }
 
+// ListContainerRecording implements Client (issue #1783).
+func (c *UnixClient) ListContainerRecording(
+	ctx context.Context, doc v1beta1.ContainerDoc,
+) (ContainerRecording, error) {
+	args := &ListContainerRecordingArgs{Doc: doc}
+	reply := &ListContainerRecordingReply{}
+	if err := c.call(ctx, MethodListContainerRecording, args, reply); err != nil {
+		return ContainerRecording{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// ReadContainerRecordingSegment implements Client (issue #1783).
+func (c *UnixClient) ReadContainerRecordingSegment(
+	ctx context.Context, doc v1beta1.ContainerDoc, req RecordingSegmentRequest,
+) (RecordingSegmentResult, error) {
+	args := &ReadContainerRecordingSegmentArgs{Doc: doc, Request: req}
+	reply := &ReadContainerRecordingSegmentReply{}
+	if err := c.call(ctx, MethodReadContainerRecordingSegment, args, reply); err != nil {
+		return RecordingSegmentResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ReadContainerLog implements Client (issue #1537).
 func (c *UnixClient) ReadContainerLog(
 	ctx context.Context,

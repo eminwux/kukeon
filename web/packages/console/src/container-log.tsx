@@ -6,7 +6,8 @@ import { apiPath } from "./routes";
 import { terminalThemeFor, type Theme } from "./terminal";
 import { apiFetch } from "@kukeon/api-client";
 
-// One chunk of GET …/containers/{name}/log (issue #1620). data is base64 of the raw stream bytes.
+// One chunk of GET …/containers/{name}/log (issue #1620). data is base64 of the output: the bytes as
+// stored for a runtime log, the decoded output of an attachable container's recording (#1783).
 type LogChunk = { source?: string; data?: string | null; start?: number; next?: number; size?: number; truncated?: boolean; more?: boolean };
 const TAIL_BYTES = 256 * 1024;
 const FOLLOW_INTERVAL_MS = 2000;
@@ -37,6 +38,9 @@ export function ContainerLog({ scope, container, attachable, live, cellState, re
   const cursor = useRef<number | null>(null);
   const busy = useRef(false);
   const again = useRef(false);
+  // Whether any output has been written since the last tail read: a recording holds a header before
+  // its first output, so its size alone does not say whether there is anything to show.
+  const shown = useRef(false);
   const [empty, setEmpty] = useState(false);
   const [omitted, setOmitted] = useState(false);
   const [error, setError] = useState<Failure>();
@@ -56,11 +60,11 @@ export function ContainerLog({ scope, container, attachable, live, cellState, re
         if (chunk === null) { setEmpty(true); return; }
         // The file is smaller than the cursor: truncated, replaced or rotated. Start over from the tail.
         if (!tail && (chunk.size ?? 0) < cursor.current!) { cursor.current = null; continue; }
-        if (tail) { term.current?.reset(); setOmitted(!!chunk.truncated); }
+        if (tail) { term.current?.reset(); setOmitted(!!chunk.truncated); shown.current = false; }
         const bytes = decode(chunk.data);
-        if (bytes.length) term.current?.write(bytes);
+        if (bytes.length) { term.current?.write(bytes); shown.current = true; }
         cursor.current = chunk.next ?? cursor.current;
-        setEmpty((chunk.size ?? 0) === 0);
+        setEmpty(!shown.current && !chunk.truncated && !chunk.more);
         if (!chunk.more) return;
       }
     } catch (failure) {

@@ -38,7 +38,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const testHostCapture = "/opt/kukeon/r1/s1/st1/c1/work/tty/terminals/main/capture.raw"
+const testHostCapture = "/opt/kukeon/r1/s1/st1/c1/work/tty/terminals/main/capture.cast"
 
 // fakeClient stubs the methods `kuke log` calls. With readContainerLogFn
 // unset, ReadContainerLog answers like a kukeond that predates the RPC, so
