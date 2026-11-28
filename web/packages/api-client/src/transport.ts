@@ -23,11 +23,19 @@ function sameOriginSocket(base: string, path: string): string {
   return url.href;
 }
 
+// trimTrailingSlashes drops every trailing "/" of base. A loop rather than /\/+$/, whose backtracking
+// is quadratic on a long run of slashes followed by another character (CodeQL js/polynomial-redos).
+function trimTrailingSlashes(base: string): string {
+  let end = base.length;
+  while (end > 0 && base[end - 1] === "/") end--;
+  return base.slice(0, end);
+}
+
 // createTransport fills in what an override leaves out: the page's fetch (looked up per call, so a
 // test or polyfill that replaces window.fetch later still applies) and a same-origin WebSocket URL
 // under the transport's own apiBase.
 export function createTransport(options: Partial<Transport> = {}): Transport {
-  const apiBase = (options.apiBase ?? defaultApiBase).replace(/\/+$/, "");
+  const apiBase = trimTrailingSlashes(options.apiBase ?? defaultApiBase);
   return {
     apiBase,
     fetch: options.fetch ?? ((input, init) => window.fetch(input, init)),

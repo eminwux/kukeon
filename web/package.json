@@ -13,7 +13,7 @@
     "apps/local"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspaces && node scripts/check-published-esm.mjs",
     "typecheck": "npm run typecheck --workspaces",
     "test:unit": "npm run test:unit --workspaces --if-present"
   },

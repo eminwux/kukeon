@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publishes @kukeon/api-client, @kukeon/ui and @kukeon/console to the npm
 # registry at one version under one dist-tag (#1753): release.yaml at the
-# release version under `latest`, edge.yaml at x.y.z-edge.<sha> under `edge`.
+# release version under `latest`, edge.yaml at x.y.z-edge.g<sha> under `edge`.
 #
 #   web/scripts/publish.sh <version> <dist-tag> [--dry-run]
 #

@@ -24,7 +24,7 @@ form into their own ignored `dist/`: ES modules, type declarations and, for
 
 The release workflow publishes the three packages to npmjs.com at the release
 version under the `latest` dist-tag; the edge workflow publishes every merge to
-main as `x.y.z-edge.<sha>` under the `edge` dist-tag (`web/scripts/publish.sh`).
+main as `x.y.z-edge.g<sha>` under the `edge` dist-tag (`web/scripts/publish.sh`).
 Both read an npm automation token for the `@kukeon` scope from the `NPM_TOKEN`
 repository secret.
 
