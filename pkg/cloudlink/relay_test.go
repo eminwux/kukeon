@@ -44,6 +44,7 @@ func testRelay(t *testing.T) (*Relay, *httptest.Server, string) {
 		t.Fatalf("NewRelay: %v", err)
 	}
 	relay.Authenticate = HeaderAuthenticator(testUserHeader)
+	relay.Authorize = AllowAnyHost
 	srv := httptest.NewUnstartedServer(relay.Handler())
 	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
 	relay.ConfigureTLS(srv.TLS)
@@ -214,6 +215,61 @@ func TestRelayProxiesHTTPAndWebSocketOverLink(t *testing.T) {
 	host.mu.Unlock()
 	if users != "alice,bob" {
 		t.Fatalf("host saw users %q, want alice,bob", users)
+	}
+}
+
+func TestRelayRefusesUserNotAuthorizedForHost(t *testing.T) {
+	relay, srv, ca := testRelay(t)
+	alice := enrollTestHost(t, relay, srv, ca)
+	bob := enrollTestHost(t, relay, srv, ca)
+	relay.Authorize = func(user, hostID string) error {
+		if user == "alice" && hostID == alice.HostID {
+			return nil
+		}
+		return errors.New("user " + user + " may not reach host " + hostID)
+	}
+	for _, cred := range []*Credential{alice, bob} {
+		pub, _ := cred.IdentityPublicKey()
+		startTestClient(t, cred, &hostHandler{pub: pub, hostID: cred.HostID})
+		waitConnected(t, relay, cred.HostID)
+	}
+
+	if status, body := relayGet(t, srv, HostsPath+alice.HostID+"/api/hello", "alice"); status != http.StatusOK {
+		t.Fatalf("GET to the user's own host = %d %q, want 200", status, body)
+	}
+	status, body := relayGet(t, srv, HostsPath+bob.HostID+"/api/hello", "alice")
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("GET to another user's host = %d %q, want 403 forbidden", status, body)
+	}
+	// An unauthorized user cannot tell an offline host from a forbidden one.
+	if status, _ = relayGet(t, srv, HostsPath+"h-unknown/api/hello", "alice"); status != http.StatusForbidden {
+		t.Fatalf("GET to an unauthorized offline host = %d, want 403", status)
+	}
+
+	dialer := websocket.Dialer{TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig}
+	wsURL := "wss://" + strings.TrimPrefix(srv.URL, "https://") + HostsPath + bob.HostID + "/api/echo"
+	conn, resp, err := dialer.Dial(wsURL, http.Header{testUserHeader: {"alice"}})
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("a WebSocket to another user's host was accepted")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("WebSocket to another user's host: resp=%v err=%v, want 403", resp, err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestRelayWithoutAuthorizeRefusesProxy(t *testing.T) {
+	relay, srv, ca := testRelay(t)
+	relay.Authorize = nil
+	cred := enrollTestHost(t, relay, srv, ca)
+	pub, _ := cred.IdentityPublicKey()
+	startTestClient(t, cred, &hostHandler{pub: pub, hostID: cred.HostID})
+	waitConnected(t, relay, cred.HostID)
+
+	status, body := relayGet(t, srv, HostsPath+cred.HostID+"/api/hello", "alice")
+	if status != http.StatusNotImplemented || !strings.Contains(body, "no_authorizer") {
+		t.Fatalf("GET through a relay without Authorize = %d %q, want 501 no_authorizer", status, body)
 	}
 }
 

@@ -58,7 +58,10 @@
 //
 // [Relay] is a complete, in-memory relay: enrollment, the link endpoint and
 // a user-facing proxy. Tests use it, and a production relay can embed it or
-// follow it.
+// follow it. The proxy authenticates the user ([Relay.Authenticate]) and
+// then authorizes that user for the host the request names
+// ([Relay.Authorize]); an embedder supplies both, and the relay serves no
+// proxied request without them.
 package cloudlink
 
 import (

@@ -79,8 +79,19 @@ const (
 // requires a host's client certificate.
 type Relay struct {
 	// Authenticate returns the user a proxied request belongs to; an error
-	// refuses it with 401. Required to serve the proxy.
+	// refuses it with 401. It only identifies the user: whether that user may
+	// reach the host the request names is Authorize's decision. Required to
+	// serve the proxy.
 	Authenticate func(*http.Request) (string, error)
+	// Authorize decides whether user may reach host hostID, the <host>
+	// segment of /v1/hosts/<host>/api/...; an error refuses the request with
+	// 403 before the relay opens a stream to the host. A user who reaches a
+	// host drives its whole /api, cell attach and exec included, so a
+	// production relay must check here that the host belongs to the user.
+	// Required to serve the proxy: without it the relay refuses every
+	// proxied request rather than let any authenticated user reach every
+	// linked host.
+	Authorize func(user, hostID string) error
 	// LinkURL is the wss:// URL enrolled hosts are told to dial. When empty
 	// it is derived from the enrollment request's Host.
 	LinkURL string
@@ -357,6 +368,10 @@ func (r *Relay) proxyHandler(w http.ResponseWriter, req *http.Request) {
 		writeRelayError(w, http.StatusNotImplemented, "no_authenticator", "the relay has no user authentication")
 		return
 	}
+	if r.Authorize == nil {
+		writeRelayError(w, http.StatusNotImplemented, "no_authorizer", "the relay has no host authorization")
+		return
+	}
 	escaped := strings.TrimPrefix(req.URL.EscapedPath(), HostsPath)
 	hostID, rest, found := strings.Cut(escaped, "/")
 	if hostID == "" || !found || !strings.HasPrefix(rest, "api/") {
@@ -366,6 +381,12 @@ func (r *Relay) proxyHandler(w http.ResponseWriter, req *http.Request) {
 	user, err := r.Authenticate(req)
 	if err != nil {
 		writeRelayError(w, http.StatusUnauthorized, "unauthenticated", err.Error())
+		return
+	}
+	// Authorize before looking the host up, so a user cannot tell which
+	// hosts they may not reach are online.
+	if err = r.Authorize(user, hostID); err != nil {
+		writeRelayError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
 	r.mu.Lock()
@@ -417,3 +438,7 @@ func HeaderAuthenticator(name string) func(*http.Request) (string, error) {
 		return user, nil
 	}
 }
+
+// AllowAnyHost is an Authorize for tests: every user may reach every host.
+// Never use it in production.
+func AllowAnyHost(string, string) error { return nil }

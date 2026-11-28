@@ -110,6 +110,7 @@ func TestKuke_CloudLink_ThroughReferenceRelay(t *testing.T) {
 		t.Fatalf("NewRelay: %v", err)
 	}
 	relay.Authenticate = cloudlink.HeaderAuthenticator(cloudUserHeader)
+	relay.Authorize = cloudlink.AllowAnyHost
 	srv := httptest.NewUnstartedServer(relay.Handler())
 	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
 	relay.ConfigureTLS(srv.TLS)
