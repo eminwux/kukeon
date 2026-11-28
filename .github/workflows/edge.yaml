@@ -386,14 +386,18 @@ jobs:
   # @kukeon/console at x.y.z-edge.g<short>, where x.y.z is the release the
   # commit descends from, under the `edge` dist-tag; `latest` stays on the
   # release. Gated on the tests like the channel itself, beside the publish
-  # job. Publishing needs the NPM_TOKEN repository secret, an npm automation
-  # token for the @kukeon scope; until the operator adds it the job warns and
-  # publishes nothing, so main stays green. The g before the short SHA (as in
-  # git describe) keeps an all-digit SHA with a leading 0 valid semver.
+  # job. There is no token: each package lists this workflow (edge.yaml) as an
+  # npm trusted publisher allowed to run `npm publish`, and npm authenticates
+  # the job through GitHub's OIDC token (id-token: write) and attaches
+  # provenance. The g before the short SHA (as in git describe) keeps an
+  # all-digit SHA with a leading 0 valid semver.
   npm:
     name: Publish the edge npm packages
     needs: [version, test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
       SHORT: ${{ needs.version.outputs.short }}
@@ -409,14 +413,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships npm 10.
+      - name: Upgrade npm
+        run: npm install -g npm@^11.21.0 --no-audit --no-fund && npm --version
+
       - name: Publish under the edge dist-tag
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN is not set; the edge npm packages are not published"
-            exit 0
-          fi
           base="${VERSION#v}"
           base="${base%%-*}"
           cd web

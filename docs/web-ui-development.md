@@ -25,8 +25,10 @@ form into their own ignored `dist/`: ES modules, type declarations and, for
 The release workflow publishes the three packages to npmjs.com at the release
 version under the `latest` dist-tag; the edge workflow publishes every merge to
 main as `x.y.z-edge.g<sha>` under the `edge` dist-tag (`web/scripts/publish.sh`).
-Both read an npm automation token for the `@kukeon` scope from the `NPM_TOKEN`
-repository secret.
+Neither uses an npm token: each package lists `release.yaml` and `edge.yaml` as
+npm trusted publishers, and npm authenticates the publish job through GitHub's
+OIDC token (`id-token: write`) and attaches provenance. Trusted publishing needs
+npm 11.5.1 or newer, so both jobs upgrade npm before publishing.
 
 ## Cell lifecycle actions
 
