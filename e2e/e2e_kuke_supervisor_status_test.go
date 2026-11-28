@@ -360,7 +360,8 @@ func TestKuke_AttachableWorkloadExit(t *testing.T) {
 
 // assertContainerFileLayout walks an attachable container's host directory
 // and checks it holds exactly the files of issue #1721's layout. A rotated
-// capture segment (capture.raw.NNNNNN[.gz]) is allowed next to capture.raw.
+// capture segment (capture.cast.NNNNNN[.gz]) is allowed next to the
+// asciicast recording capture.cast (issue #1783).
 func assertContainerFileLayout(t *testing.T, containerDir string) {
 	t.Helper()
 	want := map[string]bool{
@@ -371,7 +372,7 @@ func assertContainerFileLayout(t *testing.T, containerDir string) {
 		"tty/terminals":                    false,
 		"tty/terminals/main":               false,
 		"tty/terminals/main/control.sock":  false,
-		"tty/terminals/main/capture.raw":   false,
+		"tty/terminals/main/capture.cast":  false,
 		"tty/terminals/main/terminal.json": false,
 	}
 	walkErr := filepath.WalkDir(containerDir, func(path string, _ iofs.DirEntry, err error) error {
@@ -386,7 +387,7 @@ func assertContainerFileLayout(t *testing.T, containerDir string) {
 			want[rel] = true
 			return nil
 		}
-		if strings.HasPrefix(rel, "tty/terminals/main/capture.raw.") {
+		if strings.HasPrefix(rel, "tty/terminals/main/capture.cast.") {
 			return nil
 		}
 		t.Errorf("unexpected file in container directory: %s", rel)

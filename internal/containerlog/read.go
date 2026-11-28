@@ -14,14 +14,22 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package containerlog reads bounded, byte-exact chunks of a container's
-// output stream for the ReadContainerLog RPC (issue #1537).
+// Package containerlog reads bounded chunks of a container's output stream
+// for the ReadContainerLog RPC (issues #1537, #1783).
 //
 // It is deliberately separate from internal/daemonlog: kukeond's own log is
 // line-oriented text, so that reader holds back partial lines and replaces
-// invalid UTF-8. A container stream may be an sbsh capture — a raw terminal
-// byte stream with escape sequences, prompts that never end in a newline and
-// arbitrary bytes — so this reader returns exactly the bytes on disk.
+// invalid UTF-8. A container stream is one of two formats, which the caller
+// knows from the file it resolved, never from the file's bytes:
+//
+//   - Raw (Read): a non-Attachable container's runtime log, or the raw sbsh
+//     capture of a container started before issue #1783 — a terminal byte
+//     stream with escape sequences, prompts that never end in a newline and
+//     arbitrary bytes. The reader returns exactly the bytes on disk.
+//   - Asciicast (ReadAsciicast): the asciicast v2 recording kuketty selects
+//     for every Attachable container. The reader returns the terminal output
+//     the recording holds, decoded with sbsh's decoder, while every offset it
+//     reports stays a byte offset into the file.
 package containerlog
 
 import (
@@ -38,13 +46,7 @@ import (
 // so callers can test them with errors.Is (os.ErrNotExist,
 // os.ErrPermission).
 func Read(path string, req kukeonv1.ContainerLogRequest) (kukeonv1.ContainerLogResult, error) {
-	limit := int64(req.MaxBytes)
-	if limit <= 0 {
-		limit = kukeonv1.ContainerLogDefaultMaxBytes
-	}
-	if limit > kukeonv1.ContainerLogMaxBytes {
-		limit = kukeonv1.ContainerLogMaxBytes
-	}
+	limit := clampLimit(req.MaxBytes)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -84,6 +86,18 @@ func Read(path string, req kukeonv1.ContainerLogRequest) (kukeonv1.ContainerLogR
 	res.Next = start + int64(len(buf))
 	res.More = res.Next < size
 	return res, nil
+}
+
+// clampLimit applies the ReadContainerLog bounds to a requested MaxBytes.
+func clampLimit(maxBytes int) int64 {
+	limit := int64(maxBytes)
+	if limit <= 0 {
+		limit = kukeonv1.ContainerLogDefaultMaxBytes
+	}
+	if limit > kukeonv1.ContainerLogMaxBytes {
+		limit = kukeonv1.ContainerLogMaxBytes
+	}
+	return limit
 }
 
 func readAt(f *os.File, start, n int64) ([]byte, error) {

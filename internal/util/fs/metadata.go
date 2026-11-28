@@ -231,14 +231,25 @@ func containerSocketShortID(realmName, spaceName, stackName, cellName, container
 }
 
 // ContainerCapturePath returns the host-side path of the main terminal's sbsh
-// capture file. It is the host-visible peer of the in-container path
-// /run/kukeon/tty/terminals/main/capture.raw (ctr.AttachableCapturePath);
-// both resolve to the same inode because the per-container tty directory is
-// bind-mounted into the container. `kuke log` tails this path.
+// capture file, the asciicast recording. It is the host-visible peer of the
+// in-container path /run/kukeon/tty/terminals/main/capture.cast
+// (ctr.AttachableCapturePath); both resolve to the same inode because the
+// per-container tty directory is bind-mounted into the container. `kuke log`
+// reads this path.
 func ContainerCapturePath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
 		ContainerMainTerminalDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
 		consts.KukeonContainerCaptureFile,
+	)
+}
+
+// ContainerRawCapturePath returns the host-side path of the raw capture a
+// kuketty that predates issue #1783 writes, beside ContainerCapturePath. A
+// container started before the change keeps writing it until its next start.
+func ContainerRawCapturePath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerMainTerminalDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerRawCaptureFile,
 	)
 }
 

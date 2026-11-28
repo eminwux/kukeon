@@ -36,7 +36,7 @@ Kukeon keeps its own authoritative state on disk, rooted at a single **run path*
 │   │                       └── terminals/
 │   │                           └── main/
 │   │                               ├── control.sock  (`kuke attach` dials it)
-│   │                               ├── capture.raw   (the terminal's output; `kuke log`)
+│   │                               ├── capture.cast  (the terminal's asciicast recording; `kuke log`)
 │   │                               └── terminal.json (sbsh's terminal metadata)
 │   └── kuke-system/                            (system realm; structure identical to above)
 │       ├── healthreports/                      (system realm only)

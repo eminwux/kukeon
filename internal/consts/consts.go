@@ -227,12 +227,21 @@ const (
 	// KukeonContainerCaptureFile is the basename of a terminal's sbsh capture
 	// file inside its terminal directory. sbsh writes the full tty byte
 	// stream — every byte the workload produced and every byte typed by an
-	// attached operator — into this file, in its default raw format (kukeon
-	// sets no other). `kuke log` tails the host path that resolves to the
-	// same inode as the in-container path
-	// /run/kukeon/tty/terminals/main/capture.raw (see
-	// ctr.AttachableCapturePath).
-	KukeonContainerCaptureFile = "capture.raw"
+	// attached operator — into this file as an asciicast v2 recording (a
+	// header line per segment and per run, then "o" output and "r" resize
+	// events), which kuketty selects for every Attachable container. `kuke
+	// log` reads the host path that resolves to the same inode as the
+	// in-container path /run/kukeon/tty/terminals/main/capture.cast (see
+	// ctr.AttachableCapturePath) and decodes it. Issue #1783.
+	KukeonContainerCaptureFile = "capture.cast"
+
+	// KukeonContainerRawCaptureFile is the basename of the capture a kuketty
+	// that predates issue #1783 writes: sbsh's raw format, the tty bytes
+	// unchanged. A container started before the change keeps writing it until
+	// its next start, so readers fall back to it when KukeonContainerCaptureFile
+	// does not exist yet. The two names keep the formats apart, so the format
+	// is known from the file name and never sniffed from its bytes.
+	KukeonContainerRawCaptureFile = "capture.raw"
 
 	// KukeonContainerLogFile is the basename of the per-container stdout/
 	// stderr log file written by the containerd runtime shim via cio.LogFile

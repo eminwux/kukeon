@@ -53,8 +53,15 @@ const (
 	attachableSocketPath = attachableMainTerminalDir + "/" + consts.KukeonContainerSocketFile
 
 	// attachableCapturePath is where sbsh writes the workload capture
-	// transcript. Mirrors ctr.AttachableCapturePath.
+	// transcript, in attachableCaptureFormat. Mirrors ctr.AttachableCapturePath.
 	attachableCapturePath = attachableMainTerminalDir + "/" + consts.KukeonContainerCaptureFile
+
+	// attachableCaptureFormat is the capture format kuketty selects for every
+	// Attachable container: asciicast v2, so the recording carries timing,
+	// resizes and run boundaries the web UI's Replay view plays back. Nothing
+	// in a cell manifest selects it, and it pairs with the ".cast" file name,
+	// which is how readers know the format (issue #1783).
+	attachableCaptureFormat = sbshapi.CaptureFormatAsciicast
 
 	// attachableSupervisorLogPath is the default in-container path of
 	// kuketty's own slog output, next to supervisor.json inside the tty bind
@@ -106,6 +113,7 @@ func buildTerminalSpec(
 		// derives a capture path from runPath + ID that would land outside the
 		// bind-mount, hiding the transcript from the host.
 		sbshbuilder.WithCaptureFile(attachableCapturePath),
+		sbshbuilder.WithCaptureFormat(attachableCaptureFormat),
 		// Spec.Prompt + Spec.SetPrompt are stamped from the cell's inline
 		// Tty.Prompt with no profile loader involved (#494): an empty prompt
 		// pairs with DisableSetPrompt(true) so a non-shell workload (nginx,

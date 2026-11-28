@@ -80,6 +80,9 @@ func TestBuildTerminalSpec_KukeonGroupSet(t *testing.T) {
 	if out.CaptureFile != attachableCapturePath {
 		t.Errorf("CaptureFile = %q, want %q", out.CaptureFile, attachableCapturePath)
 	}
+	if out.CaptureFormat != sbshapi.CaptureFormatAsciicast {
+		t.Errorf("CaptureFormat = %q, want %q", out.CaptureFormat, sbshapi.CaptureFormatAsciicast)
+	}
 	if out.CaptureMode.Perm() != 0o640 {
 		t.Errorf("CaptureMode = %v, want perm 0640", out.CaptureMode)
 	}
@@ -119,6 +122,9 @@ func TestBuildTerminalSpec_NoKukeonGroup(t *testing.T) {
 	}
 	if out.CaptureFile != attachableCapturePath {
 		t.Errorf("CaptureFile = %q, want %q", out.CaptureFile, attachableCapturePath)
+	}
+	if out.CaptureFormat != sbshapi.CaptureFormatAsciicast {
+		t.Errorf("CaptureFormat = %q, want %q", out.CaptureFormat, sbshapi.CaptureFormatAsciicast)
 	}
 	if out.CaptureMode.Perm() != 0 {
 		t.Errorf("CaptureMode perm = %#o, want 0 (no kukeon group)", out.CaptureMode.Perm())
@@ -281,7 +287,7 @@ func TestBuildTerminalSpec_MetadataDirAnchored(t *testing.T) {
 			if got, want := out.SocketFile, wantDir+"/control.sock"; got != want {
 				t.Errorf("SocketFile = %q, want %q", got, want)
 			}
-			if got, want := out.CaptureFile, wantDir+"/capture.raw"; got != want {
+			if got, want := out.CaptureFile, wantDir+"/capture.cast"; got != want {
 				t.Errorf("CaptureFile = %q, want %q", got, want)
 			}
 		})
@@ -391,6 +397,9 @@ func TestBuildTerminalSpec_AllTtyFieldsMap(t *testing.T) {
 	}
 	if out.CaptureFile != attachableCapturePath {
 		t.Errorf("CaptureFile = %q, want %q", out.CaptureFile, attachableCapturePath)
+	}
+	if out.CaptureFormat != sbshapi.CaptureFormatAsciicast {
+		t.Errorf("CaptureFormat = %q, want %q", out.CaptureFormat, sbshapi.CaptureFormatAsciicast)
 	}
 	if out.LogFile != wantLogFile {
 		t.Errorf("Tty.LogFile: LogFile = %q, want %q (override stamped verbatim)", out.LogFile, wantLogFile)

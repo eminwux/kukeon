@@ -525,7 +525,7 @@ func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
 // and exited before claiming the socket listener.
 //
 // The test seeds the tty dir with the #1721 layout — supervisor.log and
-// supervisor.json at the top, and under terminals/main/ the capture.raw,
+// supervisor.json at the top, and under terminals/main/ the capture.cast,
 // a rotated capture segment, sbsh's terminal.json and the create-temp half
 // of its atomic write, and the control socket — to lock the recursion
 // contract. When the test
@@ -545,7 +545,7 @@ func TestChownAttachableStaleChildren_CoversRestartLayout(t *testing.T) {
 	seedFiles := []string{
 		consts.KukeonContainerSupervisorLogFile,                                    // supervisor.log
 		consts.KukeonContainerSupervisorFile,                                       // supervisor.json
-		filepath.Join(terminalDir, consts.KukeonContainerCaptureFile),              // capture.raw
+		filepath.Join(terminalDir, consts.KukeonContainerCaptureFile),              // capture.cast
 		filepath.Join(terminalDir, consts.KukeonContainerCaptureFile+".000001.gz"), // sbsh rotated transcript
 		filepath.Join(terminalDir, consts.KukeonContainerTerminalFile),             // sbsh's atomic doc (#1721)
 		filepath.Join(terminalDir, ".terminal.json-12345.tmp"),                     // sbsh's atomic write tmp

@@ -843,10 +843,11 @@ type LogContainerReply struct {
 //     append stdout/stderr to HostLogPath via cio.LogFile.
 type LogContainerResult struct {
 	// HostCapturePath is the host path of the per-container sbsh capture
-	// file. Inside the container the same inode is reachable at
-	// /run/kukeon/tty/terminals/main/capture.raw via the tty directory bind
-	// mount. Set only
-	// when the target container has Attachable=true.
+	// file: the asciicast recording capture.cast, or the raw capture.raw of a
+	// container started before issue #1783 that has not restarted since.
+	// Inside the container the same inode is reachable under
+	// /run/kukeon/tty/terminals/main/ via the tty directory bind mount. Set
+	// only when the target container has Attachable=true.
 	HostCapturePath string
 
 	// HostLogPath is the host path of the per-container log file written
@@ -894,16 +895,27 @@ const (
 
 // ContainerLogResult is one bounded chunk of a container's output stream.
 //
-// Unlike DaemonLogResult, Data is raw bytes, verbatim: an sbsh capture is a
-// terminal byte stream (escape sequences, prompts without a trailing
-// newline, non-UTF-8 input), so nothing is held back waiting for a newline
-// and nothing is re-encoded.
+// Start, Next and Size are always byte offsets into the file read. What Data
+// holds depends on the file's format, which kukeond knows from the file it
+// resolved (issue #1783):
+//
+//   - A raw stream (a non-Attachable container's runtime log, the raw capture
+//     of a container started before #1783, a supervisor log) is returned
+//     verbatim: unlike DaemonLogResult, nothing is held back waiting for a
+//     newline and nothing is re-encoded.
+//   - An asciicast recording (capture.cast) is returned decoded: Data is the
+//     terminal output of the whole event lines in [Start, Next). A line still
+//     being written is held back until it is complete, a line longer than
+//     MaxBytes is still returned whole, and Data may be empty while Next
+//     advances (a chunk of headers and resize events). Output that is not
+//     valid UTF-8 does not survive the recording's JSON encoding.
 type ContainerLogResult struct {
 	// Source is the daemon-side path of the stream read (informational).
 	// It is also set when the stream file does not exist, so callers can
 	// name the missing path.
 	Source string
-	// Data is the chunk's bytes, exactly as stored.
+	// Data is the chunk's bytes: as stored for a raw stream, the decoded
+	// terminal output for an asciicast recording.
 	Data []byte
 	// Start is the byte offset of Data's first byte in the stream.
 	Start int64

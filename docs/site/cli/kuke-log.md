@@ -9,7 +9,7 @@ kuke logs <cell> [flags]      # alias
 
 `<cell>` is a positional argument. `--realm`, `--space`, and `--stack` all default to `default`, so for a cell in the default location you only need the cell name.
 
-By default, `kuke log` prints the current contents of the capture file and exits. Pass `-f`/`--follow` to tail until SIGINT.
+By default, `kuke log` prints the container's current output and exits. Pass `-f`/`--follow` to tail until SIGINT.
 
 ## Flags
 
@@ -26,9 +26,9 @@ Plus all [global flags](kuke.md).
 
 ## Behavior
 
-`kuke log` asks the daemon for the container's output stream — the sbsh capture of an attachable container, or the runtime log of any other — and prints the bytes exactly as stored, including terminal escape sequences and a trailing prompt with no newline. The bytes travel over the kukeond socket in bounded chunks, so `kuke log` needs only access to the socket (`KUKEON_HOST`), not to the host's `/opt/kukeon`: it works the same from a cell that mounts just the kukeond socket and the `kuke` binary. Without `-f`, it prints what's there and exits — useful for scripting and for checking on a container that has already terminated. With `-f`, it keeps polling for new bytes until you SIGINT (Ctrl-C) the command; if the stream is truncated or replaced, it starts again from the beginning of the new stream. Once it has printed output, `-f` also keeps following across a kukeond restart (`kuke daemon reset`, an upgrade): it prints nothing while the daemon is away, resumes from the same position when it is back, and gives up with `kukeond unreachable for 2m0s` after two minutes without a daemon.
+`kuke log` asks the daemon for the container's output stream — the sbsh capture of an attachable container, or the runtime log of any other — and prints the terminal output it holds, including escape sequences and a trailing prompt with no newline. A runtime log is printed byte for byte. An attachable container's capture is an asciicast v2 recording, `capture.cast` (a header line, then timed output and resize events, which the web UI's Replay view plays back); `kuke log` prints the output it records, not the JSON. The recording stores output as JSON text, so bytes that are not valid UTF-8 are not preserved; valid UTF-8, including a character the terminal received in two reads, is printed exactly. A container started before the recording format, and not restarted since, still writes the raw `capture.raw`, which `kuke log` prints byte for byte. The output travels over the kukeond socket in bounded chunks, so `kuke log` needs only access to the socket (`KUKEON_HOST`), not to the host's `/opt/kukeon`: it works the same from a cell that mounts just the kukeond socket and the `kuke` binary. Without `-f`, it prints what's there and exits — useful for scripting and for checking on a container that has already terminated. With `-f`, it keeps polling for new bytes until you SIGINT (Ctrl-C) the command; if the stream is truncated or replaced, it starts again from the beginning of the new stream. Once it has printed output, `-f` also keeps following across a kukeond restart (`kuke daemon reset`, an upgrade): it prints nothing while the daemon is away, resumes from the same position when it is back, and gives up with `kukeond unreachable for 2m0s` after two minutes without a daemon.
 
-`kuke log` shows the live capture only: when sbsh has rotated older output into closed segments, those are not reassembled.
+`kuke log` shows the live capture only: when sbsh has rotated older output into closed segments, those are not reassembled. The web UI's Replay view reads the whole recording.
 
 With `KUKEON_NO_DAEMON=true` (or an explicit `--run-path`), `kuke log` reads the same stream in-process from the host's `/opt/kukeon`. Against a kukeond too old to serve the chunked read, `kuke log` falls back to resolving the file's host path through the daemon and opening it directly, which again requires the host's `/opt/kukeon`.
 

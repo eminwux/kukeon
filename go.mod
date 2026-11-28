@@ -12,7 +12,7 @@ require (
 	github.com/containernetworking/cni v1.3.1
 	github.com/creack/pty v1.1.24
 	github.com/distribution/reference v0.6.0
-	github.com/eminwux/sbsh v0.15.0
+	github.com/eminwux/sbsh v0.16.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/jsimonetti/rtnetlink/v2 v2.0.1
 	github.com/opencontainers/go-digest v1.0.0

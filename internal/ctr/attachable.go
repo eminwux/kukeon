@@ -64,8 +64,8 @@ const (
 	AttachableSocketPath = AttachableMainTerminalDir + "/" + consts.KukeonContainerSocketFile
 
 	// AttachableCapturePath is the in-container path of the main terminal's
-	// capture transcript (sbsh's default raw format). The host peer is
-	// fs.ContainerCapturePath, which `kuke log` reads.
+	// capture transcript, an asciicast v2 recording (issue #1783). The host
+	// peer is fs.ContainerCapturePath, which `kuke log` reads.
 	AttachableCapturePath = AttachableMainTerminalDir + "/" + consts.KukeonContainerCaptureFile
 
 	// AttachableSupervisorLogPath is the default in-container path of the

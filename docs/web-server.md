@@ -1492,17 +1492,25 @@ route answers it 404, which the console treats as listing no features.
 returns one chunk of a container's output stream as `{ "source", "data",
 "start", "next", "size", "truncated", "more", "stream" }`. It reads the same stream as
 `kuke log`: the terminal capture of an attachable container, or the runtime
-log of any other container. The stream is found from the cell's
+log of any other container. `start`, `next` and `size` are byte offsets into
+that file. The stream is found from the cell's
 specification, so a stopped cell's last output can still be read.
 
 - `offset` defaults to `-1`, which reads the newest `maxBytes`. A byte offset
   reads forward from that point; pass the previous `next` to follow.
 - `maxBytes` defaults to 65536 and must be between 1 and 1048576. Any other
   `offset` or `maxBytes` is `invalid_request` (400).
-- `data` is the base64 encoding of the raw stream bytes (`null` for an empty
-  chunk). Nothing is held back waiting for a newline and nothing is
-  re-encoded, so a capture keeps its escape sequences and any bytes that are
-  not valid UTF-8.
+- `data` is base64 (`null` for an empty chunk). For a runtime log, a
+  supervisor log, or the raw capture of a container started before the
+  recording format, it is the bytes as stored: nothing is held back waiting
+  for a newline and nothing is re-encoded. An attachable container's capture
+  is an asciicast v2 recording (`capture.cast`), and `data` is the terminal
+  output of the whole event lines between `start` and `next`, decoded: escape
+  sequences are kept, bytes that are not valid UTF-8 are not. A line still
+  being written is held back until it is complete, a line longer than
+  `maxBytes` is still returned whole, a tail read (`offset=-1`) starts at the
+  first whole line, and a chunk of headers and resize events only has empty
+  `data` while `next` advances.
 - `truncated` means earlier output exists before `start`. `more` means
   output past `next` was already available. A `size` smaller than the
   caller's cursor means the stream was truncated or replaced; read the tail

@@ -717,7 +717,7 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 	// dir chown covers a fresh provision (MkdirAll just made the dir
 	// empty), but on a restart the dir already holds stale files from the
 	// prior run — supervisor.log (#599), and the terminals/main/ subtree
-	// with sbsh's capture.raw, terminal.json and its temp files (#672,
+	// with sbsh's capture.cast (or a pre-#1783 capture.raw), terminal.json and its temp files (#672,
 	// #1721) — all root-owned because the daemon wrote them. When the work image's resolved USER is non-root (e.g. claude:
 	// latest → 1000), kuketty inside the container then hits EACCES at
 	// openTerminalLogger trying to O_RDWR-reopen the stale root-owned
