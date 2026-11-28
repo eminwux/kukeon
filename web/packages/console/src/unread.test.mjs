@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyReadings, isMarked, nextMarker, parseActivity, parseMarkers, pruneMarkers, unreadBytes, unreadLabel, unreadQuietMs, unreadState } from "./unread.mjs";
+import { applyReadings, isMarked, leftCells, nextMarker, parseActivity, parseMarkers, pruneMarkers, readingCells, unreadBytes, unreadLabel, unreadQuietMs, unreadState } from "./unread.mjs";
 
 const run1 = "2026-11-26T10:00:00Z";
 const run2 = "2026-11-26T11:00:00Z";
@@ -49,6 +49,35 @@ test("a cell being read moves its marker to every reading and is never marked", 
   const { markers, changed } = applyReadings({ [key("a")]: stored }, { [key("a")]: reading(900) }, being);
   assert.deepEqual(markers[key("a")], { startedAt: run1, bytes: 900 });
   assert.deepEqual(changed, [key("a")]);
+});
+
+// #1777: the main cell screen and the side panel can each be reading a cell.
+test("more than one cell being read: each moves its marker and none is marked; the others stay unread", () => {
+  const stored = { [key("a")]: { startedAt: run1, bytes: 100 }, [key("b")]: { startedAt: run1, bytes: 200 }, [key("c")]: { startedAt: run1, bytes: 300 } };
+  const readings = { [key("a")]: reading(900), [key("b")]: reading(1000), [key("c")]: reading(1100) };
+  const being = new Set(readingCells([key("a"), key("b")]));
+  assert.deepEqual(unreadState(stored, readings, being), { [key("c")]: { unreadBytes: 800, marked: true } });
+  const { markers, changed } = applyReadings(stored, readings, being);
+  assert.deepEqual(markers[key("a")], { startedAt: run1, bytes: 900 });
+  assert.deepEqual(markers[key("b")], { startedAt: run1, bytes: 1000 });
+  assert.deepEqual(markers[key("c")], { startedAt: run1, bytes: 300 });
+  assert.deepEqual(changed.sort(), [key("a"), key("b")].sort());
+});
+
+test("readingCells drops empty keys and counts a cell shown in both views once", () => {
+  assert.deepEqual(readingCells([key("a"), null, key("a"), "", undefined, key("b")]), [key("a"), key("b")]);
+  assert.deepEqual(readingCells([null, null]), []);
+});
+
+test("leftCells: only a cell no view reads any more is left", () => {
+  // The panel closes on b while the main view keeps reading a: only b is left.
+  assert.deepEqual(leftCells([key("a"), key("b")], [key("a")]), [key("b")]);
+  // Opening the panel on b leaves nothing; nor does the panel switching to a, which the main view reads.
+  assert.deepEqual(leftCells([key("a")], [key("a"), key("b")]), []);
+  assert.deepEqual(leftCells([key("a"), key("b")], [key("a"), key("a")]), [key("b")]);
+  // Closing the panel and leaving the cell screen at once leaves both cells.
+  assert.deepEqual(leftCells([key("a"), key("b")], []).sort(), [key("a"), key("b")].sort());
+  assert.deepEqual(leftCells([], [key("a")]), []);
 });
 
 test("an unavailable cell is not marked and keeps its marker", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { applyReadings, markersKey, parseActivity, parseMarkers, pruneMarkers, unreadState, type Markers, type Readings, type Unread } from "./unread.mjs";
+import { applyReadings, leftCells, markersKey, parseActivity, parseMarkers, pruneMarkers, readingCells, unreadState, type Markers, type Readings, type Unread } from "./unread.mjs";
 import { apiFetch } from "@kukeon/api-client";
 
 export type { Unread } from "./unread.mjs";
@@ -60,21 +60,24 @@ async function readActivity(scopes: string[][], signal: AbortSignal): Promise<Re
 // quietMs is how long a terminal must be quiet before its new output marks the cell (Mark unread
 // after quiet for); 0 marks it on the first new byte.
 //
-// reading is the cell key whose terminal the operator is looking at: its session is the one shown, it
-// is attached, and the tab is visible. Every reading of that cell moves its marker to the terminal's
-// output count. When reading changes away from a cell, one immediate request reads that cell and moves
-// its marker, so output seen in the last seconds before leaving is not reported as unread; this is the
-// one request made whatever enabled and the tab's visibility say.
+// reading holds the cell keys whose terminals the operator is looking at, one per view (#1777): the main
+// cell screen's and the open side panel's active tab, each while its session is attached and the tab is
+// visible; an empty entry is a view that reads nothing. Every reading of those cells moves their markers
+// to the terminal's output count. When a cell stops being read in every view, one immediate request
+// reads that cell and moves its marker, so output seen in the last seconds before leaving is not
+// reported as unread; this is the one request made whatever enabled and the tab's visibility say.
 //
 // inventoryKeys are the keys of every cell of a complete inventory, or null while it is loading or
 // incomplete: markers of the cells not in it are pruned.
-export function useUnread(scopes: string[][], reading: string | null, enabled: boolean, inventoryKeys: string[] | null, pollMs: number, quietMs: number): Record<string, Unread> {
+export function useUnread(scopes: string[][], reading: (string | null)[], enabled: boolean, inventoryKeys: string[] | null, pollMs: number, quietMs: number): Record<string, Unread> {
   const stored = useSyncExternalStore(subscribe, () => markers);
   const [readings, setReadings] = useState<Readings>({});
   const [leaving, setLeaving] = useState<string[]>([]);
   const latest = useRef(scopes);
   latest.current = scopes;
-  const beingRead = useMemo(() => new Set([...(reading ? [reading] : []), ...leaving]), [reading, leaving]);
+  const readingKey = JSON.stringify(readingCells(reading));
+  const read = useMemo(() => JSON.parse(readingKey) as string[], [readingKey]);
+  const beingRead = useMemo(() => new Set([...read, ...leaving]), [read, leaving]);
   const beingReadRef = useRef(beingRead);
   beingReadRef.current = beingRead;
   // One request at a time: the polls and the leave readings share this chain.
@@ -134,25 +137,26 @@ export function useUnread(scopes: string[][], reading: string | null, enabled: b
   }, [scopesKey]);
 
   // Leaving a cell: read it once more and treat it as read until that reading lands.
-  const previous = useRef(reading);
+  const previous = useRef(read);
   useEffect(() => {
-    const left = previous.current;
-    previous.current = reading;
-    if (!left || left === reading) return;
-    let scope: string[];
-    try { scope = JSON.parse(left); } catch { return; }
-    setLeaving(old => old.includes(left) ? old : [...old, left]);
-    enqueue(async () => {
-      const signal = lifetime.current?.signal;
-      if (!signal || signal.aborted) return;
-      try {
-        const next = await readActivity([scope], signal);
-        if (!signal.aborted) apply(next, left);
-      } finally {
-        if (!signal.aborted) setLeaving(old => old.filter(key => key !== left));
-      }
-    });
-  }, [reading]);
+    const before = previous.current;
+    previous.current = read;
+    for (const left of leftCells(before, read)) {
+      let scope: string[];
+      try { scope = JSON.parse(left); } catch { continue; }
+      setLeaving(old => old.includes(left) ? old : [...old, left]);
+      enqueue(async () => {
+        const signal = lifetime.current?.signal;
+        if (!signal || signal.aborted) return;
+        try {
+          const next = await readActivity([scope], signal);
+          if (!signal.aborted) apply(next, left);
+        } finally {
+          if (!signal.aborted) setLeaving(old => old.filter(key => key !== left));
+        }
+      });
+    }
+  }, [read]);
 
   const inventoryId = inventoryKeys ? inventoryKeys.join("\n") : null;
   useEffect(() => {

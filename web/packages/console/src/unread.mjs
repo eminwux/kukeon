@@ -91,6 +91,20 @@ export function applyReadings(markers, readings, beingRead) {
   return { markers: next, changed };
 }
 
+// readingCells is the set of cells being read (#1777): every key of reading (one per view that shows an
+// attached session: the main cell screen, the open side panel's active tab), without empty keys and
+// duplicates, so a cell shown in both views is one entry.
+export function readingCells(reading) {
+  return [...new Set(reading.filter(Boolean))];
+}
+
+// leftCells are the cells that were being read and no longer are: each gets one last reading. A cell
+// still shown in another view has not been left.
+export function leftCells(previous, current) {
+  const now = new Set(current);
+  return [...new Set(previous)].filter(key => !now.has(key));
+}
+
 // unreadState is what each surface shows per cell: the unread bytes and whether the cell is marked. A
 // cell being read shows nothing, whatever its last reading said.
 export function unreadState(markers, readings, beingRead, quietMs = unreadQuietMs) {

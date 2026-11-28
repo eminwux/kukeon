@@ -682,8 +682,6 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--er
 .ask-majordomo.is-prominent { color: var(--accent); border-color: var(--accent); background: var(--selected); font-weight: 600; }
 td .ask-majordomo { margin-left: 8px; vertical-align: middle; }
 .status-ask { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding: 10px 12px; border: 1px solid var(--status-error-line); border-radius: 7px; background: var(--status-error-bg); color: var(--status-error); font-size: var(--font-md); }
-.terminal-docked { padding: 48px 24px; }
-.terminal-docked button { margin-top: 8px; }
 /* Health page (#1509). */
 .health-report-actions { display: flex; align-items: center; gap: 8px; }
 .health-sweeps, .health-findings { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }

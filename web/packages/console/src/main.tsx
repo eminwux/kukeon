@@ -266,10 +266,10 @@ async function readCellPresence(scope: string[]): Promise<boolean | null> {
 
 // cellTerminal (#/workspace/...) and cellRead (#/resource/...) share one mounted screen so switching
 // between them keeps the TerminalWorkspace, and therefore every attached session, alive.
-function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, autoAttach, operations, onLifecycleAction, dockedCells, onOpenDock, onChanged }: {
+function CellDetailsScreen({ title, view, scope, revision, inventory, manager, theme, autoAttach, operations, onLifecycleAction, inPanel, onOpenInPanel, onChanged }: {
   onChanged: () => void;
-  dockedCells: string[];
-  onOpenDock: () => void;
+  inPanel: boolean;
+  onOpenInPanel: (scope: string[]) => void;
   title: string;
   view: CellView;
   scope: string[] | null;
@@ -398,7 +398,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
       </div>
     </div>}
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
-      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} autoAttach={autoAttach} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} dockedCells={dockedCells} onOpenDock={onOpenDock} operation={operation} onLifecycleAction={onLifecycleAction} />
+      <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} autoAttach={autoAttach} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} inPanel={inPanel} onOpenInPanel={onOpenInPanel} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
     <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
   </div>;
@@ -464,8 +464,9 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const dock = useMajordomoDock(viewport, sidebarWidth);
   // The toast stack is a sibling of the shell, so the rendered dock width is published on the root.
   useLayoutEffect(() => { document.documentElement.style.setProperty("--majordomo-width", `${dock.effectiveWidth}px`); }, [dock.effectiveWidth]);
-  // Every majordomo cell is docked in the panel; their terminals never open in the cell screen.
-  const dockedCells = major.cells.map(row => JSON.stringify(row.scope));
+  // The side panel's cells (#1777). A cell in the panel opens in the main view too, over its own session.
+  const panelCells = major.panel.map(row => cellId(row.scope));
+  const openInPanel = useCallback((scope: string[]) => { major.add(cellId(scope)); dock.setOpen(true); }, [major.add, dock.setOpen]);
   // quiet records the row's state and leaves the toast to a batch's one summary (#1745).
   function recordOperation(scope: string[], operation: LifecycleFeedback, quiet = false) {
     const key = JSON.stringify(scope);
@@ -757,20 +758,24 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const cellView: CellView = isWorkspace ? "terminal" : "read";
   const cellTerminalActive = !!cellScreenScope && cellView === "terminal";
   screenCell.current = cellScreenScope ? JSON.stringify(cellScreenScope) : "";
-  // Unread terminal output (#1696). The cell being read is the open cell while its terminal screen is
-  // shown, the session on it is attached and the tab is visible; the polled cells are the ones the
-  // Workbench sidebar lists.
+  // Unread terminal output (#1696). A cell is being read while the tab is visible and its attached
+  // session is shown in the main cell screen, or is the active tab of the open side panel (#1777); the
+  // polled cells are the ones the Workbench sidebar lists.
   const tabVisible = useTabVisible();
   const openCell = cellTerminalActive && tabVisible && cellScreenScope ? cellId(cellScreenScope) : "";
   const shownContainer = openCell ? terminals.selection[openCell] : undefined;
-  const shownSession = openCell && !dockedCells.includes(openCell)
-    ? terminals.sessions.find(session => cellId(session.scope) === openCell && (!shownContainer || session.container === shownContainer))
+  const shownSession = openCell
+    ? terminals.sessions.find(session => session.view === "main" && cellId(session.scope) === openCell && (!shownContainer || session.container === shownContainer))
     : undefined;
-  const readingCell = shownSession?.state === "attached" ? openCell : null;
+  const panelCell = dock.open && tabVisible && major.active ? cellId(major.active.scope) : "";
+  const panelContainer = panelCell ? terminals.selection[panelCell] : undefined;
+  const panelSessions = panelCell ? terminals.sessions.filter(session => session.view === "panel" && cellId(session.scope) === panelCell) : [];
+  const panelSession = panelSessions.find(session => session.container === panelContainer) ?? panelSessions[0];
+  const readingCells = [shownSession?.state === "attached" ? openCell : null, panelSession?.state === "attached" ? panelCell : null];
   const allCells = inventory.data?.rows[3];
   const unreadScopes = useMemo(() => activeCells(allCells ?? [], cellScreenScope ?? undefined).map(row => row.scope), [allCells, cellScreenScope?.join("\n")]);
   const inventoryKeys = useMemo(() => inventory.data && !inventory.error && !inventory.data.failures.length ? (allCells ?? []).map(row => cellId(row.scope)) : null, [inventory.data, inventory.error, allCells]);
-  const unread = useUnread(unreadScopes, readingCell, view === "workbench", inventoryKeys, settings.unreadPollSeconds * 1000, settings.unreadQuietSeconds * 1000);
+  const unread = useUnread(unreadScopes, readingCells, view === "workbench", inventoryKeys, settings.unreadPollSeconds * 1000, settings.unreadQuietSeconds * 1000);
   const depth = titles.findIndex(title => title.toLowerCase() === route.view);
   const catalog = Object.keys(catalogTitles).includes(route.view);
   const images = route.view === "images";
@@ -856,8 +861,8 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{route.view === "workbench" && <a className="header-action page-heading-action" href={newAgentLink()}>New agent</a>}</div>}
-        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} autoAttach={settings.autoAttach} operations={operations} onLifecycleAction={runCellLifecycle} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} onChanged={() => setRevision(value => value + 1)} />
-        {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink()} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} dockedCells={dockedCells} onOpenDock={() => dock.setOpen(true)} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} screenSeconds={settings.gridScreenSeconds} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
+        <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} autoAttach={settings.autoAttach} operations={operations} onLifecycleAction={runCellLifecycle} inPanel={!!cellScreenScope && panelCells.includes(cellId(cellScreenScope))} onOpenInPanel={openInPanel} onChanged={() => setRevision(value => value + 1)} />
+        {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink()} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} screenSeconds={settings.gridScreenSeconds} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refreshes every {settings.refreshSeconds} s.</footer>
       </div>
     </main>

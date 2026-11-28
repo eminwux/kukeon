@@ -51,6 +51,7 @@ async function world(page, { cells = [], configs = [], reports = [], createError
       state.requests.push(`POST ${parts.slice(6).join("/")}`);
       const target = named(decodeURIComponent(parts[7]));
       if (parts[8] === "start" && target) { target.status = { state: "Ready" }; return route.fulfill({ json: { action: "start", cell: target.metadata.name } }); }
+      if (parts[8] === "stop" && target) { target.status = { state: "Stopped" }; return route.fulfill({ json: { action: "stop", cell: target.metadata.name } }); }
       return route.fulfill({ status: 404, json: { error: { code: "not_found", message: "cell not found" } } });
     }
     const leaf = body => route.fulfill({ json: body });
@@ -390,15 +391,72 @@ test("Majordomo dock never squeezes main below its floor and overlays the conten
   expect(await page.evaluate(() => localStorage.getItem("kukeon-majordomo-width"))).toBe("960");
 });
 
-test("majordomo's own cell screen points at the panel instead of opening a second terminal", async ({ page }) => {
+// #1777, A: a cell in the panel also opens in the main view, each view over its own WebSocket.
+const resizes = socket => socket.messages.filter(message => typeof message === "string" && JSON.parse(message).type === "resize");
+const mainTools = page => page.locator(".cell-terminal-tools");
+test("majordomo's own cell screen attaches it too: two sessions, each detached, reconnected and sized on its own", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("kukeon-majordomo-open", "true"));
   const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo()] });
   await page.goto(`${server.url}#/workspace/default/default/default/majordomo`);
   const workspace = page.getByRole("region", { name: "Terminal workspace" });
-  await expect(workspace).toContainText("This cell's terminal is docked in the Majordomo panel.");
-  expect(state.sockets).toEqual([]);
-  await workspace.getByRole("button", { name: "Open the Majordomo panel" }).click();
   await expect(connection(page)).toContainText("Attached");
-  expect(state.sockets).toHaveLength(1);
+  await expect(mainTools(page).locator(".terminal-connection-state")).toHaveClass(/attached/);
+  await expect(workspace).not.toContainText("docked");
+  await expect(workspace.locator(".xterm")).toBeVisible();
+  await expect.poll(() => state.sockets.map(socket => socket.url)).toEqual([attachPath("majordomo"), attachPath("majordomo")]);
+  // The cell is in the panel already: its screen offers no Open in side panel, and keeps Exec and its lifecycle controls.
+  await expect(mainTools(page).getByRole("button", { name: "Open in side panel" })).toHaveCount(0);
+  await expect(mainTools(page).getByRole("button", { name: "Exec", exact: true })).toBeVisible();
+  // Each view sends its size when it attaches.
+  await expect.poll(() => state.sockets.every(socket => resizes(socket).length > 0)).toBe(true);
+
+  // Detach in the panel closes the panel's session only.
+  await panel(page).getByRole("button", { name: "Detach majordomo" }).click();
+  await expect(connection(page)).toContainText("Detached");
+  await expect.poll(() => state.sockets.filter(socket => socket.closed)).toHaveLength(1);
+  const main = state.sockets.find(socket => !socket.closed);
+  await expect(mainTools(page).locator(".terminal-connection-state")).toHaveClass(/attached/);
+  await panel(page).getByRole("button", { name: "Reconnect majordomo" }).click();
+  await expect(connection(page)).toContainText("Attached");
+  await expect.poll(() => state.sockets).toHaveLength(3);
+  const side = state.sockets[2];
+  expect(main.closed).toBe(false);
+  // Detach in the main view leaves the panel's session alone.
+  await mainTools(page).getByRole("button", { name: "Detach" }).click();
+  await expect.poll(() => main.closed).toBe(true);
+  expect(side.closed).toBe(false);
+  await expect(connection(page)).toContainText("Attached");
+  await mainTools(page).getByRole("button", { name: "Attach" }).click();
+  await expect.poll(() => state.sockets).toHaveLength(4);
+  const mainAgain = state.sockets[3];
+  await expect(mainTools(page).locator(".terminal-connection-state")).toHaveClass(/attached/);
+
+  // Taking focus sends the size again even when it did not change, so the view in use sets it; the
+  // other view keeps working and shows no error.
+  await expect.poll(() => resizes(side).length).toBeGreaterThan(0);
+  const sideBefore = resizes(side).length;
+  await panel(page).locator(".xterm").click();
+  await expect.poll(() => resizes(side).length).toBeGreaterThan(sideBefore);
+  await expect.poll(() => resizes(mainAgain).length).toBeGreaterThan(0);
+  const mainBefore = resizes(mainAgain).length;
+  await workspace.locator(".xterm").click();
+  await expect.poll(() => resizes(mainAgain).length).toBeGreaterThan(mainBefore);
+  expect(JSON.parse(resizes(mainAgain).at(-1))).toEqual(expect.objectContaining({ cols: expect.any(Number), rows: expect.any(Number) }));
+  // Opening the panel again makes its terminal the shown one: it sends its size too.
+  const reopened = resizes(side).length;
+  await panel(page).getByRole("button", { name: "Collapse majordomo panel" }).click();
+  await page.getByRole("button", { name: "Show majordomo panel" }).click();
+  await expect.poll(() => resizes(side).length).toBeGreaterThan(reopened);
+  await expect(connection(page)).toContainText("Attached");
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  await expect(workspace.getByRole("alert")).toHaveCount(0);
+
+  // A lifecycle action interrupts the cell's sessions in both views.
+  await page.locator(".cell-page-title-row").getByRole("button", { name: "Stop", exact: true }).click();
+  await expect.poll(() => [side.closed, mainAgain.closed]).toEqual([true, true]);
+  await expect(connection(page)).toContainText("Cell is Stopped");
+  await expect(workspace).toContainText("Cell is Stopped");
 });
 
 test("Ask majordomo pastes one unsubmitted bracketed paste carrying the cell's scoped identity and state", async ({ page }) => {
@@ -532,10 +590,11 @@ const reports = [
   },
 ];
 
-// #1630, item H: every majordomo cell is docked in the panel, one tab each.
+// #1630, item H: every majordomo cell is in the panel by default, one tab each; #1777: any other cell can
+// be added, any cell removed.
 const attachPath = name => `/api/realms/default/spaces/default/stacks/default/cells/${name}/containers/agent/attach`;
 const majordomoCell = (name, configName, createdAt) => cell(name, "Ready", { ...majordomoLabels, "kukeon.io/config": configName }, createdAt ? { createdAt } : {});
-const tabs = page => panel(page).getByRole("tablist", { name: "Majordomo cells" }).getByRole("tab");
+const tabs = page => panel(page).getByRole("tablist", { name: "Panel cells" }).getByRole("tab");
 const bracketed = socket => socket.messages.filter(message => Buffer.isBuffer(message) && message.toString().includes("\x1b[200~"));
 
 test("each majordomo cell is a tab ordered by creation; switching keeps every session and Ask pastes into the active one", async ({ page }) => {
@@ -584,12 +643,15 @@ test("each majordomo cell is a tab ordered by creation; switching keeps every se
   expect(bracketed(state.sockets[1])).toHaveLength(0);
   expect(state.sockets).toHaveLength(2);
 
-  // Every docked cell's own screen points at the panel instead of opening a second terminal.
-  for (const name of ["assistant-b", "majordomo"]) {
+  // A panel cell's own screen opens a second terminal for it, over its own WebSocket (#1777); the
+  // panel's sessions stay open.
+  for (const [index, name] of ["assistant-b", "majordomo"].entries()) {
     await page.goto(`${server.url}#/workspace/default/default/default/${name}`);
-    await expect(page.getByRole("region", { name: "Terminal workspace" })).toContainText("This cell's terminal is docked in the Majordomo panel.");
+    await expect(page.locator(".cell-terminal-tools .terminal-connection-state")).toHaveClass(/attached/);
+    await expect.poll(() => state.sockets.length).toBe(3 + index);
+    expect(state.sockets.at(-1).url).toBe(attachPath(name));
   }
-  expect(state.sockets).toHaveLength(2);
+  expect(state.sockets.map(socket => socket.closed)).toEqual([false, false, false, false]);
 
   // The choice survives a reload.
   await page.reload();
@@ -620,27 +682,196 @@ test("Add majordomo offers only the harness configs no cell was created from and
   await expect(page.getByRole("region", { name: "Majordomo", exact: true }).locator(".majordomo-count")).toHaveText("2");
 });
 
-for (const [width, height] of [[1440, 900], [390, 844]]) test(`three majordomo tabs fit the panel at ${width}×${height} without scrolling the page sideways`, async ({ page }) => {
+const cellKey = name => JSON.stringify([...scope, name]);
+const membership = value => ({ key: "kukeon-panel-cells", value: JSON.stringify(value) });
+for (const [width, height] of [[1440, 900], [390, 844]]) test(`four tabs, two majordomo and two other cells, fit the panel at ${width}×${height} without scrolling the page sideways`, async ({ page }) => {
   await page.setViewportSize({ width, height });
-  await page.addInitScript(() => localStorage.setItem("kukeon-majordomo-open", "true"));
-  const configs = [...teamConfigs(), config("kuke-majordomo-codex-with-a-long-name", majordomoLabels)];
-  await world(page, { configs, cells: [
+  const stored = membership({ added: [cellKey("api"), cellKey("frontend-with-a-rather-long-cell-name")], removed: [] });
+  await page.addInitScript(item => { localStorage.setItem("kukeon-majordomo-open", "true"); localStorage.setItem(item.key, item.value); }, stored);
+  await world(page, { configs: teamConfigs(), cells: [
     majordomoCell("majordomo", "kuke-majordomo-claude", "2026-11-01T10:00:00Z"),
     majordomoCell("assistant-b", "assistant-b", "2026-11-02T10:00:00Z"),
-    majordomoCell("kuke-majordomo-codex-with-a-long-name", "kuke-majordomo-codex-with-a-long-name", "2026-11-03T10:00:00Z"),
+    cell("api", "Ready"),
+    cell("frontend-with-a-rather-long-cell-name", "Ready"),
   ] });
   await page.goto(`${server.url}#/resources`);
   await expect(panel(page)).toBeVisible();
-  await expect(tabs(page)).toHaveCount(3);
+  // Majordomo cells first, by Config; then the added cells, by name, in the order added.
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^assistant-b/, /^api/, /^frontend-with-a-rather-long-cell-name/]);
+  await expect(tabs(page).nth(3)).toHaveAttribute("title", /^default \/ default \/ default \/ frontend-with-a-rather-long-cell-name/);
   const box = await panel(page).boundingBox();
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     await expect(tabs(page).nth(i)).toBeVisible();
     const tab = await tabs(page).nth(i).boundingBox();
     expect(tab.x).toBeGreaterThanOrEqual(box.x - 1);
     expect(tab.x + tab.width).toBeLessThanOrEqual(box.x + box.width + 1);
     expect(tab.height).toBeGreaterThanOrEqual(24);
   }
+  // Every header control fits the panel too.
+  const controls = panel(page).locator(".majordomo-header button");
+  for (let i = 0; i < await controls.count(); i++) {
+    const control = await controls.nth(i).boundingBox();
+    expect(control.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(control.x + control.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+});
+
+// #1777, B: panel membership, kept per browser.
+test("Add cell adds any cell, Remove takes any out, majordomo included, and the choice survives a reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready"), cell("web", "Stopped")] });
+  await page.goto(`${server.url}#/resources`);
+  await entry(page).click();
+  await expect(connection(page)).toContainText("Attached");
+  await expect(panel(page).getByRole("tablist")).toHaveCount(0);
+  // Add cell and Add majordomo are separate controls.
+  await expect(panel(page).getByRole("button", { name: "Add majordomo", exact: true })).toBeVisible();
+  await panel(page).getByRole("button", { name: "Add cell", exact: true }).click();
+  const picker = panel(page).getByRole("group", { name: "Add cell to the panel" });
+  await expect(picker.getByLabel("Cell").locator("option")).toHaveText(["default / default / default / api", "default / default / default / web"]);
+  await picker.getByLabel("Cell").selectOption({ label: "default / default / default / api" });
+  await picker.getByRole("button", { name: "Add to panel" }).click();
+  // The added cell's tab shows its name and the full scope as its title, and is the active one.
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^api/]);
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs(page).nth(1)).toHaveAttribute("title", /^default \/ default \/ default \/ api/);
+  await expect(connection(page)).toContainText("Attached");
+  await expect.poll(() => state.sockets.map(socket => socket.url)).toEqual([attachPath("majordomo"), attachPath("api")]);
+  await expect(panel(page).getByRole("button", { name: "Detach api" })).toBeVisible();
+
+  // A stopped cell shows its state and Start, and the texts do not call it majordomo.
+  await panel(page).getByRole("button", { name: "Add cell", exact: true }).click();
+  await expect(picker.getByLabel("Cell").locator("option")).toHaveText(["default / default / default / web"]);
+  await picker.getByRole("button", { name: "Add to panel" }).click();
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^api/, /^web/]);
+  await expect(panel(page)).toContainText("The cell default / default / default / web is");
+  await expect(panel(page)).not.toContainText("The majordomo cell");
+  await expect(panel(page).getByRole("button", { name: "Start" })).toBeVisible();
+  // Every cell is offered now: no Add cell.
+  await expect(panel(page).getByRole("button", { name: "Add cell", exact: true })).toHaveCount(0);
+
+  // Removing a cell closes the panel's session only.
+  await tabs(page).nth(1).click();
+  await panel(page).getByRole("button", { name: "Remove api from the side panel" }).click();
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^web/]);
+  await expect.poll(() => state.sockets[1].closed).toBe(true);
+  expect(state.sockets[0].closed).toBe(false);
+  // The majordomo cell can be removed too, and the last cell as well.
+  await tabs(page).nth(0).click();
+  await panel(page).getByRole("button", { name: "Remove majordomo from the side panel" }).click();
+  await expect.poll(() => state.sockets[0].closed).toBe(true);
+  await expect(tabs(page)).toHaveText([/^web/]);
+  await panel(page).getByRole("button", { name: "Remove web from the side panel" }).click();
+  await expect(panel(page)).toContainText("The side panel holds no cells.");
+  await expect(connection(page)).toContainText("No cell in the panel");
+  // Removing majordomo never offers its Config again; the sidebar entry still reports it.
+  await panel(page).getByRole("button", { name: "Add majordomo", exact: true }).click();
+  await expect(panel(page).getByRole("group", { name: "Add majordomo" }).getByLabel("Harness").locator("option")).toHaveText(["assistant-b"]);
+  await panel(page).getByRole("group", { name: "Add majordomo" }).getByRole("button", { name: "Cancel" }).click();
+  await expect(entry(page)).toContainText("Ready");
+
+  // The choice survives a reload, and is stored per browser.
+  await page.reload();
+  await expect(panel(page)).toContainText("The side panel holds no cells.");
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem("kukeon-panel-cells")))).toEqual({ added: [], removed: [cellKey("majordomo")] });
+  // The empty state's Add cell brings majordomo back.
+  await panel(page).getByRole("button", { name: "Add cell", exact: true }).click();
+  await picker.getByLabel("Cell").selectOption({ label: "default / default / default / majordomo" });
+  await picker.getByRole("button", { name: "Add to panel" }).click();
+  await expect(connection(page)).toContainText("Attached");
+  await expect(panel(page).getByRole("tablist")).toHaveCount(0);
+  await page.reload();
+  await expect(connection(page)).toContainText("Attached");
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem("kukeon-panel-cells")))).toEqual({ added: [], removed: [] });
+});
+
+test("entries for cells a complete inventory no longer has are pruned", async ({ page }) => {
+  const stored = membership({ added: [cellKey("api"), cellKey("gone")], removed: [cellKey("old")] });
+  await page.addInitScript(item => { if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1"); localStorage.setItem(item.key, item.value); } }, stored);
+  await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
+  await page.goto(`${server.url}#/resources`);
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => localStorage.getItem("kukeon-panel-cells")))).toEqual({ added: [cellKey("api")], removed: [] });
+});
+
+test("Open in side panel adds a cell from its screen; Ask majordomo pastes only into majordomo, adding it back when removed", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const state = await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
+  const socketsOf = name => state.sockets.filter(socket => socket.url === attachPath(name));
+  await page.goto(`${server.url}#/workspace/default/default/default/api`);
+  await expect(mainTools(page).locator(".terminal-connection-state")).toHaveClass(/attached/);
+  await expect(panel(page)).toBeHidden();
+  await mainTools(page).getByRole("button", { name: "Open in side panel" }).click();
+  await expect(panel(page)).toBeVisible();
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^api/]);
+  await expect(tabs(page).nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(connection(page)).toContainText("Attached");
+  await expect.poll(() => socketsOf("api")).toHaveLength(2);
+  await expect(mainTools(page).getByRole("button", { name: "Open in side panel" })).toHaveCount(0);
+
+  // With another cell's tab active, Ask switches to the majordomo tab and pastes there only.
+  await page.goto(`${server.url}#/resource/default/default/default/api`);
+  const ask = page.locator(".cell-page-title-row").getByRole("button", { name: "Ask majordomo about cell default / default / default / api" });
+  await ask.click();
+  await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => socketsOf("majordomo").flatMap(bracketed)).toHaveLength(1);
+  expect(socketsOf("api").flatMap(bracketed)).toHaveLength(0);
+
+  // A majordomo cell removed from the panel is added back first.
+  await panel(page).getByRole("button", { name: "Remove majordomo from the side panel" }).click();
+  await expect(tabs(page)).toHaveText([/^api/]);
+  await expect(panel(page).getByRole("status").filter({ hasText: "Waiting to paste" })).toHaveCount(0);
+  await ask.click();
+  await expect(tabs(page)).toHaveText([/^kuke-majordomo-claude/, /^api/]);
+  await expect(tabs(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => socketsOf("majordomo").at(-1) && bracketed(socketsOf("majordomo").at(-1)).length).toBe(1);
+  expect(socketsOf("api").flatMap(bracketed)).toHaveLength(0);
+  // The sidebar entry and rail button still count majordomo cells only.
+  await expect(entry(page)).toContainText("Ready");
+  await expect(entryRegion(page).locator(".majordomo-count")).toHaveCount(0);
+});
+
+// #1777, C: reading a cell in the panel counts as reading it.
+test("the majordomo cell's unread mark and byte count clear within one poll while it is shown in the panel", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.clock.install();
+  await page.addInitScript(() => localStorage.setItem("kukeon-show-unread-bytes", "true"));
+  const counts = { "default/default/default/majordomo": { container: "agent", startedAt: "2026-11-26T10:00:00Z", bytesOut: 100, bytesIn: 0, idleMs: 60_000 } };
+  const asked = [];
+  let answered = 0;
+  await page.route("**/api/terminal-activity**", async route => {
+    const cells = new URL(route.request().url()).searchParams.getAll("cell");
+    asked.push(cells);
+    await route.fulfill({ json: { cells: cells.map(item => ({ scope: item.split("/"), ...(counts[item] ?? { unavailable: "not_found" }) })) } });
+    answered++;
+  });
+  const tick = async () => { const count = answered; await page.clock.fastForward(5000); await expect.poll(() => answered).toBeGreaterThan(count); await page.clock.fastForward(100); };
+  await world(page, { configs: teamConfigs(), cells: [runningMajordomo()] });
+  await page.goto(server.url);
+  // The majordomo cell is listed under its Config, as an agent instance.
+  const row = page.getByRole("navigation", { name: "Cell navigation" }).getByRole("link", { name: /open default \/ default \/ default \/ majordomo/ });
+  await expect.poll(() => answered).toBeGreaterThan(0);
+  counts["default/default/default/majordomo"] = { ...counts["default/default/default/majordomo"], bytesOut: 48_228 };
+  await tick();
+  await expect(row).toHaveClass(/has-unread/);
+  await expect(row.locator(".cell-unread-count")).toHaveText("47 KiB");
+
+  // Shown and attached in the panel: cleared within one poll, and the marker moves to every reading.
+  await entry(page).click();
+  await expect(connection(page)).toContainText("Attached");
+  await tick();
+  await expect(row).not.toHaveClass(/has-unread/);
+  await expect(row.locator(".cell-unread-count")).toHaveCount(0);
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => localStorage.getItem("kukeon-terminal-seen")))[cellKey("majordomo")]).toEqual({ startedAt: "2026-11-26T10:00:00Z", bytes: 48_228 });
+
+  // Closing the panel takes one last reading of the cell left.
+  counts["default/default/default/majordomo"] = { ...counts["default/default/default/majordomo"], bytesOut: 50_000, idleMs: 4000 };
+  const before = asked.length;
+  await panel(page).getByRole("button", { name: "Collapse majordomo panel" }).click();
+  await expect.poll(() => asked.length).toBeGreaterThan(before);
+  expect(asked.at(-1)).toEqual(["default/default/default/majordomo"]);
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => localStorage.getItem("kukeon-terminal-seen")))[cellKey("majordomo")]).toEqual({ startedAt: "2026-11-26T10:00:00Z", bytes: 50_000 });
+  await expect(row).not.toHaveClass(/has-unread/);
 });
 
 test("the Health page shows the latest report, its findings and the history", async ({ page }) => {
@@ -776,20 +1007,19 @@ test("an enabled sweep shows no reapply instructions, and a host without majordo
 });
 
 // #1635: the Workbench grid and the Manage sidebar with majordomo docked.
-test("a grid tile for a docked majordomo cell opens the panel and does not navigate", async ({ page }) => {
+test("a grid tile opens the cell screen, also for a cell in the side panel", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await world(page, { configs: teamConfigs(), cells: [runningMajordomo(), cell("api", "Ready")] });
   await page.goto(server.url);
   const grid = page.getByRole("region", { name: "Cell terminals" });
-  const docked = grid.getByRole("button", { name: "Open default / default / default / majordomo in the majordomo panel" });
-  await expect(docked).toBeVisible();
+  await expect(grid.getByRole("button")).toHaveCount(0);
+  const tile = grid.getByRole("link", { name: "Open default / default / default / majordomo", exact: true });
+  await expect(tile).toHaveAttribute("href", "#/workspace/default/default/default/majordomo");
   await expect(grid.getByRole("link", { name: "Open default / default / default / api", exact: true })).toHaveAttribute("href", "#/workspace/default/default/default/api");
+  await tile.click();
+  await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/majordomo$/);
+  await expect(mainTools(page).locator(".terminal-connection-state")).toHaveClass(/attached/);
   await expect(panel(page)).toBeHidden();
-  const url = page.url();
-  await docked.click();
-  await expect(panel(page)).toBeVisible();
-  expect(page.url()).toBe(url);
-  await expect(page.locator(".page-heading h1")).toHaveText("Workbench");
 });
 
 test("with the majordomo panel docked at 1440×900 the Manage sidebar and a list page do not overflow", async ({ page }) => {

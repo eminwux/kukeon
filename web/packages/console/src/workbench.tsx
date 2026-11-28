@@ -16,7 +16,7 @@ const key = (scope: string[]) => JSON.stringify(scope);
 
 // A cell with unread terminal output (#1696) shows an Unread badge in the foot: "Unread · <amount>" with
 // Show unread bytes on.
-function CellTile({ row, label, screen, docked, terminalState, onOpenDock, unreadBytes = 0, showUnreadBytes = false }: { row: Row; label?: string; screen?: Screen; docked: boolean; terminalState?: TerminalState; onOpenDock: () => void; unreadBytes?: number; showUnreadBytes?: boolean }) {
+function CellTile({ row, label, screen, terminalState, unreadBytes = 0, showUnreadBytes = false }: { row: Row; label?: string; screen?: Screen; terminalState?: TerminalState; unreadBytes?: number; showUnreadBytes?: boolean }) {
   const state = row.doc.status?.state;
   const unreadSuffix = unreadLabel(unreadBytes, showUnreadBytes);
   const fullName = row.scope.join(" / ");
@@ -29,10 +29,8 @@ function CellTile({ row, label, screen, docked, terminalState, onOpenDock, unrea
     {text ? <pre className="cell-tile-screen" aria-hidden="true">{text}</pre> : <span className="cell-tile-screen cell-tile-empty">{screen || unavailableStates.has(state ?? "") ? "No terminal screen" : "Reading terminal screen…"}</span>}
     {(screen?.stale || terminalState || unreadBytes > 0) && <span className="cell-tile-foot">{unreadBytes > 0 && <span className="badge cell-tile-unread"><span className="unread-dot" aria-hidden="true" />{showUnreadBytes ? `Unread · ${unreadAmount(unreadBytes)}` : "Unread"}</span>}{screen?.stale && <span className="badge cell-tile-stale" title="The last screen refresh failed">Stale</span>}{terminalState && <span className={`cell-terminal-state ${terminalState}`}>Terminal {terminalState}</span>}</span>}
   </>;
-  // A cell docked in the majordomo panel opens the panel instead of the cell screen.
-  return docked
-    ? <button type="button" className="cell-tile panel" data-scope={key(row.scope)} aria-label={`Open ${fullName} in the majordomo panel${unreadSuffix}`} title={fullName} onClick={onOpenDock}>{body}</button>
-    : <a className="cell-tile panel" data-scope={key(row.scope)} href={workspaceLink(row.scope)} aria-label={`Open ${label ? `${label} (${fullName})` : fullName}${unreadSuffix}`} title={fullName}>{body}</a>;
+  // A tile always opens the cell screen, also for a cell that is in the side panel (#1777).
+  return <a className="cell-tile panel" data-scope={key(row.scope)} href={workspaceLink(row.scope)} aria-label={`Open ${label ? `${label} (${fullName})` : fullName}${unreadSuffix}`} title={fullName}>{body}</a>;
 }
 
 // The grid's own search field and Group by select (#1686), separate from the sidebar's. Each is rendered
@@ -50,11 +48,9 @@ function GridControls({ filter, keys, showSearch, showGroupBy }: { filter: CellF
 // filtered and grouped by the grid's own search and Group by (#1686), attention first inside each group.
 // In agent style the sections are the agents (Configs) with their instance tiles, Other cells last, and
 // no Group by is offered.
-export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, terminalStates, listStyle = "default", showSearch = true, showGroupBy = true, unread = {}, showUnreadBytes = false, screenSeconds = 5 }: {
+export function WorkbenchGrid({ inventory, filter, terminalStates, listStyle = "default", showSearch = true, showGroupBy = true, unread = {}, showUnreadBytes = false, screenSeconds = 5 }: {
   inventory: InventoryResource;
   filter: CellFilter;
-  dockedCells: string[];
-  onOpenDock: () => void;
   terminalStates: Record<string, TerminalState>;
   listStyle?: CellListStyle;
   showSearch?: boolean;
@@ -118,7 +114,7 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
     <div ref={grid} className="cell-grid-groups">
       {sections.filter(section => section.rows.length).map(section => <section className="cell-grid-group" key={section.id} aria-label={section.heading ? section.name : undefined}>
         {section.heading && <h2 className="cell-grid-heading">{section.heading} <small>{section.rows.length}{section.rollup && <span className="sr-only"> {section.rows.length === 1 ? "instance" : "instances"}</span>}</small>{section.rollup && <RollupDot state={section.state} />}</h2>}
-        <ul className="cell-grid">{section.rows.map(row => <li key={key(row.scope)}><CellTile row={row} label={labels.get(key(row.scope))} screen={screens[key(row.scope)]} docked={dockedCells.includes(key(row.scope))} terminalState={terminalStates[key(row.scope)]} onOpenDock={onOpenDock} unreadBytes={unread[key(row.scope)]?.unreadBytes} showUnreadBytes={showUnreadBytes} /></li>)}</ul>
+        <ul className="cell-grid">{section.rows.map(row => <li key={key(row.scope)}><CellTile row={row} label={labels.get(key(row.scope))} screen={screens[key(row.scope)]} terminalState={terminalStates[key(row.scope)]} unreadBytes={unread[key(row.scope)]?.unreadBytes} showUnreadBytes={showUnreadBytes} /></li>)}</ul>
       </section>)}
     </div>
     <StoppedCellsLink hidden={hidden} />

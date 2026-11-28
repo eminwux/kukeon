@@ -12,6 +12,8 @@ export function unreadBytes(stored: Marker | undefined, reading: Reading | undef
 export function isMarked(unread: number, idleMs: number, quietMs?: number): boolean;
 export function pruneMarkers(markers: Markers, cellKeys: Iterable<string>): Markers;
 export function applyReadings(markers: Markers, readings: Readings, beingRead: Set<string>): { markers: Markers; changed: string[] };
+export function readingCells(reading: (string | null | undefined)[]): string[];
+export function leftCells(previous: Iterable<string>, current: Iterable<string>): string[];
 export function unreadState(markers: Markers, readings: Readings, beingRead: Set<string>, quietMs?: number): Record<string, Unread>;
 export function unreadLabel(bytes: number, showBytes: boolean): string;
 export function unreadAmount(bytes: number): string;

@@ -17,9 +17,12 @@ import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } 
 
 type Container = { id: string; attachable?: boolean; root?: boolean };
 export type TerminalState = "connecting" | "attached" | "disconnected" | "interrupted";
+// The view a session is shown in (#1777): the main cell screen or the side panel. One cell can be
+// attached in both at once, each over its own WebSocket; both count against the connection limits.
+export type TerminalView = "main" | "panel";
 // reattach marks an interrupted session that auto-attach may open again by itself: one whose cell
 // restarted into a new process (#1745). Every other interruption waits for Reconnect or a start.
-export type Session = { id: string; scope: string[]; container: string; state: TerminalState; message: string; generation: number; reattach?: boolean };
+export type Session = { id: string; scope: string[]; container: string; view: TerminalView; state: TerminalState; message: string; generation: number; reattach?: boolean };
 // A paste waiting for its session: delivered once, when the session is attached and on screen.
 type PendingPaste = { text: string; nonce: number };
 const maxConnections = 20;
@@ -34,7 +37,7 @@ const maxSessions = 20;
 const reattachDelays = [1000, 2000, 5000];
 const reattachResetMs = 10_000;
 export const cellId = (scope: string[]) => JSON.stringify(scope);
-export const sessionId = (scope: string[], container: string) => JSON.stringify([...scope, container]);
+export const sessionId = (scope: string[], container: string, view: TerminalView = "main") => JSON.stringify([...scope, container, view]);
 export const unavailableStates = new Set(["Stopped", "Stopping", "Exited", "Deleted", "Failed", "Error", "Pending", "Unknown"]);
 const terminalTheme = { cursorAccent: "#000000", selectionBackground: "#4d4d4d" };
 export type Theme = "system" | "light" | "dark";
@@ -76,17 +79,19 @@ export function useTerminalSessions(inventory: InventoryResource) {
     picked.current = { ...picked.current, [cellId(scope)]: container };
     setSelection(old => ({ ...old, [cellId(scope)]: container }));
   }, []);
-  const attach = useCallback((scope: string[], container: string) => {
-    const id = sessionId(scope, container);
+  // Only the main view's attach chooses the cell's container: the panel follows that choice and never
+  // changes it, so attaching in the panel cannot cancel the main view's effect-driven attach.
+  const attach = useCallback((scope: string[], container: string, view: TerminalView = "main") => {
+    const id = sessionId(scope, container, view);
     setSessions(old => {
       const existing = old.find(item => item.id === id);
       if (existing?.state === "attached" || existing?.state === "connecting") return old;
       if (old.filter(item => item.state === "attached" || item.state === "connecting").length >= maxConnections) return old;
       if (!existing && old.length >= maxSessions) return old;
       if (existing) return old.map(item => item.id === id ? { ...item, generation: item.generation + 1, state: "connecting", message: "Connecting…" } : item);
-      return [...old, { id, scope: [...scope], container, state: "connecting", message: "Connecting…", generation: 0 }];
+      return [...old, { id, scope: [...scope], container, view, state: "connecting", message: "Connecting…", generation: 0 }];
     });
-    select(scope, container);
+    if (view === "main") select(scope, container);
   }, [select]);
   // The effect-driven attach. `seen` is the selection of the render that scheduled the effect; a
   // different one now means a container was chosen since, so the effect neither opens a session for
@@ -96,6 +101,11 @@ export function useTerminalSessions(inventory: InventoryResource) {
     attach(scope, container);
   }, [attach]);
   const detach = useCallback((id: string) => setSessions(old => old.filter(item => item.id !== id)), []);
+  // Close every session of a cell in one view (a cell taken out of the side panel); the other view's stay.
+  const detachView = useCallback((scope: string[], view: TerminalView) => {
+    const key = cellId(scope);
+    setSessions(old => old.some(item => item.view === view && cellId(item.scope) === key) ? old.filter(item => item.view !== view || cellId(item.scope) !== key) : old);
+  }, []);
   const removeCell = useCallback((scope: string[]) => {
     const key = cellId(scope);
     retainedCells.current.delete(key);
@@ -159,7 +169,7 @@ export function useTerminalSessions(inventory: InventoryResource) {
     }
     return result;
   }, [sessions]);
-  return { sessions, selection, select, attach, autoAttach, detach, removeCell, interruptCell, dropInterrupted, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
+  return { sessions, selection, select, attach, autoAttach, detach, detachView, removeCell, interruptCell, dropInterrupted, holdCell, releaseCell, update, cellStates, pastes, paste, pasteDelivered };
 }
 
 export type TerminalManager = ReturnType<typeof useTerminalSessions>;
@@ -200,8 +210,11 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
-  const fitNow = useRef<() => void>(() => {});
+  // fitNow(true) sends the size even when it equals the last one sent.
+  const fitNow = useRef<(force?: boolean) => void>(() => {});
   // Only a real size change reaches the container; a repeated fit must not SIGWINCH its process again.
+  // The terminal has one size shared by every attach (#1777): another view may have changed it since, so
+  // becoming the shown terminal or taking focus sends the size again (force), and the last size sent wins.
   const sentSize = useRef("");
   const activeNow = useRef(active);
   const wasInterrupted = useRef(false);
@@ -220,31 +233,41 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     term.loadAddon(fit);
     term.open(mount.current);
     let resizeFrame = 0;
-    const resize = () => {
+    // A forced send waits in the frame with any other fit, so activation and the focus it gives send once.
+    let forced = false;
+    const resize = (force = false) => {
       if (!activeNow.current) return;
+      forced ||= force;
       if (resizeFrame) cancelAnimationFrame(resizeFrame);
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = 0;
         if (!activeNow.current || !mount.current?.clientWidth || !mount.current.clientHeight) return;
         fit.fit();
         const size = `${term.cols}x${term.rows}`;
-        if (socket.current?.readyState !== WebSocket.OPEN || size === sentSize.current) return;
+        if (socket.current?.readyState !== WebSocket.OPEN || (size === sentSize.current && !forced)) return;
+        forced = false;
         sentSize.current = size;
         socket.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       });
     };
     fitNow.current = resize;
-    const observer = new ResizeObserver(resize);
+    const onLayout = () => resize();
+    const onFocus = () => resize(true);
+    const observer = new ResizeObserver(onLayout);
     observer.observe(mount.current);
     if (mount.current.parentElement) observer.observe(mount.current.parentElement);
-    window.addEventListener("resize", resize);
-    window.visualViewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", onLayout);
+    window.visualViewport?.addEventListener("resize", onLayout);
+    // Taking focus (a click into the terminal, or the focus activation gives it) sends the size again.
+    const focusTarget = mount.current;
+    focusTarget.addEventListener("focusin", onFocus);
     const input = term.onData(data => {
       if (activeNow.current && socket.current?.readyState === WebSocket.OPEN) socket.current.send(new TextEncoder().encode(data));
     });
     return () => {
-      observer.disconnect(); window.removeEventListener("resize", resize);
-      window.visualViewport?.removeEventListener("resize", resize);
+      observer.disconnect(); window.removeEventListener("resize", onLayout);
+      window.visualViewport?.removeEventListener("resize", onLayout);
+      focusTarget.removeEventListener("focusin", onFocus);
       if (resizeFrame) cancelAnimationFrame(resizeFrame);
       input.dispose(); term.dispose(); terminal.current = null;
       fitNow.current = () => {};
@@ -337,8 +360,9 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   useEffect(() => {
     if (!active) { terminal.current?.blur(); return; }
     // A session activated from a tab list (the majordomo tabs) leaves focus on the tab, so the arrow keys
-    // keep moving between tabs instead of typing into the terminal.
-    const frame = requestAnimationFrame(() => { fitNow.current(); if (!document.activeElement?.closest('[role="tablist"]')) terminal.current?.focus(); });
+    // keep moving between tabs instead of typing into the terminal. Becoming the shown terminal sends the
+    // size even when unchanged here: another view of the same terminal may have set its own since.
+    const frame = requestAnimationFrame(() => { fitNow.current(true); if (!document.activeElement?.closest('[role="tablist"]')) terminal.current?.focus(); });
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
@@ -376,11 +400,13 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
   </div>;
 }
 
-// dockedCells are the cells whose terminals live in the majordomo panel, by cellId. Their sessions are
-// mounted there and nowhere else, so this workspace neither renders nor attaches them.
+// The main view's terminal of a cell. A cell that is also in the side panel (#1777) is attached here as
+// well, over its own session: this workspace renders and attaches only the main view's sessions.
 // autoAttach is the Profile's Auto-attach terminals setting (#1745): on, the selected attachable container
 // attaches whenever the cell is started and nothing is attached or connecting; off, only Attach does.
-export function TerminalWorkspace({ scope, revision, inventory, manager, theme, autoAttach = true, visible = true, controlsHost, onExpandedChange, dockedCells = [], onOpenDock, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; autoAttach?: boolean; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; dockedCells?: string[]; onOpenDock?: () => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
+// inPanel says whether the cell is in the side panel; onOpenInPanel, when given, offers Open in side panel
+// for a cell that is not.
+export function TerminalWorkspace({ scope, revision, inventory, manager, theme, autoAttach = true, visible = true, controlsHost, onExpandedChange, inPanel = false, onOpenInPanel, operation, onLifecycleAction }: { scope: string[] | null; revision: number; inventory: InventoryResource; manager: Manager; theme: Theme; autoAttach?: boolean; visible?: boolean; controlsHost: HTMLDivElement | null; onExpandedChange: (expanded: boolean) => void; inPanel?: boolean; onOpenInPanel?: (scope: string[]) => void; operation?: LifecycleFeedback; onLifecycleAction?: (scope: string[], action: LifecycleAction, state?: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   // The session id of the container whose Exec panel is open (#1432); "" when none is.
@@ -420,8 +446,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   // Containers without a terminal are still listed: their output shows in the log view.
   const logOnly = workloads.filter(container => !container.attachable);
   const key = scope ? cellId(scope) : "";
-  const docked = !!key && dockedCells.includes(key);
-  const openInCell = manager.sessions.filter(item => cellId(item.scope) === key);
+  const mainSessions = manager.sessions.filter(item => item.view === "main");
+  const openInCell = mainSessions.filter(item => cellId(item.scope) === key);
   // Attachable first, then log-only, then retained sessions whose container is gone: the default stays the first attachable one.
   const options = [
     ...eligible.map(container => container.id),
@@ -430,26 +456,27 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   ];
   const selected = options.includes(manager.selection[key]) ? manager.selection[key] : options[0] ?? "";
   const currentId = scope && selected ? sessionId(scope, selected) : "";
-  const current = manager.sessions.find(item => item.id === currentId);
+  const current = mainSessions.find(item => item.id === currentId);
   const selectedEligible = eligible.some(container => container.id === selected);
+  // The limits count every view's sessions: a cell attached in both views holds two connections.
   const connections = manager.sessions.filter(item => item.state === "attached" || item.state === "connecting").length;
   const cellState = inventory.data?.rows[3].find(row => cellId(row.scope) === key)?.doc.status?.state;
   const unavailable = cellState && unavailableStates.has(cellState);
   const selectedListed = workloads.some(container => container.id === selected);
   // A live terminal needs an attachable container in a live cell; everything else that is listed shows its log.
-  const mode: "terminal" | "logs" = scope && !docked && selectedListed && (!selectedEligible || unavailable) ? "logs" : "terminal";
+  const mode: "terminal" | "logs" = scope && selectedListed && (!selectedEligible || unavailable) ? "logs" : "terminal";
   const logs = mode === "logs";
   // Exec runs in any listed container, attachable or not, of a cell that is running. The panel takes
   // the place of the terminal or log while it is open and closes when its container is deselected.
-  const execOpen = !!currentId && execFor === currentId && selectedListed && !docked && !unavailable;
+  const execOpen = !!currentId && execFor === currentId && selectedListed && !unavailable;
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
-  // Wait for the inventory: it is what tells whether this cell's terminal is docked.
+  // Wait for the inventory: it is what tells whether the cell is available.
   // Only cellTerminal attaches: cellRead keeps this workspace mounted so existing sessions
   // survive, but inspecting a cell must not open a new terminal session (#1566). Nothing attaches
   // while a lifecycle action on the cell is still running.
-  const canAutoAttach = autoAttach && visible && !!scope && !docked && !logs && !!inventory.data && !containers.loading && !containers.error && !!selected && selectedEligible && !unavailable && operation?.phase !== "pending" && skipAutoAttachFor !== currentId;
+  const canAutoAttach = autoAttach && visible && !!scope && !logs && !!inventory.data && !containers.loading && !containers.error && !!selected && selectedEligible && !unavailable && operation?.phase !== "pending" && skipAutoAttachFor !== currentId;
   useEffect(() => {
     if (!canAutoAttach || atLimit || current) return;
     manager.autoAttach(scope!, selected, manager.selection[key]);
@@ -489,28 +516,27 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     : current ? <>{connectButton("Reconnect", reconnectLimited || !selectedEligible || !!unavailable || !!containers.error, resume)}{connectButton("Detach", false, () => { setSkipAutoAttachFor(current.id); manager.detach(current.id); })}</>
     : idle ? connectButton("Attach", !!atLimit || !selectedEligible || !!unavailable || !!containers.error, resume) : null;
   const optionLabel = (id: string) => eligible.some(container => container.id === id) ? id : logOnly.some(container => container.id === id) ? `${id} (logs)` : `${id} (unavailable)`;
-  const controls = scope && !docked && <div className="terminal-workspace-tools">
+  const controls = scope && <div className="terminal-workspace-tools">
     {!empty && <span className={`terminal-connection-state ${headerTone}`} role="status" tabIndex={0} title={tooltip} data-tooltip={tooltip}><span className="state-dot" aria-hidden="true" /><span className="sr-only">{headerState}</span></span>}
     <div className="terminal-controls">
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{optionLabel(id)}</option>)}</select>
         {!logs && connectSlot}
         {selectedListed && <ExecButton container={selected} open={execOpen} reason={unavailable ? `Exec unavailable: cell is ${cellState}.` : ""} onToggle={() => setExecFor(execOpen ? "" : currentId)} />}</>}
+      {!inPanel && onOpenInPanel && <button type="button" className="icon-button" aria-label="Open in side panel" data-tooltip="Open in side panel" onClick={() => onOpenInPanel(scope)}><Icon name="sidePanel" /></button>}
       {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
     </div>
   </div>;
   return <>
     {controls && controlsHost && createPortal(controls, controlsHost)}
     <section className={`panel terminal-workspace${expanded ? " is-expanded" : ""}${empty ? " is-empty" : ""}`} id="cell-terminal" hidden={!scope} aria-label="Terminal workspace">
-      {docked ? <div className="empty-state terminal-docked" role="status"><p>This cell's terminal is docked in the Majordomo panel.</p><button type="button" onClick={onOpenDock}>Open the Majordomo panel</button></div> : <>
-        {empty && <p className="empty-state terminal-empty" role="status">No containers are available.</p>}
-        {overlay && <div className="terminal-overlay">{overlay}</div>}
-        {logs && unavailable && <div className="terminal-log-status" role="status">
-          <span>Cell is {cellState}. Showing the last output of <code>{selected}</code>.</span>
-          {availableLifecycleActions(cellState).includes("start") && <button type="button" disabled={operation?.phase === "pending"} onClick={() => onLifecycleAction?.(scope!, "start", cellState)}>Start</button>}
-        </div>}
-      </>}
+      {empty && <p className="empty-state terminal-empty" role="status">No containers are available.</p>}
+      {overlay && <div className="terminal-overlay">{overlay}</div>}
+      {logs && unavailable && <div className="terminal-log-status" role="status">
+        <span>Cell is {cellState}. Showing the last output of <code>{selected}</code>.</span>
+        {availableLifecycleActions(cellState).includes("start") && <button type="button" disabled={operation?.phase === "pending"} onClick={() => onLifecycleAction?.(scope!, "start", cellState)}>Start</button>}
+      </div>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>
-        {manager.sessions.filter(session => !dockedCells.includes(cellId(session.scope))).map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && !execOpen && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+        {mainSessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && !execOpen && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
         {/* Not mounting the log while hidden is what keeps cellRead free of log requests (#1566). */}
         {visible && logs && !execOpen && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
         {/* Unmounting the panel closes its terminal's WebSocket, which is what kills the exec process. */}

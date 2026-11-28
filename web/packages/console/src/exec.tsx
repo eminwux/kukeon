@@ -102,7 +102,7 @@ export function ExecPanel({ scope, container, theme, visible, expanded, onClose 
 
   const scopeKey = JSON.stringify(scope);
   const session: Session = useMemo(
-    () => ({ id: `exec:${sessionId(scope, container)}`, scope, container, state: shell.state, message: shell.message, generation: shell.generation }),
+    () => ({ id: `exec:${sessionId(scope, container)}`, scope, container, view: "main" as const, state: shell.state, message: shell.message, generation: shell.generation }),
     [scopeKey, container, shell.state, shell.message, shell.generation],
   );
   const updateShell = useCallback((_id: string, generation: number, state: TerminalState, message: string) => {
