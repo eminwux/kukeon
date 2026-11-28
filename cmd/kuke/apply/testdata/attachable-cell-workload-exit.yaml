@@ -1,0 +1,24 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: test-cell
+spec:
+  id: test-cell
+  realmId: test-realm
+  spaceId: test-space
+  stackId: test-stack
+  containers:
+    - id: root
+      root: true
+      image: ghcr.io/containerd/busybox:latest
+      command: sh
+      args:
+        - "-c"
+        - "trap 'exit 0' TERM; sleep 3600 & wait"
+    - id: work
+      image: ghcr.io/containerd/busybox:latest
+      command: sh
+      args:
+        - "-c"
+        - "sleep 3; WORKLOAD_EXIT"
+      attachable: true

@@ -23,13 +23,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 )
 
 // TestParseArgs_Default locks in the no-flags contract: with zero argv
@@ -285,19 +287,16 @@ func TestIsCleanShutdown(t *testing.T) {
 	}
 }
 
-// TestWorkloadExitCode covers the carriers sbsh v0.13.1 embeds the workload
-// child's exit code in (issue #1273): the *exec.ExitError on the non-init
-// cmd.Wait path, the "(code 0)" literal on a non-init clean exit, the
-// init-mode "code=N" string from the PID-1 reaper, and the abnormal
-// no-recoverable-code teardown paths. A genuine kuketty-internal failure must
-// report ok=false so it maps to exitCodeInternal.
+// TestWorkloadExitCode pins the mapping from sbsh's typed workload exit
+// (*sbshserver.ExitError, issue #1721) to kuketty's exit code. No error text
+// is inspected: an error that merely reads like sbsh's old exit carriers is
+// not a workload exit and maps to exitCodeInternal (ok=false).
 //
-// The "pty-EIO race resolves to code=N" case pins the issue #1282 contract:
-// sbsh v0.13.1 prefers the authoritative EvCmdExited over the benign PTY-master
-// read EIO (eminwux/sbsh#439), so a clean PID-1 exit surfaces as "code=0" here
-// rather than the EIO error — and a raw PTY-read EIO that still surfaces means
-// a genuine error (child alive), which must map to exitCodeInternal (ok=false).
+// The #1273 cases: a clean exit is code 0 and a non-zero exit propagates its
+// code. The #1282 case: a raw PTY-read EIO is not a workload exit (sbsh
+// resolves the EIO/exit race itself, eminwux/sbsh#439).
 func TestWorkloadExitCode(t *testing.T) {
+	zero, three := 0, 3
 	tests := []struct {
 		name     string
 		err      error
@@ -305,41 +304,23 @@ func TestWorkloadExitCode(t *testing.T) {
 		wantOK   bool
 	}{
 		{name: "nil is clean", err: nil, wantCode: 0, wantOK: true},
+		{name: "clean exit", err: &sbshserver.ExitError{Code: &zero}, wantCode: 0, wantOK: true},
+		{name: "non-zero exit", err: &sbshserver.ExitError{Code: &three}, wantCode: 3, wantOK: true},
 		{
-			name:     "non-init clean exit literal",
-			err:      errors.New("shell process exited (code 0)"),
+			name:     "wrapped exit",
+			err:      fmt.Errorf("server.Serve: %w", &sbshserver.ExitError{Code: &three}),
+			wantCode: 3,
+			wantOK:   true,
+		},
+		{name: "killed by SIGKILL", err: &sbshserver.ExitError{Signal: "SIGKILL"}, wantCode: 137, wantOK: true},
+		{name: "killed by SIGTERM", err: &sbshserver.ExitError{Signal: "SIGTERM"}, wantCode: 143, wantOK: true},
+		{name: "unknown signal name", err: &sbshserver.ExitError{Signal: "SIGBOGUS"}, wantCode: 128, wantOK: true},
+		{name: "exit with neither code nor signal", err: &sbshserver.ExitError{}, wantCode: 0, wantOK: false},
+		{
+			name:     "old exit text is not a workload exit",
+			err:      errors.New("shell process exited: code=3"),
 			wantCode: 0,
-			wantOK:   true,
-		},
-		{
-			name:     "init-mode clean exit",
-			err:      errors.New("shell process exited: code=0"),
-			wantCode: 0,
-			wantOK:   true,
-		},
-		{
-			name:     "init-mode non-zero exit",
-			err:      errors.New("shell process exited: code=7"),
-			wantCode: 7,
-			wantOK:   true,
-		},
-		{
-			name:     "init-mode wraps via fmt.Errorf",
-			err:      fmt.Errorf("server.Serve: %w", errors.New("shell process exited: code=137")),
-			wantCode: 137,
-			wantOK:   true,
-		},
-		{
-			name:     "no recoverable code is treated clean",
-			err:      errors.New("shell process exited"),
-			wantCode: 0,
-			wantOK:   true,
-		},
-		{
-			name:     "close-cancelled tracked-exit wait is treated clean",
-			err:      errors.New("shell process exited (close cancelled tracked-exit wait)"),
-			wantCode: 0,
-			wantOK:   true,
+			wantOK:   false,
 		},
 		{
 			name:     "internal failure is not a workload exit",
@@ -348,18 +329,6 @@ func TestWorkloadExitCode(t *testing.T) {
 			wantOK:   false,
 		},
 		{
-			// #1282: under sbsh v0.13.1 a clean PID-1 exit racing the
-			// PTY-master EIO surfaces as the authoritative "code=N" carrier
-			// (sbsh#439), not the EIO — so it decodes to a clean exit.
-			name:     "pty-EIO race resolves to init-mode code=N",
-			err:      fmt.Errorf("server.Serve: %w", errors.New("shell process exited: code=0")),
-			wantCode: 0,
-			wantOK:   true,
-		},
-		{
-			// A raw PTY-read EIO that still surfaces means a genuine error with
-			// the child alive (sbsh v0.13.1 only returns it after waiting in
-			// vain for EvCmdExited), so it is a kuketty-internal failure.
 			name: "raw pty-read EIO is an internal failure",
 			err: fmt.Errorf(
 				"terminalManagerReader pty read error: could not read pipe->pipe: %w",
@@ -379,26 +348,6 @@ func TestWorkloadExitCode(t *testing.T) {
 				t.Errorf("code = %d, want %d", code, tc.wantCode)
 			}
 		})
-	}
-}
-
-// TestWorkloadExitCode_ExecExitError pins the non-init cmd.Wait carrier: sbsh
-// wraps the *exec.ExitError from cmd.Wait with %w, so errors.As must recover
-// the child's real exit code (here a non-zero status).
-func TestWorkloadExitCode_ExecExitError(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "exit 3")
-	runErr := cmd.Run()
-	var exitErr *exec.ExitError
-	if !errors.As(runErr, &exitErr) {
-		t.Fatalf("expected *exec.ExitError, got %v", runErr)
-	}
-	wrapped := fmt.Errorf("shell process exited: %w", exitErr)
-	code, ok := workloadExitCode(wrapped)
-	if !ok {
-		t.Fatalf("ok = false, want true")
-	}
-	if code != 3 {
-		t.Errorf("code = %d, want 3", code)
 	}
 }
 
@@ -461,5 +410,123 @@ func TestEnsureTerminalDir(t *testing.T) {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Fatalf("stat %s: %v", dir, err)
 		}
+	}
+}
+
+// startServeTerminal runs serveTerminal on a temp layout with the given shell
+// script as the workload, against a real sbsh server, and returns the
+// reporter, the document path and serveTerminal's result channel.
+func startServeTerminal(
+	ctx context.Context, t *testing.T, script string,
+) (*supervisorReporter, string, <-chan error) {
+	t.Helper()
+	tmp := t.TempDir()
+	terminalDir := filepath.Join(tmp, "terminals", "main")
+	if err := os.MkdirAll(terminalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := &sbshapi.TerminalSpec{
+		ID:            sbshapi.ID("kuketty-" + filepath.Base(tmp)),
+		Name:          "kuketty-test",
+		Labels:        map[string]string{},
+		Command:       "/bin/sh",
+		CommandArgs:   []string{"-c", script},
+		EnvInherit:    true,
+		RunPath:       tmp,
+		MetadataDir:   terminalDir,
+		MetadataFile:  "terminal.json",
+		SocketFile:    filepath.Join(terminalDir, "control.sock"),
+		CaptureFile:   filepath.Join(terminalDir, "capture.raw"),
+		ShutdownGrace: 500 * time.Millisecond,
+	}
+	listener, err := claimSocketListener(ctx, spec.SocketFile, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, path := newTestReporter(t)
+	done := make(chan error, 1)
+	go func() { done <- serveTerminal(ctx, spec, listener, discardLogger(), r) }()
+	return r, path, done
+}
+
+// waitServeTerminal waits for serveTerminal to return.
+func waitServeTerminal(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(20 * time.Second):
+		t.Fatal("serveTerminal did not return")
+		return nil
+	}
+}
+
+// TestServeTerminal_WorkloadExit drives a real sbsh terminal whose workload
+// exits 3 or is killed, and checks kuketty's result and the supervisor
+// document's terminal exit come from sbsh's typed exit and status (#1721).
+func TestServeTerminal_WorkloadExit(t *testing.T) {
+	cases := []struct {
+		name       string
+		script     string
+		wantCode   int
+		wantSignal string
+	}{
+		{name: "exit 0", script: "sleep 0.2; exit 0", wantCode: 0},
+		{name: "exit 3", script: "sleep 0.2; exit 3", wantCode: 3},
+		{name: "killed by SIGKILL", script: "sleep 0.2; kill -KILL $$", wantCode: 137, wantSignal: "SIGKILL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_, path, done := startServeTerminal(ctx, t, tc.script)
+			err := waitServeTerminal(t, done)
+			if code := exitCode(err, io.Discard); code != tc.wantCode {
+				t.Errorf("exit code = %d (err %v), want %d", code, err, tc.wantCode)
+			}
+			doc := readDoc(t, path)
+			if doc.Status.Phase != v1beta1.SupervisorPhaseExited {
+				t.Errorf("phase = %q, want Exited", doc.Status.Phase)
+			}
+			term := doc.Status.Terminals[0]
+			if term.State != sbshapi.Exited.String() {
+				t.Errorf("terminal state = %q, want Exited", term.State)
+			}
+			if term.Exit == nil || term.Exit.Code != tc.wantCode || term.Exit.Signal != tc.wantSignal ||
+				term.Exit.At.IsZero() {
+				t.Errorf("terminal exit = %+v, want code %d signal %q with a time",
+					term.Exit, tc.wantCode, tc.wantSignal)
+			}
+		})
+	}
+}
+
+// TestServeTerminal_ObserverReportsReady checks that the running terminal's
+// status reaches the supervisor document through sbsh's observer (kuketty no
+// longer polls), and that an operator shutdown is a clean exit.
+func TestServeTerminal_ObserverReportsReady(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	r, path, done := startServeTerminal(ctx, t, "sleep 30")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if terms := r.snapshot().Status.Terminals; len(terms) == 1 && terms[0].State == sbshapi.Ready.String() {
+			if terms[0].PID <= 0 {
+				t.Errorf("ready terminal has pid %d", terms[0].PID)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("terminal did not reach Ready: %+v", r.snapshot().Status.Terminals)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := waitServeTerminal(t, done); err != nil {
+		t.Errorf("serveTerminal after cancel = %v, want nil", err)
+	}
+	if doc := readDoc(t, path); doc.Status.Phase != v1beta1.SupervisorPhaseExited ||
+		doc.Status.Terminals[0].State != sbshapi.Exited.String() {
+		t.Errorf("after shutdown: phase %q, terminal %+v", doc.Status.Phase, doc.Status.Terminals[0])
 	}
 }

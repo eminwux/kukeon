@@ -19,6 +19,7 @@ package e2e_test
 import (
 	"encoding/json"
 	iofs "io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -220,7 +221,7 @@ func TestKuke_AttachableSupervisorRunning(t *testing.T) {
 			"--realm", realmName, "--space", spaceName)...)
 	applyAttachableCell(t, host, "attachable-cell.yaml", realmName, spaceName, stackName, cellName)
 
-	// kuketty polls its terminal about once a second.
+	// sbsh reports the terminal's status to kuketty as it changes.
 	var st v1beta1.ContainerStatus
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -254,6 +255,106 @@ func TestKuke_AttachableSupervisorRunning(t *testing.T) {
 	if code != 0 || len(supOut) == 0 {
 		t.Errorf("kuke log --supervisor on a running container: exit %d, %d bytes\nstderr:\n%s",
 			code, len(supOut), supErr)
+	}
+}
+
+// TestKuke_AttachableWorkloadExit checks that a workload's own exit reaches
+// the container's status through sbsh's typed exit and status (issue #1721):
+// exit 3 yields terminals[0].exit.code 3, supervisor.exit.code 3 and reason
+// WorkloadFailed; a workload killed by a signal yields terminals[0].exit.signal.
+func TestKuke_AttachableWorkloadExit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		exit       string
+		wantCode   int
+		wantSignal string
+	}{
+		{name: "exit 3", exit: "exit 3", wantCode: 3},
+		{name: "killed by SIGKILL", exit: "kill -KILL $$", wantCode: 137, wantSignal: "SIGKILL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			runPath := getRandomRunPath(t)
+			host := startKukeondDaemon(t, runPath)
+
+			realmName := generateUniqueRealmName(t)
+			spaceName := generateUniqueSpaceName(t)
+			stackName := generateUniqueStackName(t)
+			cellName := generateUniqueCellName(t)
+
+			t.Cleanup(func() {
+				cleanupCellNoDaemon(t, runPath, realmName, spaceName, stackName, cellName)
+				cleanupStackNoDaemon(t, runPath, realmName, spaceName, stackName)
+				cleanupSpaceNoDaemon(t, runPath, realmName, spaceName)
+				cleanupRealmNoDaemon(t, runPath, realmName)
+			})
+
+			runReturningBinary(t, nil, kuke,
+				append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+			runReturningBinary(t, nil, kuke,
+				append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+			runReturningBinary(t, nil, kuke,
+				append(buildKukeDaemonArgs(host), "create", "stack", stackName,
+					"--realm", realmName, "--space", spaceName)...)
+
+			tmpFile := renderAttachableCellFixture(t, "attachable-cell-workload-exit.yaml",
+				realmName, spaceName, stackName, cellName)
+			data, err := os.ReadFile(tmpFile)
+			if err != nil {
+				t.Fatalf("read %s: %v", tmpFile, err)
+			}
+			if err = os.WriteFile(tmpFile, []byte(strings.ReplaceAll(string(data), "WORKLOAD_EXIT", tc.exit)),
+				0o644); err != nil {
+				t.Fatalf("write %s: %v", tmpFile, err)
+			}
+			// The workload exits a few seconds after it starts, so apply may
+			// report the container as running or as already failed.
+			if res := <-startKukeApplyAsync(t, host, tmpFile); res.err != nil {
+				t.Logf("kuke apply: %v\n%s", res.err, res.output)
+			}
+
+			var st v1beta1.ContainerStatus
+			deadline := time.Now().Add(60 * time.Second)
+			for {
+				st = getContainerDoc(t, host, realmName, spaceName, stackName, cellName, "work").Status
+				if st.Reason != "" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("container got no reason after the workload exited; status = %+v", st)
+				}
+				time.Sleep(time.Second)
+			}
+			if st.ExitCode != tc.wantCode {
+				t.Errorf("status.exitCode = %d, want %d", st.ExitCode, tc.wantCode)
+			}
+			if st.Reason != v1beta1.ContainerReasonWorkloadFailed {
+				t.Errorf("status reason/message = %q/%q, want WorkloadFailed", st.Reason, st.Message)
+			}
+			sup := st.Supervisor
+			if sup == nil {
+				t.Fatalf("status.supervisor is empty; status = %+v", st)
+			}
+			if sup.Exit == nil || sup.Exit.Code != tc.wantCode {
+				t.Errorf("status.supervisor.exit = %+v, want code %d", sup.Exit, tc.wantCode)
+			}
+			if len(sup.Terminals) != 1 {
+				t.Fatalf("status.supervisor.terminals = %+v, want one", sup.Terminals)
+			}
+			term := sup.Terminals[0]
+			if term.State != "Exited" {
+				t.Errorf("terminals[0].state = %q, want Exited", term.State)
+			}
+			if term.Exit == nil || term.Exit.Code != tc.wantCode || term.Exit.Signal != tc.wantSignal ||
+				term.Exit.At.IsZero() {
+				t.Errorf("terminals[0].exit = %+v, want code %d signal %q with a time",
+					term.Exit, tc.wantCode, tc.wantSignal)
+			}
+		})
 	}
 }
 

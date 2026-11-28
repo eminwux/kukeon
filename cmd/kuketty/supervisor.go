@@ -17,7 +17,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -86,10 +85,6 @@ const attachedTerminalID = "main"
 // like the log next to it.
 const supervisorDocMode os.FileMode = 0o640
 
-// terminalPollInterval is how often kuketty reads the terminal's status while
-// it runs. sbsh has no status-change notification yet (#1721).
-const terminalPollInterval = time.Second
-
 // supervisorReporter owns kuketty's TerminalSupervisor document and rewrites
 // it, through a temporary file and a rename, after every change: every phase
 // change, the start and end of every repo and stage, every terminal status
@@ -105,6 +100,9 @@ type supervisorReporter struct {
 	doc    v1beta1.TerminalSupervisorDoc
 	now    func() time.Time
 	logger *slog.Logger
+	// terminalFinal is set once the attached terminal's final document has
+	// been recorded; sbsh observer calls that arrive later are ignored.
+	terminalFinal bool
 }
 
 // newSupervisorReporter returns a reporter for the container name that writes
@@ -222,39 +220,25 @@ func (r *supervisorReporter) startTerminals() {
 	})
 }
 
-// setTerminal replaces the terminal entry with the same ID, writing the
-// document only when something changed.
-func (r *supervisorReporter) setTerminal(t v1beta1.SupervisorTerminalStatus) {
-	r.update(func(s *v1beta1.TerminalSupervisorDoc) bool {
-		for i := range s.Status.Terminals {
-			if s.Status.Terminals[i].ID != t.ID {
-				continue
-			}
-			if t.Exit == nil {
-				t.Exit = s.Status.Terminals[i].Exit
-			}
-			if reflect.DeepEqual(s.Status.Terminals[i], t) {
-				return false
-			}
-			s.Status.Terminals[i] = t
-			return true
+// replaceTerminal replaces the terminal entry with t's ID, or appends t, and
+// reports whether the document changed. A recorded exit is kept when t
+// carries none.
+func replaceTerminal(s *v1beta1.TerminalSupervisorDoc, t v1beta1.SupervisorTerminalStatus) bool {
+	for i := range s.Status.Terminals {
+		if s.Status.Terminals[i].ID != t.ID {
+			continue
 		}
-		s.Status.Terminals = append(s.Status.Terminals, t)
+		if t.Exit == nil {
+			t.Exit = s.Status.Terminals[i].Exit
+		}
+		if reflect.DeepEqual(s.Status.Terminals[i], t) {
+			return false
+		}
+		s.Status.Terminals[i] = t
 		return true
-	})
-}
-
-// setTerminalExit records how the attached terminal's workload exited.
-func (r *supervisorReporter) setTerminalExit(code int) {
-	r.update(func(s *v1beta1.TerminalSupervisorDoc) bool {
-		for i := range s.Status.Terminals {
-			if s.Status.Terminals[i].ID == s.Status.AttachedTerminal {
-				s.Status.Terminals[i].Exit = &v1beta1.TerminalExit{Code: code, At: r.now()}
-				return true
-			}
-		}
-		return false
-	})
+	}
+	s.Status.Terminals = append(s.Status.Terminals, t)
+	return true
 }
 
 // terminalsExited enters phase Exited: the attached terminal ended.
@@ -338,40 +322,44 @@ func (r *supervisorReporter) write() error {
 	return nil
 }
 
-// terminalMetadataFunc reads a terminal's sbsh status; *sbshserver.Server's
-// Metadata method satisfies it.
-type terminalMetadataFunc func() (*sbshapi.TerminalDoc, error)
-
-// pollTerminal copies the terminal's status into the document once per
-// interval until ctx is done, and once more on return. Read errors are
-// ignored: Metadata fails until sbsh has brought the terminal up.
-func (r *supervisorReporter) pollTerminal(
-	ctx context.Context, id string, metadata terminalMetadataFunc, interval time.Duration,
-) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		r.observeTerminal(id, metadata)
-		select {
-		case <-ctx.Done():
-			r.observeTerminal(id, metadata)
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-// observeTerminal reads the terminal's status once and records it.
-func (r *supervisorReporter) observeTerminal(id string, metadata terminalMetadataFunc) {
-	md, err := metadata()
-	if err != nil || md == nil {
+// observeTerminal is kuketty's sbsh status observer: sbsh calls it with the
+// terminal's document after every committed status change (state, attach,
+// detach, exit), so the attached terminal's entry follows it without polling
+// (issue #1721). Calls after finalTerminal are ignored.
+func (r *supervisorReporter) observeTerminal(doc sbshapi.TerminalDoc) {
+	if r == nil {
 		return
 	}
-	r.setTerminal(terminalStatusFromSbsh(id, md.Status))
+	t := terminalStatusFromSbsh(attachedTerminalID, doc.Status)
+	r.update(func(s *v1beta1.TerminalSupervisorDoc) bool {
+		if r.terminalFinal {
+			return false
+		}
+		return replaceTerminal(s, t)
+	})
+}
+
+// finalTerminal records the attached terminal's final document, read after
+// Serve returned, and stops observeTerminal from overwriting it: sbsh may
+// still deliver an earlier document after this one. A nil doc (sbsh never
+// started the terminal) only stops the observer.
+func (r *supervisorReporter) finalTerminal(doc *sbshapi.TerminalDoc) {
+	if r == nil {
+		return
+	}
+	r.update(func(s *v1beta1.TerminalSupervisorDoc) bool {
+		r.terminalFinal = true
+		if doc == nil {
+			return false
+		}
+		return replaceTerminal(s, terminalStatusFromSbsh(attachedTerminalID, doc.Status))
+	})
 }
 
 // terminalStatusFromSbsh copies the fields kukeon reports from sbsh's
 // terminal status. kukeon's API carries its own fields, not sbsh's type.
+// Once sbsh has recorded the workload's exit, Exit carries its code, or the
+// signal that killed it with the shell's 128+N code, and the time.
 func terminalStatusFromSbsh(id string, st sbshapi.TerminalStatus) v1beta1.SupervisorTerminalStatus {
 	out := v1beta1.SupervisorTerminalStatus{
 		ID:             id,
@@ -381,6 +369,16 @@ func terminalStatusFromSbsh(id string, st sbshapi.TerminalStatus) v1beta1.Superv
 	}
 	if len(st.Attachers) > 0 {
 		out.Attachers = append([]string(nil), st.Attachers...)
+	}
+	switch {
+	case st.ExitCode != nil:
+		out.Exit = &v1beta1.TerminalExit{Code: *st.ExitCode, At: st.ExitedAt}
+	case st.ExitSignal != "":
+		out.Exit = &v1beta1.TerminalExit{
+			Code:   signalExitCode(st.ExitSignal),
+			Signal: st.ExitSignal,
+			At:     st.ExitedAt,
+		}
 	}
 	return out
 }
