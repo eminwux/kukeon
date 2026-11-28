@@ -552,7 +552,7 @@ func TestVolume_LoginIdentityTag(t *testing.T) {
 	r := newMetadataTestExec(t, runPath, time.Now())
 
 	md := intmodel.VolumeMetadata{Name: "dev-state", Realm: "default"}
-	spec := intmodel.VolumeSpec{Connector: "claude", Method: "login", LoginMarker: ".credentials.json"}
+	spec := intmodel.VolumeSpec{Connector: "claude", Method: "manual", LoginMarker: ".credentials.json"}
 	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md, Spec: spec}); err != nil {
 		t.Fatalf("WriteVolume() error = %v", err)
 	}
@@ -595,7 +595,7 @@ func TestVolume_LoginStatus(t *testing.T) {
 	r := newMetadataTestExec(t, runPath, time.Now())
 
 	md := intmodel.VolumeMetadata{Name: "dev-state", Realm: "default"}
-	spec := intmodel.VolumeSpec{Connector: "claude", Method: "login", LoginMarker: ".credentials.json"}
+	spec := intmodel.VolumeSpec{Connector: "claude", Method: "manual", LoginMarker: ".credentials.json"}
 	if _, err := r.WriteVolume(intmodel.Volume{Metadata: md, Spec: spec}); err != nil {
 		t.Fatalf("WriteVolume() error = %v", err)
 	}

@@ -931,7 +931,7 @@ secret.
 
 Two more connectors are enabled without the role asking: the one that
 authenticates the pair's harness (`claude` or `codex` — exactly one of its
-methods per Config, the login by default) and `git`, for a role with
+methods per Config, `manual` by default) and `git`, for a role with
 `needs.repos`.
 
 A team decides **how** each connector is delivered and **which identity** fills
@@ -943,7 +943,7 @@ ask for itself:
 # kind: Team — a repository's kuketeam.yaml or the stored declaration
 spec:
   connectors:
-    claude: { method: subscription, identity: claude-team }
+    claude: { method: subscription-key, identity: claude-team }
     github: { identity: work-github }
     git: { identity: bot-key }
   roles:
@@ -986,16 +986,16 @@ a token method with its harness state. It writes the same fields as above:
 # kind: Team — after setting the team to work-max and "Own per role" on pm
 spec:
   connectors:
-    claude: { method: login, identity: work-max@default }
+    claude: { method: manual, identity: work-max@default }
   roles:
     - name: pm
       # ...
       connectors:
-        claude: { method: login } # a method and no identity: pm keeps <team>-pm-claude-state
+        claude: { method: manual } # a method and no identity: pm keeps <team>-pm-claude-state
 ```
 
 A role entry that names a method replaces the team's choice for that role
-whole, so **Own per role** is the login method with no identity. Every change
+whole, so **Own per role** is the `manual` method with no identity. Every change
 is previewed against each team it recomposes — with the cross-role warning
 when roles would share a login identity — and applied on confirm; running
 cells keep their identity until they restart. A team the user does not touch
@@ -1197,7 +1197,7 @@ configs and the sweep cell all mount the same one, so one harness login covers
 every cell of that role × harness.
 
 That Volume is the role's [login identity](connectors.md#login-identities)
-when the pair uses a `login` method. Its name does not change, and nothing has
+when the pair uses a `manual` method. Its name does not change, and nothing has
 to be migrated: the next cell start tags it with its connector, and until then
 `kuke connector list` and the web UI list it anyway. Log in to it with
 `kuke connector login <connector> <team>-<role>-<harness>-state --space <space>
@@ -1208,7 +1208,7 @@ Two choices in the team declaration change where a pair keeps its state, both
 under `connectors.<name>` of the connector that authenticates the harness (team
 or role entry):
 
-- `identity` with `method: login` names another login identity for the pair
+- `identity` with `method: manual` names another login identity for the pair
   instead of the team's own Volume. One that a Config of another role uses is
   accepted with a warning naming both roles, which `kuke team apply` prints
   under `Warnings` (`kuke apply -o json` in the Team's `warnings`): sharing is

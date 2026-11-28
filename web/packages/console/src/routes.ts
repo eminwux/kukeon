@@ -43,6 +43,8 @@ export function readRoute(): Route {
     // ?scope=[realm, space, stack] opens that connector's scope-default editor on a scope;
     // #/identities/assignments is the Assignments tab; #/identities/<name>/new-identity?scope=[…],
     // …/new-login?scope=[…] and …/rotate-identity?identity=[realm, space?, stack?, name] are the identity forms.
+    // #/identities/<name>/identity?identity=[…] and …/login?identity=[…] are the page of one Secret identity
+    // and of one login identity (#1805): a connector can hold both under the same name and scope.
     // The connector catalog is the Daemon page's Connectors tab: #/daemon/connectors and
     // #/daemon/connectors/<name>. The historical #/connectors routes open the matching new page.
     if (parts[0] === "identities" || parts[0] === "connectors") {
@@ -51,7 +53,7 @@ export function readRoute(): Route {
       let identity: unknown;
       try { identity = JSON.parse(params.get("identity") ?? "null"); } catch { identity = null; }
       const scope = Array.isArray(target) && target.every(value => typeof value === "string") ? target.slice(0, 3) : undefined;
-      const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" || (parts[0] === "identities" && parts[2] === "new-login") ? parts[2] : undefined;
+      const action = parts[2] === "new-identity" || parts[2] === "rotate-identity" || (parts[0] === "identities" && (parts[2] === "new-login" || parts[2] === "identity" || parts[2] === "login")) ? parts[2] : undefined;
       const identities = (connector: string | undefined, section?: string): Route => ({ view: "identities", scope: action && connector ? [connector] : [], parent: [], document: false, target: scope, action, identity: action && Array.isArray(identity) && identity.length >= 2 && identity.every(value => typeof value === "string") ? identity.slice(0, 4) : undefined, ...(connector && !action ? { connector } : {}), ...(section ? { section } : {}) });
       if (parts[0] === "connectors") {
         // #/connectors/<name>/new-identity, …/rotate-identity, and a connector page opened on a scope (the

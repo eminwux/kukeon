@@ -224,7 +224,7 @@ func TestCreateCell_ConnectorMethodFlagRejections(t *testing.T) {
 		"no method":         {[2]string{"from-config", "prod"}, []string{"codex"}, "want <connector>=<method>"},
 		"empty method":      {[2]string{"from-config", "prod"}, []string{"codex="}, "want <connector>=<method>"},
 		"bad method":        {[2]string{"from-config", "prod"}, []string{"codex=API KEY"}, "want <connector>=<method>"},
-		"named twice":       {[2]string{"from-config", "prod"}, []string{"codex=login", "codex=api-key"}, "more than once"},
+		"named twice":       {[2]string{"from-config", "prod"}, []string{"codex=manual", "codex=api-key"}, "more than once"},
 		"with a blueprint":  {[2]string{"from-blueprint", "web"}, []string{"codex=api-key"}, "only valid with --from-config"},
 		"with a clone":      {[2]string{"clone", "src"}, []string{"codex=api-key"}, "only valid with --from-config"},
 		"with a bare image": {[2]string{"image", "busybox"}, []string{"codex=api-key"}, "only valid with --from-config"},

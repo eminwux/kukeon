@@ -16,8 +16,8 @@ spec:
     - name: ANTHROPIC_MODEL
       default: opus
   # How the cell authenticates is not declared here: it is the `claude`
-  # connector (team/connectors/claude), whose method - the login in the state
-  # volume, a subscription token or an API key - a team picks per Config.
+  # connector (team/connectors/claude), whose method - `manual` (the login in
+  # the state volume), `subscription-key` or `api-key` - a team picks per Config.
   # The mode is picked per cell at create time (`--mode`), so one role config
   # serves both an attached session and a dispatched run.
   modes:

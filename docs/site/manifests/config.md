@@ -102,7 +102,7 @@ Image capabilities this Config's cells need on top of the blueprint's and its en
 
 ### `spec.components` (array of string, optional)
 
-The blueprint's **optional** components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell. Components that share a `group` are alternatives: enabling two of one group — `claude-subscription` and `claude-api-key`, say — is an apply-time error.
+The blueprint's **optional** components to enable, by name. A component that is not optional is always on and need not be listed; naming a component the blueprint does not declare is an apply-time error. Enabling a component adds its parameters, env, secret slots and required capabilities to the cell. Components that share a `group` are alternatives: enabling two of one group — `claude-subscription-key` and `claude-api-key`, say — is an apply-time error.
 
 A `connector` component makes its [connector](../concepts/connectors.md) a requirement of the Config's cells. Which identity fills it is resolved at render time: a per-cell `--connector`, else this Config's `spec.secrets` fill (or `spec.git.identityRef`), else the Stack, Space and Realm defaults.
 
@@ -240,8 +240,8 @@ status:
       identity: { name: work-github, realm: default }
       origin: realm
     - connector: claude
-      component: claude-login
-      method: login
+      component: claude-manual
+      method: manual
       delivery: stateVolume
       state: resolved
       volume: team-dev-claude-state

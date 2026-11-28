@@ -463,7 +463,7 @@ sudo kuke create cell --from-config team-dev-codex --connector-method codex=api-
 - `--connector <name>` on `kuke create secret` validates the secret against that connector: an unknown connector, a type the connector does not accept, an unknown identity field, a missing required field or a value that does not read as its declared type exits non-zero and stores nothing. An identity field without `--connector` exits non-zero.
 - `kuke get secrets` shows `TYPE` and `CONNECTOR`; `-o wide` adds the readable `IDENTITY` fields. No list, table row, log line or error carries secret material; a named `kuke get secret <name> -o yaml|json` prints it.
 - The identity of a connector resolves per cell as: `--connector` override > the Config's fill > Stack default > Space default > Realm default. A Config that chose no identity has no fill, so changing a default changes its next cell with no re-apply of the Config.
-- `kuke get configs -o wide` prints a `CONNECTORS` column (`github=work-github (realm)`, `claude=login`, `github=MISSING`); `-o yaml` carries the same resolution in `status.connectors`.
+- `kuke get configs -o wide` prints a `CONNECTORS` column (`github=work-github (realm)`, `claude=manual`, `github=MISSING`); `-o yaml` carries the same resolution in `status.connectors`.
 - A Config whose required connector resolves to no identity cannot be previewed (`--dry-run`) or created: the command exits non-zero with an error naming the connector. A named identity that is missing, tagged for another connector or of a type the connector does not accept exits non-zero too, also for an optional connector.
 - A Config that enables two components of one group (two ways to authenticate one harness) is rejected at apply.
 - `--connector <connector>=<secret>[@realm[/space[/stack]]]` is valid with `--from-config` only (`kuke create cell`, `kuke run`). A connector the Config does not require exits non-zero. The override is recorded in `spec.provenance.connectorOverrides` and is used again by `kuke restart`, a reconcile-driven recreate and `--clone`.
@@ -497,7 +497,7 @@ sudo kuke run -c team-pm-claude --state ephemeral
 **Invariants.**
 
 - A Volume has a readable `spec.connector`, `spec.method` and `spec.loginMarker`; `kuke get volume <v> -o yaml` and `kuke get volumes -o wide` (`CONNECTOR`, `METHOD`, `LOGIN`) show them. A method or marker without a connector, and a marker that is not a path inside the volume, exit non-zero on `kuke apply` and `kuke create volume`.
-- Starting a cell from a Config that uses a `login` method tags its state Volume with the connector, method and marker — when the start creates the Volume and when it already existed untagged. An ensure mount never resets an existing Volume's reclaim policy or tag.
+- Starting a cell from a Config that uses a `manual` method tags its state Volume with the connector, method and marker — when the start creates the Volume and when it already existed untagged. An ensure mount never resets an existing Volume's reclaim policy or tag.
 - A Volume tagged for one connector is refused as the state volume of another: the cell is not created, and the error names both connectors.
 - `kuke connector list` lists every login identity with `TYPE login`, its scope, `STATUS` (`logged in` / `empty`, `-` when unknown) and `USED BY`. A state volume a Config logs in through is listed before any cell start has tagged it.
 - The status is the existence of the marker the connector declares (`login.marker` in `connector.yaml`). kukeond stats it and never opens it; no command output, error or web UI response carries the content of a login.
@@ -508,7 +508,7 @@ sudo kuke run -c team-pm-claude --state ephemeral
 - Binding a login identity that Configs of another `kukeon.io/role` already use exits non-zero with an error naming both roles: `kuke apply` of a Config that names it as its state volume through a login method (nothing is stored, and the role already using it keeps creating cells), and `--connector <connector>=<volume>` on a cell. Configs of the same role, and Configs without a role label, may share one.
 - `spec.state` on a Config, `connectors.<name>.state` in a team declaration and `--state` on a cell choose `persistent` (default) or `ephemeral` harness state. An `ephemeral` cell mounts no state Volume and starts authenticated from its Secret. `--state` is valid with `--from-config` only and is recorded in `spec.provenance.state`. Existing Configs render unchanged.
 - `ephemeral` with a method that keeps its login in the state volume exits non-zero, on `kuke apply` of the Config, at composition of the team and at cell creation, with an error saying the login would not survive the cell.
-- `kuke get configs -o wide` shows, per harness connector, the identity and the state: `claude=login [<volume>, logged in]`, `claude=<secret> (realm) [state <volume>]`, `[state ephemeral]`.
+- `kuke get configs -o wide` shows, per harness connector, the identity and the state: `claude=manual [<volume>, logged in]`, `claude=<secret> (realm) [state <volume>]`, `[state ephemeral]`.
 - Team state volume names (`<team>-<role>-<harness>-state`) do not change, and a declaration that sets neither `identity` (for a login) nor `state` renders the same Config values as before.
 
 ### Importing a git identity (`kuke connector`)

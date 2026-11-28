@@ -1,8 +1,8 @@
 # Claude connector: how a Claude Code cell authenticates.
 #
 # The three methods are mutually exclusive (group claude-auth); `kuke team`
-# enables exactly one on every claude Config. `login` is the default because it
-# is what a cell did before connectors existed: with no token in its
+# enables exactly one on every claude Config. `manual` is the default because
+# it is what a cell did before connectors existed: with no token in its
 # environment, Claude Code uses the login kept in the harness state volume.
 apiVersion: v1beta1
 kind: Connector
@@ -17,7 +17,7 @@ spec:
   identity:
     secretTypes: [opaque]
   methods:
-    - name: login
+    - name: manual
       default: true
       delivery: stateVolume
       description: >-
@@ -27,7 +27,7 @@ spec:
         # Claude Code writes its OAuth credentials here on Linux.
         marker: .credentials.json
         command: [claude, auth, login]
-    - name: subscription
+    - name: subscription-key
       delivery: env
       description: >-
         A subscription token from `claude setup-token` (Pro, Max, Team or

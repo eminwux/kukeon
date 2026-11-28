@@ -264,7 +264,7 @@ identity of the connector.
 | `--clear`  | `false`                              | Remove the Realm's default. Takes no identity.           |
 
 An identity without a realm is looked up in `--realm`, else `default`. A
-connector with several methods that take an identity (`claude`: `subscription`
+connector with several methods that take an identity (`claude`: `subscription-key`
 and `api-key`) needs `--method`. The command prints the new default and the one
 it replaced, in the same form as `import git --default`.
 
@@ -278,7 +278,7 @@ kuke connector default git git-ssh
 kuke connector default git git-ssh --realm dev
 
 # A token default for one method of a multi-method connector
-kuke connector default claude claude-team --method subscription
+kuke connector default claude claude-team --method subscription-key
 
 # Remove the default
 kuke connector default git --clear

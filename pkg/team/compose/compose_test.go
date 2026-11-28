@@ -519,7 +519,7 @@ func assertRootResources(t *testing.T, result *compose.Result) {
 	// authenticates (issue #1548): with nothing chosen, the login kept in the
 	// state volume.
 	if !slices.Equal(p.Config.Spec.Requires, []string{"go"}) ||
-		!slices.Equal(p.Config.Spec.Components, []string{"codex-login"}) {
+		!slices.Equal(p.Config.Spec.Components, []string{"codex-manual"}) {
 		t.Fatalf("config requires %v components %v", p.Config.Spec.Requires, p.Config.Spec.Components)
 	}
 	if !slices.Equal(bp.Spec.Requires, []string{"git"}) {

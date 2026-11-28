@@ -75,7 +75,7 @@ func TestTeamConnectorChoices(t *testing.T) {
 		fill       *api.ContainerSecretRef
 		defaults   []string
 	}{
-		{name: "nothing chosen", component: "claude-login"},
+		{name: "nothing chosen", component: "claude-manual"},
 		{
 			name:      "team picks a method",
 			team:      map[string]config.ConnectorChoice{auth: {Method: "api-key"}},
@@ -83,27 +83,27 @@ func TestTeamConnectorChoices(t *testing.T) {
 		},
 		{
 			name:      "team picks a method and an identity",
-			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription", Identity: "team-sub"}},
-			component: "claude-subscription", slot: "claude-code-oauth-token", fill: ref("team-sub"),
+			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription-key", Identity: "team-sub"}},
+			component: "claude-subscription-key", slot: "claude-code-oauth-token", fill: ref("team-sub"),
 		},
 		{
 			name:      "role identity keeps the team method",
-			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription", Identity: "team-sub"}},
+			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription-key", Identity: "team-sub"}},
 			role:      map[string]config.ConnectorChoice{auth: {Identity: "role-sub@auth/shared"}},
-			component: "claude-subscription", slot: "claude-code-oauth-token",
+			component: "claude-subscription-key", slot: "claude-code-oauth-token",
 			fill: &api.ContainerSecretRef{Name: "role-sub", Realm: "auth", Space: "shared"},
 		},
 		{
 			name:      "role method wins over the team",
-			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription", Identity: "team-sub"}},
+			team:      map[string]config.ConnectorChoice{auth: {Method: "subscription-key", Identity: "team-sub"}},
 			role:      map[string]config.ConnectorChoice{auth: {Method: "api-key"}},
 			component: "claude-api-key", slot: "anthropic-api-key", defaults: []string{"anthropic-api-key"},
 		},
 		{
 			name:      "role returns to the login",
 			team:      map[string]config.ConnectorChoice{auth: {Method: "api-key", Identity: "team-key"}},
-			role:      map[string]config.ConnectorChoice{auth: {Method: "login"}},
-			component: "claude-login",
+			role:      map[string]config.ConnectorChoice{auth: {Method: "manual"}},
+			component: "claude-manual",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,12 +123,12 @@ func TestTeamConnectorChoices(t *testing.T) {
 			// Every method is on the form, so a Config can be re-pointed
 			// without a new blueprint.
 			form := componentNames(pair.Blueprint)
-			for _, method := range []string{"claude-login", "claude-subscription", "claude-api-key"} {
+			for _, method := range []string{"claude-manual", "claude-subscription-key", "claude-api-key"} {
 				if !slices.Contains(form, method) {
 					t.Fatalf("blueprint components %v lack %s", form, method)
 				}
 			}
-			if slices.Contains(form, "codex-login") {
+			if slices.Contains(form, "codex-manual") {
 				t.Fatalf("another harness's auth leaked into the claude blueprint: %v", form)
 			}
 			fill, filled := pair.Config.Spec.Secrets[tc.slot]
@@ -142,7 +142,7 @@ func TestTeamConnectorChoices(t *testing.T) {
 			// The other harness is untouched by a choice for this one.
 			if other := pairOf(t, result, "codex"); !slices.Equal(
 				other.Config.Spec.Components,
-				[]string{"codex-login"},
+				[]string{"codex-manual"},
 			) {
 				t.Fatalf("codex components = %v", other.Config.Spec.Components)
 			}
@@ -170,11 +170,11 @@ func TestLegacySecretNamesSelectAMethod(t *testing.T) {
 	}
 	pair := pairOf(t, result, "claude")
 	// Methods are tried in the connector's order, not the role's.
-	if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription"}) {
+	if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription-key"}) {
 		t.Fatalf("components = %v", pair.Config.Spec.Components)
 	}
 	if !slices.ContainsFunc(result.Notes, func(note string) bool {
-		return strings.Contains(note, "subscription and api-key") && strings.Contains(note, "alternatives")
+		return strings.Contains(note, "subscription-key and api-key") && strings.Contains(note, "alternatives")
 	}) {
 		t.Fatalf("no note about the alternative methods: %v", result.Notes)
 	}
@@ -184,11 +184,11 @@ func TestLegacySecretNamesSelectAMethod(t *testing.T) {
 	}
 
 	// A team choice overrides what the role's secret names imply.
-	cfg.Spec.Defaults.Connectors = map[string]config.ConnectorChoice{"claude": {Method: "login"}}
+	cfg.Spec.Defaults.Connectors = map[string]config.ConnectorChoice{"claude": {Method: "manual"}}
 	if result, err = compose.Compose(cfg, selectedTeam(cfg), opts); err != nil {
 		t.Fatal(err)
 	}
-	if pair = pairOf(t, result, "claude"); !slices.Equal(pair.Config.Spec.Components, []string{"claude-login"}) {
+	if pair = pairOf(t, result, "claude"); !slices.Equal(pair.Config.Spec.Components, []string{"claude-manual"}) {
 		t.Fatalf("components with a team choice = %v", pair.Config.Spec.Components)
 	}
 }
@@ -228,7 +228,7 @@ func TestHarnessDeclaringItsOwnAuthSlots(t *testing.T) {
 		t.Fatalf("cell secrets = %v", names)
 	}
 	// The codex blueprint of the same team still gets its connector.
-	if other := pairOf(t, result, "codex"); !slices.Equal(other.Config.Spec.Components, []string{"codex-login"}) {
+	if other := pairOf(t, result, "codex"); !slices.Equal(other.Config.Spec.Components, []string{"codex-manual"}) {
 		t.Fatalf("codex components = %v", other.Config.Spec.Components)
 	}
 }
@@ -265,7 +265,7 @@ func TestGitConnectorOnAConfig(t *testing.T) {
 	}
 
 	result = compose1(t, true, nil)
-	if cfg := result.Pairs[0].Config; !slices.Equal(cfg.Spec.Components, []string{"codex-login", "git"}) ||
+	if cfg := result.Pairs[0].Config; !slices.Equal(cfg.Spec.Components, []string{"codex-manual", "git"}) ||
 		cfg.Spec.Git != nil {
 		t.Fatalf("role with repositories: components=%v git=%+v", cfg.Spec.Components, cfg.Spec.Git)
 	}
@@ -297,8 +297,8 @@ func TestConnectorIsData(t *testing.T) {
 	}
 	pair := result.Pairs[0]
 	component := connectortest.Name + "-token"
-	if !slices.Equal(pair.Config.Spec.Components, []string{component, "codex-login"}) &&
-		!slices.Equal(pair.Config.Spec.Components, []string{"codex-login", component}) {
+	if !slices.Equal(pair.Config.Spec.Components, []string{component, "codex-manual"}) &&
+		!slices.Equal(pair.Config.Spec.Components, []string{"codex-manual", component}) {
 		t.Fatalf("components = %v", pair.Config.Spec.Components)
 	}
 	i := slices.IndexFunc(pair.Blueprint.Spec.Components, func(c api.BlueprintComponent) bool {
@@ -354,7 +354,7 @@ func TestConnectorChoiceRejections(t *testing.T) {
 		{
 			name: "unknown method",
 			team: map[string]config.ConnectorChoice{"claude": {Method: "magic"}},
-			want: `has no method "magic" (methods: login, subscription, api-key)`,
+			want: `has no method "magic" (methods: manual, subscription-key, api-key)`,
 		},
 		{
 			name: "ephemeral state with a login",
@@ -415,7 +415,7 @@ func TestTeamHarnessState(t *testing.T) {
 		},
 		{
 			name:   "role names a scoped login identity",
-			team:   map[string]config.ConnectorChoice{auth: {Method: "login"}},
+			team:   map[string]config.ConnectorChoice{auth: {Method: "manual"}},
 			role:   map[string]config.ConnectorChoice{auth: {Identity: "shared-login@auth/teams/core"}},
 			volume: [4]string{"shared-login", "auth", "teams", "core"},
 		},
@@ -425,7 +425,7 @@ func TestTeamHarnessState(t *testing.T) {
 			// team's choice whole, so the role keeps its own state volume.
 			name: "role keeps its own state volume under a team login identity",
 			team: map[string]config.ConnectorChoice{auth: {Identity: "work-max"}},
-			role: map[string]config.ConnectorChoice{auth: {Method: "login"}},
+			role: map[string]config.ConnectorChoice{auth: {Method: "manual"}},
 		},
 		{
 			name:  "ephemeral state with a token method",
@@ -507,7 +507,7 @@ func TestSubscriptionDefaultServesEveryRole(t *testing.T) {
 	addRole(source, "reviewer")
 	cfg.Spec.Defaults.Roles = append(cfg.Spec.Defaults.Roles,
 		config.Role{Name: "reviewer", Source: "kukeon", Path: "team/roles/reviewer"})
-	cfg.Spec.Defaults.Connectors = map[string]config.ConnectorChoice{"claude": {Method: "subscription"}}
+	cfg.Spec.Defaults.Connectors = map[string]config.ConnectorChoice{"claude": {Method: "subscription-key"}}
 	team := selectedTeam(cfg)
 	team.Spec.Harnesses = slices.Clone(cfg.Spec.Defaults.Harnesses)
 	result, err := compose.Compose(cfg, team, opts)
@@ -525,7 +525,7 @@ func TestSubscriptionDefaultServesEveryRole(t *testing.T) {
 	volumes := map[string]bool{}
 	for i, mode := range []string{interactive, headless} {
 		pair := result.Pairs[i]
-		if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription"}) ||
+		if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription-key"}) ||
 			len(pair.Config.Spec.Secrets) != 0 {
 			t.Fatalf("%s: components=%v fills=%+v", pair.Role, pair.Config.Spec.Components, pair.Config.Spec.Secrets)
 		}

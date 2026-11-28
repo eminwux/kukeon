@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterRows, identityRows, markDefaults, roleOf, scopeDefaults, systemDefaults, usedByCount } from "./identities.mjs";
+import { defaultLabel, filterRows, findRow, identityRows, loginMethodOf, markDefaults, pageKind, pageLogin, pageOf, pageSecret, pinnedFor, roleOf, searchRows, unpinnedRows, usedBySummary, scopeDefaults, systemDefaults, usedByCount } from "./identities.mjs";
 
 // A test-only catalog: a harness connector with a login and a token method, a git-delivered one and a
 // registry-delivered one — nothing here is a connector the UI knows by name.
@@ -88,4 +88,61 @@ test("systemDefaults pins one row per connector × method: the default team's ag
 test("filterRows narrows to one connector", () => {
   assert.deepEqual(filterRows(rows, "repo").map(item => item.name), ["git-ssh"]);
   assert.equal(filterRows(rows, "").length, rows.length);
+});
+
+test("a login identity with no method tag takes the connector's login method from the catalog", () => {
+  const renamed = [{ ...connectors[0], methods: [{ name: "key", delivery: "env" }, { name: "manual", delivery: "stateVolume" }, { name: "browser", delivery: "stateVolume", default: true }] }];
+  assert.equal(loginMethodOf(renamed[0]), "browser");
+  assert.equal(loginMethodOf({ ...renamed[0], methods: renamed[0].methods.slice(0, 2) }), "manual");
+  assert.equal(loginMethodOf(connectors[1]), "");
+  const untagged = [{ connector: "agent", volume: { name: "dev-state", realm: "default" }, exists: true, tagged: false, login: { state: "empty" }, usedBy: [] }];
+  const [got] = identityRows({ connectors: renamed, secrets: [], logins: untagged, configs: [], scopes: [[], [], []] });
+  assert.equal(got.method, "browser");
+});
+
+test("findRow opens the row a page route names, telling a Secret from a login identity of the same name and scope", () => {
+  const twin = identityRows({ connectors, secrets: [secret("work-max", "default", "agent")], logins, configs: [], scopes: [[], [], []] });
+  const secretRow = findRow(twin, pageSecret, "agent", ["default", "work-max"]);
+  const loginRow = findRow(twin, pageLogin, "agent", ["default", "work-max"]);
+  assert.equal(secretRow.kind, "secret");
+  assert.equal(loginRow.kind, "login");
+  assert.notEqual(secretRow.key, loginRow.key);
+  assert.equal(pageKind(secretRow), pageSecret);
+  assert.equal(pageKind(loginRow), pageLogin);
+  // A login identity not created yet has a page; a stack-scoped one is named by its whole scope.
+  assert.equal(findRow(rows, pageLogin, "agent", ["default", "default", "default", "default-agent-agent-state"]).exists, false);
+  assert.equal(findRow(rows, pageLogin, "agent", ["default", "default-agent-agent-state"]), undefined);
+  assert.equal(findRow(rows, pageSecret, "agent", ["default", "nope"]), undefined);
+  assert.equal(findRow(rows, pageSecret, "repo", ["default", "agent-key"]), undefined, "another connector's page");
+  assert.equal(findRow(rows, pageSecret, "agent", ["agent-key"]), undefined, "a reference without a realm");
+});
+
+test("a pinned identity is listed once: pinnedFor names its system defaults and unpinnedRows drops it below", () => {
+  const pinned = systemDefaults({ connectors, rows, realmDefaults: [{ connector: "agent", method: "key", levels: { realm: { name: "agent-key", realm: "default" } } }] });
+  const keyRow = row("agent-key");
+  assert.deepEqual(pinnedFor(pinned, keyRow).map(item => item.method), ["key"]);
+  assert.deepEqual(pinnedFor(pinned, row("spare")), []);
+  const below = unpinnedRows(rows, pinned).map(item => item.name);
+  assert.ok(!below.includes("agent-key") && !below.includes("default-agent-agent-state"), below.join(","));
+  assert.ok(below.includes("spare") && below.includes("work-max"));
+  // A Not set up row pins nothing.
+  assert.equal(unpinnedRows(rows, systemDefaults({ connectors, rows: [], realmDefaults: [] })).length, rows.length);
+});
+
+test("searchRows narrows by name and pageOf pages 25 at a time", () => {
+  assert.deepEqual(searchRows(rows, " WORK ").map(item => item.name), ["work-max"]);
+  assert.equal(searchRows(rows, "").length, rows.length);
+  const many = Array.from({ length: 53 }, (_, i) => i);
+  assert.deepEqual(pageOf(many, 0), { items: many.slice(0, 25), page: 0, last: 2, first: 1, end: 25, total: 53 });
+  assert.deepEqual(pageOf(many, 2).items, [50, 51, 52]);
+  assert.equal(pageOf(many, 9).page, 2, "a page past the end shows the last one");
+  assert.deepEqual(pageOf([], 3), { items: [], page: 0, last: 0, first: 0, end: 0, total: 0 });
+});
+
+test("usedBySummary counts the Configs and teams, and names the defaults when no Config uses the identity", () => {
+  assert.equal(usedBySummary(row("work-max")), "2 Configs · 2 teams");
+  assert.equal(usedBySummary(row("agent-key")), "2 Configs · 2 teams");
+  assert.equal(usedBySummary(row("git-ssh")), "Realm default default");
+  assert.equal(usedBySummary(row("spare")), "");
+  assert.equal(defaultLabel({ level: "stack", scope: ["dev", "teams", "core"] }), "Stack default dev / teams / core");
 });

@@ -1,7 +1,7 @@
 # Codex connector: how a Codex cell authenticates.
 #
 # The three methods are mutually exclusive (group codex-auth); `kuke team`
-# enables exactly one on every codex Config. `login` is the default: on a
+# enables exactly one on every codex Config. `manual` is the default: on a
 # personal ChatGPT plan `codex login` is the only option, and it is what a cell
 # did before connectors existed.
 apiVersion: v1beta1
@@ -17,7 +17,7 @@ spec:
   identity:
     secretTypes: [opaque]
   methods:
-    - name: login
+    - name: manual
       default: true
       delivery: stateVolume
       description: >-

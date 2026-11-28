@@ -385,7 +385,7 @@ func TestApplyDocuments_VolumeRoutesToReconcile(t *testing.T) {
 // re-tags a login identity for another connector (#1685).
 func TestCreateVolume_LoginIdentityTag(t *testing.T) {
 	stored := intmodel.VolumeSpec{
-		ReclaimPolicy: intmodel.ReclaimRetain, Connector: "claude", Method: "login", LoginMarker: ".credentials.json",
+		ReclaimPolicy: intmodel.ReclaimRetain, Connector: "claude", Method: "manual", LoginMarker: ".credentials.json",
 	}
 	newCtrl := func(existing intmodel.VolumeSpec, wrote *[]intmodel.Volume) *controller.Exec {
 		return setupTestController(t, &fakeRunner{
@@ -414,7 +414,7 @@ func TestCreateVolume_LoginIdentityTag(t *testing.T) {
 
 	t.Run("an untagged volume is tagged", func(t *testing.T) {
 		var wrote []intmodel.Volume
-		tag := intmodel.VolumeSpec{Connector: "claude", Method: "login"}
+		tag := intmodel.VolumeSpec{Connector: "claude", Method: "manual"}
 		existing := intmodel.VolumeSpec{ReclaimPolicy: intmodel.ReclaimRetain}
 		if _, err := newCtrl(existing, &wrote).CreateVolume(intmodel.Volume{Metadata: md, Spec: tag}); err != nil {
 			t.Fatalf("CreateVolume() error = %v", err)
@@ -429,7 +429,7 @@ func TestCreateVolume_LoginIdentityTag(t *testing.T) {
 	t.Run("another connector is refused", func(t *testing.T) {
 		var wrote []intmodel.Volume
 		_, err := newCtrl(stored, &wrote).CreateVolume(intmodel.Volume{
-			Metadata: md, Spec: intmodel.VolumeSpec{Connector: "codex", Method: "login"},
+			Metadata: md, Spec: intmodel.VolumeSpec{Connector: "codex", Method: "manual"},
 		})
 		if !errors.Is(err, errdefs.ErrVolumeIdentity) || len(wrote) != 0 {
 			t.Fatalf("error = %v, wrote = %+v; want ErrVolumeIdentity and no write", err, wrote)

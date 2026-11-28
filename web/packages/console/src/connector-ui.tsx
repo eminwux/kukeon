@@ -60,6 +60,12 @@ export function rotateIdentityLink(connector: string, identity: Partial<SecretRe
   const parts = scopeParts(scope);
   return routeHref(`/identities/${encodeURIComponent(connector)}/rotate-identity` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : "") + (parts.length ? `${ref ? "&" : "?"}scope=${encodeURIComponent(JSON.stringify(parts))}` : ""));
 }
+// identityPageLink opens the page of one identity (#1805): kind "login" for a login identity, else a
+// Secret identity. A login identity not created yet has a page too.
+export function identityPageLink(connector: string, kind: string, identity: Partial<SecretRef>): string {
+  const ref = secretRef(identity);
+  return routeHref(`/identities/${encodeURIComponent(connector)}/${kind === "login" ? "login" : "identity"}` + (ref ? `?identity=${encodeURIComponent(JSON.stringify([...refScope(ref), ref.name]))}` : ""));
+}
 function levelTitle(level: string): string { return `${level[0].toUpperCase()}${level.slice(1)}`; }
 export function levelLabel(level: string, scope: Partial<Scope>): string { return `${levelTitle(level)} — ${scopeParts(scopeAt(scope, level)).join(" / ")}`; }
 

@@ -279,7 +279,7 @@ func nextColumn(c *v1beta1.CellConfigDoc) string {
 // connectorsColumn renders the CONNECTORS column: one `<connector>=<what fills
 // it>` entry per connector the Config requires. What fills it is the identity
 // and the level it comes from (`gh-token (realm)`), the method for a connector
-// that keeps a login in the state volume (`login`), `MISSING` for a required
+// that keeps a login in the state volume (`manual`), `MISSING` for a required
 // connector nothing resolves — a cell cannot be created until one does — and
 // `none` for one the cell starts without. A connector that authenticates a
 // harness adds, in brackets, where the harness keeps its state: the login

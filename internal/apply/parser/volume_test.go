@@ -146,16 +146,16 @@ func TestValidateDocument_Volume_ReclaimPolicy(t *testing.T) {
 func TestValidateDocument_Volume_ConnectorTag(t *testing.T) {
 	base := "apiVersion: v1beta1\nkind: Volume\nmetadata:\n  name: data\n  realm: default\n"
 
-	doc := parseVolume(t, base+"spec:\n  connector: claude\n  method: login\n  loginMarker: .credentials.json\n")
+	doc := parseVolume(t, base+"spec:\n  connector: claude\n  method: manual\n  loginMarker: .credentials.json\n")
 	if err := parser.ValidateDocument(doc); err != nil {
 		t.Fatalf("tagged volume should be valid, got: %v", err)
 	}
-	if spec := doc.VolumeDoc.Spec; spec.Connector != "claude" || spec.Method != "login" || !spec.IsLoginIdentity() {
+	if spec := doc.VolumeDoc.Spec; spec.Connector != "claude" || spec.Method != "manual" || !spec.IsLoginIdentity() {
 		t.Errorf("parsed spec = %+v, want the claude login tag", spec)
 	}
 
 	for name, spec := range map[string]string{
-		"method without connector":  "spec:\n  method: login\n",
+		"method without connector":  "spec:\n  method: manual\n",
 		"marker without connector":  "spec:\n  loginMarker: auth.json\n",
 		"marker escapes the volume": "spec:\n  connector: claude\n  loginMarker: ../../secrets/x\n",
 		"absolute marker":           "spec:\n  connector: claude\n  loginMarker: /etc/passwd\n",

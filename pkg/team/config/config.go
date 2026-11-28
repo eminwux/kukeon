@@ -142,8 +142,8 @@ type Defaults struct {
 // ConnectorChoice is what a team (or one of its roles) decides for one
 // connector. Both fields are optional.
 type ConnectorChoice struct {
-	// Method picks one of the connector's methods (for example `subscription`,
-	// `api-key` or `login` for claude). Empty selects the connector's default.
+	// Method picks one of the connector's methods (for example `subscription-key`,
+	// `api-key` or `manual` for claude). Empty selects the connector's default.
 	Method string `yaml:"method,omitempty"`
 	// Identity names the stored Secret that fills the connector, written
 	// `name[@realm[/space[/stack]]]`; without a scope it is looked up in the
@@ -151,7 +151,7 @@ type ConnectorChoice struct {
 	// later change of a default reaches the team's cells without a re-render.
 	//
 	// With a method that keeps its login in the harness state volume
-	// (`login`) it names a login identity instead: the Volume the role's cells
+	// (`manual`) it names a login identity instead: the Volume the role's cells
 	// keep their harness state in, in the same notation. Empty keeps the
 	// team's own `<team>-<role>-<harness>-state` (issue #1685).
 	Identity string `yaml:"identity,omitempty"`

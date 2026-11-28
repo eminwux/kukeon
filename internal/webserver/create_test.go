@@ -340,7 +340,7 @@ func TestConfigCreationReturnsConnectorWarnings(t *testing.T) {
 	const warning = `volume team-dev-claude@default is also the login identity of role dev; ` +
 		`role kuke/majordomo shares it at the operator's risk`
 	client := &creationClient{materializeCreated: true, connectors: []v1beta1.ConnectorStatus{
-		{Connector: "claude", Component: "claude-login", State: v1beta1.ConnectorResolved, Warning: warning},
+		{Connector: "claude", Component: "claude-manual", State: v1beta1.ConnectorResolved, Warning: warning},
 		{Connector: "github", Component: "github", State: v1beta1.ConnectorResolved},
 	}}
 	handler := testCreateHandler(t, client)
