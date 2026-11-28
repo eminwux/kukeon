@@ -823,6 +823,24 @@ func TestReconcileCells_OutOfSync_RevisionOnlyDriftStaysSynced(t *testing.T) {
 			},
 			moved: []string{cellconfig.AnnotationRenderConfigRevision},
 		},
+		{
+			// A fill-only move (issue #1776): the values hash covers the fill
+			// as written, but the render trims a repo fill's URL, so the cell
+			// renders the same. The hash is back-filled so the next tick does
+			// not rewrite it. A spec.values edit cannot stand in here: the
+			// cell's provenance records the values, so it changes the render.
+			name: "config fill changed, same render",
+			change: func(t *testing.T, mock *fakeRunner) {
+				cfg := renderConfig()
+				fill := cfg.Spec.Repos["project"]
+				fill.URL = "  " + fill.URL + "  "
+				cfg.Spec.Repos["project"] = fill
+				serveConfig(t, mock, cfg)
+			},
+			moved: []string{
+				cellconfig.AnnotationRenderConfigRevision, cellconfig.AnnotationRenderValuesHash,
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := newRenderRunner(t, &renderScope{}, renderConfig())

@@ -191,17 +191,30 @@ test-kukebuild:
 # fmt-clean (#1501), so any diff comes from the branch. Use golangci-lint
 # v2.6.2, the `rev` pinned in .pre-commit-config.yaml: another release can
 # format the same source differently. Fails on a non-zero exit (config or
-# parse error) or on any diff output.
+# parse error) or on any diff output, and says which of the two it was (#1780):
+# a missing binary, or one built with a Go older than go.mod's `go` line (it
+# refuses to load the config, exit 3), is a tool problem, not a formatting
+# diff. A diff exits 1 and prints `diff`/`---`/`+++` file headers.
 GOLANGCI_LINT ?= golangci-lint
+GOLANGCI_LINT_VERSION := v2.6.2
+GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
+GOLANGCI_LINT_INSTALL := GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: fmt-check
 fmt-check:
-	@out="$$($(GOLANGCI_LINT) fmt --diff ./... 2>&1)"; rc=$$?; \
-	if [ "$$rc" -ne 0 ] || [ -n "$$out" ]; then \
-		printf '%s\n' "$$out"; \
-		echo "golangci-lint formatters would change the files above. Run 'GOWORK=off $(GOLANGCI_LINT) fmt ./...' (v2.6.2) and commit the result." >&2; \
+	@if ! command -v $(GOLANGCI_LINT) >/dev/null 2>&1; then \
+		echo "fmt-check: $(GOLANGCI_LINT) not found on PATH. Install golangci-lint $(GOLANGCI_LINT_VERSION) built with Go $(GO_VERSION): '$(GOLANGCI_LINT_INSTALL)', or point GOLANGCI_LINT at a matching binary." >&2; \
 		exit 1; \
-	fi
+	fi; \
+	out="$$($(GOLANGCI_LINT) fmt --diff ./... 2>&1)"; rc=$$?; \
+	if [ "$$rc" -eq 0 ] && [ -z "$$out" ]; then exit 0; fi; \
+	printf '%s\n' "$$out"; \
+	if [ "$$rc" -le 1 ] && printf '%s\n' "$$out" | grep -qE '^(diff |--- )'; then \
+		echo "golangci-lint formatters would change the files above. Run 'GOWORK=off $(GOLANGCI_LINT) fmt ./...' ($(GOLANGCI_LINT_VERSION)) and commit the result." >&2; \
+	else \
+		echo "golangci-lint fmt failed (exit $$rc); the output above is not a formatting diff. If it says the Go version used to build golangci-lint is lower than the targeted one, rebuild it with Go $(GO_VERSION): '$(GOLANGCI_LINT_INSTALL)'." >&2; \
+	fi; \
+	exit 1
 
 # Ref the e2e suite uses for the local kukeond image. `kukebuild` writes it
 # straight into the kuke-system realm's containerd namespace before `go test`
