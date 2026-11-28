@@ -425,7 +425,7 @@ func parseArgs(args []string) (string, error) {
 // the path used before issue #1721: the container was created with the old
 // tty layout and its mounts cannot change, so it must be recreated.
 var errLegacyLayout = errors.New("container was created with the pre-#1721 tty layout; " +
-	"recreate it (kuke apply -f, or kuke delete and kuke run)")
+	"recreate it (kuke delete cell <name>, then kuke apply -f or kuke run again)")
 
 // refuseLegacyLayout reports errLegacyLayout when configPath is missing and
 // the pre-#1721 mount point legacyPath exists instead. kukeond refuses to

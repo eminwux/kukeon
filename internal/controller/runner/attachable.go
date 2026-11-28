@@ -34,6 +34,7 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	extmodel "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"golang.org/x/sys/unix"
 )
 
 // attachableTTYDirRootMode is the mode applied to the per-container tty
@@ -199,23 +200,95 @@ func (r *Exec) attachableBuildOpts(
 // ensureAttachableTerminalDir creates tty/terminals/ and the main terminal's
 // directory under ttyDir, applying mode (and the kukeon group when gid > 0)
 // to both explicitly, like the tty dir itself.
+//
+// attachablePostCreateChown re-owns tty/ and everything under it to the
+// container uid on every start, so a workload can replace terminals/ or
+// terminals/main with a symlink (or a file) before the next start. A
+// path-based MkdirAll/Chmod/Chown would follow such a link and hand a host
+// directory to root:kukeon. Each level is therefore resolved relative to its
+// parent's descriptor with O_NOFOLLOW: a non-directory entry is unlinked and
+// replaced with a fresh directory, and the mode and owner are set through
+// the opened descriptor, never through a path.
 func ensureAttachableTerminalDir(ttyDir string, mode os.FileMode, gid int) error {
-	terminalsDir := filepath.Join(ttyDir, consts.KukeonContainerTerminalsDir)
-	terminalDir := filepath.Join(terminalsDir, consts.KukeonContainerMainTerminal)
-	if err := os.MkdirAll(terminalDir, mode); err != nil {
-		return err
+	parent, err := openDirNoFollow(unix.AT_FDCWD, ttyDir)
+	if err != nil {
+		return fmt.Errorf("open %q: %w", ttyDir, err)
 	}
-	for _, dir := range []string{terminalsDir, terminalDir} {
-		if err := os.Chmod(dir, mode); err != nil {
-			return fmt.Errorf("chmod %q to %v: %w", dir, mode, err)
+	path := ttyDir
+	for _, name := range []string{consts.KukeonContainerTerminalsDir, consts.KukeonContainerMainTerminal} {
+		path = filepath.Join(path, name)
+		dir, dirErr := ensureDirAt(parent, name, path, mode, gid)
+		_ = parent.Close()
+		if dirErr != nil {
+			return dirErr
 		}
-		if gid > 0 {
-			if err := os.Chown(dir, 0, gid); err != nil {
-				return fmt.Errorf("chown %q to root:%d: %w", dir, gid, err)
-			}
+		parent = dir
+	}
+	return parent.Close()
+}
+
+// ensureDirAt makes name, relative to parent, a real directory with mode
+// (and root:gid when gid > 0) and returns it opened. path is name's full
+// path, used only in error messages. An existing directory is kept along
+// with its contents; any other entry, a symlink included, is unlinked
+// without being followed.
+func ensureDirAt(parent *os.File, name, path string, mode os.FileMode, gid int) (*os.File, error) {
+	parentFD := int(parent.Fd())
+	var st unix.Stat_t
+	switch err := unix.Fstatat(parentFD, name, &st, unix.AT_SYMLINK_NOFOLLOW); {
+	case err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR:
+	case err == nil:
+		if rmErr := unix.Unlinkat(parentFD, name, 0); rmErr != nil {
+			return nil, fmt.Errorf("remove non-directory %q: %w", path, rmErr)
+		}
+		if mkErr := mkdirAt(parentFD, name); mkErr != nil {
+			return nil, fmt.Errorf("mkdir %q: %w", path, mkErr)
+		}
+	case errors.Is(err, unix.ENOENT):
+		if mkErr := mkdirAt(parentFD, name); mkErr != nil {
+			return nil, fmt.Errorf("mkdir %q: %w", path, mkErr)
+		}
+	default:
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+	// O_NOFOLLOW|O_DIRECTORY: an entry swapped in after the check above
+	// fails the open instead of being followed.
+	dir, err := openDirNoFollow(parentFD, name)
+	if err != nil {
+		return nil, fmt.Errorf("open %q: %w", path, err)
+	}
+	if err = dir.Chmod(mode); err != nil {
+		_ = dir.Close()
+		return nil, fmt.Errorf("chmod %q to %v: %w", path, mode, err)
+	}
+	if gid > 0 {
+		if err = dir.Chown(0, gid); err != nil {
+			_ = dir.Close()
+			return nil, fmt.Errorf("chown %q to root:%d: %w", path, gid, err)
 		}
 	}
-	return nil
+	return dir, nil
+}
+
+// mkdirAt creates name under dirFD owner-only; the caller applies the final
+// mode through the opened descriptor. EEXIST is left to the caller's
+// O_NOFOLLOW open, which accepts only a real directory.
+func mkdirAt(dirFD int, name string) error {
+	err := unix.Mkdirat(dirFD, name, uint32(attachableTTYDirNoGroupMode))
+	if errors.Is(err, unix.EEXIST) {
+		return nil
+	}
+	return err
+}
+
+// openDirNoFollow opens name, relative to dirFD, as a directory without
+// following a symlink in its final component.
+func openDirNoFollow(dirFD int, name string) (*os.File, error) {
+	fd, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), name), nil
 }
 
 // writeKukettyDoc renders the per-container ContainerDoc and writes it

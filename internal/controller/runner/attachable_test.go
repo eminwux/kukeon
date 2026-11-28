@@ -1334,3 +1334,93 @@ func TestAttachableBuildOpts_CreatesMainTerminalDir(t *testing.T) {
 		}
 	}
 }
+
+// TestAttachableBuildOpts_TerminalDirRefusesPlantedEntries locks the
+// symlink-follow fix on the main terminal's directory setup. tty/ and its
+// children are owned by the container uid after a start, so the workload can
+// plant terminals -> <host dir> (or terminals/main -> <host dir>, or a file)
+// before the next start. The next start must replace the entry with a real
+// directory and leave the link's target untouched: no new child, mode
+// unchanged.
+func TestAttachableBuildOpts_TerminalDirRefusesPlantedEntries(t *testing.T) {
+	cases := []struct {
+		name  string
+		plant func(t *testing.T, terminalsDir, target string)
+	}{
+		{"terminals symlink", func(t *testing.T, terminalsDir, target string) {
+			if err := os.Symlink(target, terminalsDir); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"terminals/main symlink", func(t *testing.T, terminalsDir, target string) {
+			if err := os.Mkdir(terminalsDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(terminalsDir, consts.KukeonContainerMainTerminal)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"terminals regular file", func(t *testing.T, terminalsDir, _ string) {
+			if err := os.WriteFile(terminalsDir, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runPath := t.TempDir()
+			stub := filepath.Join(runPath, kukettyBinaryStagedSubdir, "kuketty")
+			if err := os.MkdirAll(filepath.Dir(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(stub, []byte("\x7fELF stub"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+			r.opts.RunPath = runPath
+			spec := intmodel.ContainerSpec{
+				ID: "work", RealmName: "default", SpaceName: "s", StackName: "k", CellName: "c", Attachable: true,
+			}
+			if _, err := r.attachableBuildOpts("default.kukeon.io", spec, nil, nil); err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+			terminalDir := fs.ContainerMainTerminalDir(runPath, "default", "s", "k", "c", "work")
+			terminalsDir := filepath.Dir(terminalDir)
+			if err := os.RemoveAll(terminalsDir); err != nil {
+				t.Fatal(err)
+			}
+			target := t.TempDir()
+			if err := os.Chmod(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			tc.plant(t, terminalsDir, target)
+
+			if _, err := r.attachableBuildOpts("default.kukeon.io", spec, nil, nil); err != nil {
+				t.Fatalf("restart: %v", err)
+			}
+			for _, dir := range []string{terminalsDir, terminalDir} {
+				info, err := os.Lstat(dir)
+				if err != nil {
+					t.Fatalf("lstat %s: %v", dir, err)
+				}
+				if !info.IsDir() || info.Mode().Perm() != attachableTTYDirNoGroupMode.Perm() {
+					t.Errorf("%s mode = %v, want real dir %v", dir, info.Mode(), attachableTTYDirNoGroupMode)
+				}
+			}
+			info, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o755 {
+				t.Errorf("symlink target mode = %v, want 0755 (followed)", info.Mode().Perm())
+			}
+			entries, err := os.ReadDir(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("symlink target gained entries %v (followed)", entries)
+			}
+		})
+	}
+}
