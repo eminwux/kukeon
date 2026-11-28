@@ -158,6 +158,7 @@ func TestRunWithCloudLinkServesThroughRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	relay.Authenticate = cloudlink.HeaderAuthenticator("X-User")
+	relay.Authorize = cloudlink.AllowAnyHost
 	srv := httptest.NewUnstartedServer(relay.Handler())
 	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
 	relay.ConfigureTLS(srv.TLS)
