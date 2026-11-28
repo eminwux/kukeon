@@ -947,6 +947,93 @@ type ReadContainerLogReply struct {
 	Err    *APIError
 }
 
+// ---- Recording ----
+
+// Recording formats (issue #1783). An Attachable container's capture is an
+// asciicast v2 recording; one started before #1783 that has not restarted
+// since still writes a raw capture, which has no timing.
+const (
+	RecordingFormatAsciicast = "asciicast"
+	RecordingFormatRaw       = "raw"
+)
+
+// ContainerRecording lists the retained segments of an Attachable
+// container's terminal recording — the capture sbsh rotates and prunes —
+// oldest first, the live segment last. Format is known from the file kukeond
+// resolved, never sniffed from its bytes. A container with no output yet has
+// no segments.
+type ContainerRecording struct {
+	Format   string
+	Segments []RecordingSegment
+}
+
+// RecordingSegment is one retained segment of a recording, as listed.
+type RecordingSegment struct {
+	// Seq orders segments: lower is older. The live segment carries the
+	// sequence number it keeps when sbsh rotates it, so after a rotation the
+	// same Seq names a closed segment.
+	Seq uint64
+	// Size is the stored size in bytes (the gzip size of a compressed
+	// segment) when it was listed. A live segment grows.
+	Size int64
+	// Compressed reports that the stored bytes are gzip.
+	Compressed bool
+	// Live reports the segment sbsh is still appending to.
+	Live bool
+}
+
+// RecordingSegmentRequest selects a byte range of one segment's stored
+// bytes. Offset is a byte offset into the stored (possibly compressed) bytes;
+// MaxBytes has ReadContainerLog's default and bounds
+// (ContainerLogDefaultMaxBytes, ContainerLogMaxBytes).
+type RecordingSegmentRequest struct {
+	Seq      uint64
+	Offset   int64
+	MaxBytes int
+}
+
+// RecordingSegmentResult is one bounded chunk of a segment's bytes, as
+// stored: kukeond neither decompresses nor parses them.
+//
+// Live is false once the segment has rotated, which is how a client
+// following the live segment by offset learns of the rotation: it then
+// re-reads the segment, now closed and possibly compressed, from 0. An Offset
+// beyond Size returns no data and leaves Next at Offset.
+type RecordingSegmentResult struct {
+	Data       []byte
+	Start      int64
+	Next       int64
+	Size       int64
+	More       bool
+	Compressed bool
+	Live       bool
+}
+
+// ListContainerRecordingArgs is the wire request for ListContainerRecording.
+type ListContainerRecordingArgs struct {
+	Doc v1beta1.ContainerDoc
+}
+
+// ListContainerRecordingReply is the wire reply for ListContainerRecording.
+type ListContainerRecordingReply struct {
+	Result ContainerRecording
+	Err    *APIError
+}
+
+// ReadContainerRecordingSegmentArgs is the wire request for
+// ReadContainerRecordingSegment.
+type ReadContainerRecordingSegmentArgs struct {
+	Doc     v1beta1.ContainerDoc
+	Request RecordingSegmentRequest
+}
+
+// ReadContainerRecordingSegmentReply is the wire reply for
+// ReadContainerRecordingSegment.
+type ReadContainerRecordingSegmentReply struct {
+	Result RecordingSegmentResult
+	Err    *APIError
+}
+
 // ---- Refresh ----
 
 type RefreshAllArgs struct{}

@@ -181,6 +181,17 @@ type Client interface {
 	// exists but its stream file does not. Read-only; see
 	// ContainerLogRequest for the cursor contract.
 	ReadContainerLog(ctx context.Context, doc v1beta1.ContainerDoc, req ContainerLogRequest) (ContainerLogResult, error)
+	// ListContainerRecording lists the retained segments of an Attachable
+	// container's terminal recording, running or stopped (issue #1783). It
+	// surfaces ErrContainerNotFound for a missing container and
+	// ErrRecordingUnavailable for a non-Attachable one. Read-only.
+	ListContainerRecording(ctx context.Context, doc v1beta1.ContainerDoc) (ContainerRecording, error)
+	// ReadContainerRecordingSegment returns one bounded chunk of a listed
+	// segment's bytes as stored (issue #1783). A segment pruned since it was
+	// listed is ErrRecordingSegmentGone. Read-only.
+	ReadContainerRecordingSegment(
+		ctx context.Context, doc v1beta1.ContainerDoc, req RecordingSegmentRequest,
+	) (RecordingSegmentResult, error)
 	// ConnectContainerTerminal returns a connection to the target
 	// container's sbsh control socket, so a caller without filesystem
 	// access to the socket (a cell holding only the kukeond socket mount)
@@ -585,6 +596,9 @@ const (
 	MethodLogContainer    = ServiceName + ".LogContainer"
 
 	MethodReadContainerLog = ServiceName + ".ReadContainerLog"
+
+	MethodListContainerRecording        = ServiceName + ".ListContainerRecording"
+	MethodReadContainerRecordingSegment = ServiceName + ".ReadContainerRecordingSegment"
 
 	MethodConnectContainerTerminal = ServiceName + ".ConnectContainerTerminal"
 	MethodExecContainer            = ServiceName + ".ExecContainer"

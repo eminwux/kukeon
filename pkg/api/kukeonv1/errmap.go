@@ -80,6 +80,8 @@ var kindToSentinel = map[string]error{
 	"CellNotFromConfig":         errdefs.ErrCellNotFromConfig,
 	"DaemonLogUnavailable":      errdefs.ErrDaemonLogUnavailable,
 	"ContainerLogUnavailable":   errdefs.ErrContainerLogUnavailable,
+	"RecordingUnavailable":      errdefs.ErrRecordingUnavailable,
+	"RecordingSegmentGone":      errdefs.ErrRecordingSegmentGone,
 	"NoSupervisor":              errdefs.ErrNoSupervisor,
 	"SupervisorLogUnreadable":   errdefs.ErrSupervisorLogUnreadable,
 	"ContainerLogStreamInvalid": errdefs.ErrContainerLogStreamInvalid,

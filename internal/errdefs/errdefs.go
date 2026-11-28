@@ -154,6 +154,13 @@ var (
 	// container exists but whose output stream file does not (yet): the
 	// runtime shim or sbsh has not opened it (issue #1537).
 	ErrContainerLogUnavailable = errors.New("container log stream unavailable")
+	// ErrRecordingUnavailable marks a recording request for a container that
+	// has no terminal recording: a non-Attachable container (issue #1783).
+	ErrRecordingUnavailable = errors.New("container has no terminal recording")
+	// ErrRecordingSegmentGone marks a recording segment read for a sequence
+	// number that is no longer retained: sbsh pruned it after it was listed
+	// (issue #1783). The caller lists the recording again.
+	ErrRecordingSegmentGone = errors.New("recording segment is no longer retained")
 
 	// ErrNoSupervisor marks a `kuke log --supervisor` request for a container
 	// that has no terminal supervisor (a non-Attachable container). Issue

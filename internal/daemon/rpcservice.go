@@ -445,6 +445,38 @@ func (s *KukeonV1Service) ReadContainerLog(
 	return nil
 }
 
+// ListContainerRecording lists the retained segments of a container's
+// terminal recording (issue #1783), so the web UI's Replay view can read a
+// stopped cell's whole recording, which no sbsh process is left to serve.
+func (s *KukeonV1Service) ListContainerRecording(
+	args *kukeonv1.ListContainerRecordingArgs,
+	reply *kukeonv1.ListContainerRecordingReply,
+) error {
+	result, err := s.core.ListContainerRecording(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ListContainerRecording returned error", "error", err)
+	}
+	return nil
+}
+
+// ReadContainerRecordingSegment returns one bounded chunk of a recording
+// segment's stored bytes (issue #1783). Socket access is the only gate, as
+// for ReadContainerLog.
+func (s *KukeonV1Service) ReadContainerRecordingSegment(
+	args *kukeonv1.ReadContainerRecordingSegmentArgs,
+	reply *kukeonv1.ReadContainerRecordingSegmentReply,
+) error {
+	result, err := s.core.ReadContainerRecordingSegment(s.ctx, args.Doc, args.Request)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ReadContainerRecordingSegment returned error", "error", err)
+	}
+	return nil
+}
+
 // ReadHealthDigest evaluates kukeond's health in the daemon (issue #1509).
 func (s *KukeonV1Service) ReadHealthDigest(
 	args *kukeonv1.ReadHealthDigestArgs,

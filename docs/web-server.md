@@ -1525,6 +1525,49 @@ specification, so a stopped cell's last output can still be read.
   container returns `not_found` (404), and a kukeond that predates the route,
   or `stream=supervisor`, returns `daemon_outdated` (501).
 
+`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/recording`
+lists the retained segments of an attachable container's terminal recording,
+running or stopped, as `{ "format", "segments": [{ "seq", "size",
+"compressed", "live" }] }`. It is the whole recording sbsh keeps — the closed
+segments it rotated and the live one it still appends to — not only the live
+segment the log route reads, and it is what the web UI's Replay view plays.
+
+- `format` is `asciicast` (an asciicast v2 recording, `capture.cast`) or `raw`
+  (the raw capture of a container started before the recording format, which
+  has no timing). kukeond knows it from the file name, never from the bytes.
+- `segments` are oldest first, the live segment last. `seq` orders them;
+  `size` is the stored size in bytes when listed (the gzip size of a
+  `compressed` segment); `live` marks the segment still being written. The
+  live segment's `seq` is the one it keeps when sbsh rotates it, so after a
+  rotation the same `seq` names a closed segment. A container with no output
+  yet returns an empty list.
+
+`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/recording/segments/{seq}?offset={n}&maxBytes={m}`
+returns one chunk of a segment's bytes as stored, as `{ "data", "start",
+"next", "size", "more", "compressed", "live" }`. kukeond neither decompresses
+nor parses them: a closed segment is usually gzip, about a tenth of its raw
+size, so one segment is about one read at the bound. The browser decompresses
+and decodes.
+
+- `seq` is a listed segment's sequence number (an unsigned integer).
+  `offset` is a byte offset into the stored bytes and defaults to `0`; pass the
+  previous `next` to continue. `maxBytes` has the log route's default (65536)
+  and bounds (1 to 1048576). Any other `seq`, `offset` or `maxBytes` is
+  `invalid_request` (400).
+- `data` is base64 of the stored bytes, gzip when `compressed`. `more` means
+  bytes past `next` were already stored. An `offset` past `size` returns no
+  data and leaves `next` at `offset`.
+- `live: false` on a segment that was live when listed means sbsh rotated it.
+  A client following the live segment by offset then reads that segment again
+  from `0` (it may now be compressed), drops the events it already holds, and
+  lists the recording again to find the new live segment.
+
+Both routes read through kukeond, so the web server opens no host file and
+they work through `kuke serve --host`. A non-attachable container returns
+`recording_unavailable` (404), a missing cell or container `not_found` (404), a
+segment pruned after it was listed `segment_gone` (404; list again), and a
+kukeond that predates the routes `daemon_outdated` (501).
+
 `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/screenshot?container={name}`
 returns a cell's rendered terminal screen as text, the same sbsh `Screenshot`
 read as `kuke screenshot`, as `{ "container", "cols", "rows", "cursorX",

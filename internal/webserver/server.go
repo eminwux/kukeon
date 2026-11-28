@@ -331,6 +331,10 @@ func apiErrorStatus(err error) (int, string) {
 		status, code = http.StatusNotFound, "screen_unavailable"
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"
+	case errors.Is(err, errdefs.ErrRecordingUnavailable):
+		status, code = http.StatusNotFound, "recording_unavailable"
+	case errors.Is(err, errdefs.ErrRecordingSegmentGone):
+		status, code = http.StatusNotFound, "segment_gone"
 	case errors.Is(err, errdefs.ErrDaemonLogUnavailable),
 		errors.Is(err, errdefs.ErrContainerLogUnavailable),
 		errors.Is(err, errdefs.ErrNoSupervisor),
