@@ -11,6 +11,7 @@ import type { InventoryResource } from "./inventory";
 import { Icon } from "@kukeon/ui";
 import { ContainerLog } from "./container-log";
 import { ExecButton, ExecPanel } from "./exec";
+import { ReplayButton, ReplayPanel } from "./replay";
 import { availableLifecycleActions } from "./lifecycle-policy.js";
 import type { LifecycleAction, LifecycleFeedback } from "./lifecycle";
 import { darkAnsi, darkTerminalBackground, lightAnsi, lightTerminalBackground } from "./terminal-palette.js";
@@ -411,6 +412,9 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   const [skipAutoAttachFor, setSkipAutoAttachFor] = useState("");
   // The session id of the container whose Exec panel is open (#1432); "" when none is.
   const [execFor, setExecFor] = useState("");
+  // The session id of the container whose Replay panel is open (#1783); "" when none is. Opening one
+  // panel closes the other.
+  const [replayFor, setReplayFor] = useState("");
   const expandButton = useRef<HTMLButtonElement>(null);
   const screens = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -469,6 +473,10 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
   // Exec runs in any listed container, attachable or not, of a cell that is running. The panel takes
   // the place of the terminal or log while it is open and closes when its container is deselected.
   const execOpen = !!currentId && execFor === currentId && selectedListed && !unavailable;
+  // Replay plays the recording of an attachable container in any cell state. It opens no session, so
+  // the attached terminal stays attached behind it and the connection limits are untouched.
+  const replayOpen = !execOpen && !!currentId && replayFor === currentId && selectedEligible;
+  const panelOpen = execOpen || replayOpen;
   const atLimit = !current && (connections >= maxConnections || manager.sessions.length >= maxSessions);
   const reconnectLimited = (current?.state === "disconnected" || current?.state === "interrupted") && connections >= maxConnections;
   useEffect(() => { setSkipAutoAttachFor(""); }, [key]);
@@ -500,7 +508,7 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
       : containers.error && !live ? `${headerState}: ${containers.error.message}`
         : staleContainers && !live ? staleContainers
           : current?.message || headerState;
-  const overlay = !scope || empty || live || logs || execOpen ? null
+  const overlay = !scope || empty || live || logs || panelOpen ? null
     : atLimit || reconnectLimited ? <p className="terminal-limit" role="status">{limitMessage}</p>
       : unavailable ? <p className="terminal-unavailable" role="status">Terminal unavailable: cell is {cellState}.</p>
         : containers.error ? <><ErrorNotice error={containers.error} kind="Containers" />{staleContainers && <p className="stale">{staleContainers}</p>}</>
@@ -521,7 +529,8 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
     <div className="terminal-controls">
       {!!options.length && <><label htmlFor="terminal-container" className="sr-only">Container</label><select id="terminal-container" className="mono-id" value={selected} onChange={event => manager.select(scope, event.target.value)}>{options.map(id => <option key={id} value={id}>{optionLabel(id)}</option>)}</select>
         {!logs && connectSlot}
-        {selectedListed && <ExecButton container={selected} open={execOpen} reason={unavailable ? `Exec unavailable: cell is ${cellState}.` : ""} onToggle={() => setExecFor(execOpen ? "" : currentId)} />}</>}
+        {selectedEligible && <ReplayButton container={selected} open={replayOpen} onToggle={() => { setExecFor(""); setReplayFor(replayOpen ? "" : currentId); }} />}
+        {selectedListed && <ExecButton container={selected} open={execOpen} reason={unavailable ? `Exec unavailable: cell is ${cellState}.` : ""} onToggle={() => { setReplayFor(""); setExecFor(execOpen ? "" : currentId); }} />}</>}
       {!inPanel && onOpenInPanel && <button type="button" className="icon-button" aria-label="Open in side panel" data-tooltip="Open in side panel" onClick={() => onOpenInPanel(scope)}><Icon name="sidePanel" /></button>}
       {!empty && <button ref={expandButton} type="button" className="icon-button" aria-label={expanded ? "Collapse terminal" : "Expand terminal"} data-tooltip={expanded ? "Collapse terminal" : "Expand terminal"} aria-expanded={expanded} aria-controls="terminal-screens" onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} /></button>}
     </div>
@@ -536,11 +545,13 @@ export function TerminalWorkspace({ scope, revision, inventory, manager, theme, 
         {availableLifecycleActions(cellState).includes("start") && <button type="button" disabled={operation?.phase === "pending"} onClick={() => onLifecycleAction?.(scope!, "start", cellState)}>Start</button>}
       </div>}
       <div className="terminal-screens" id="terminal-screens" ref={screens}>
-        {mainSessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && !execOpen && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
+        {mainSessions.map(session => <TerminalSession key={session.id} session={session} active={!!scope && visible && !logs && !panelOpen && session.id === currentId} expanded={expanded} theme={theme} update={manager.update} pending={manager.pastes[session.id]} onPasted={manager.pasteDelivered} />)}
         {/* Not mounting the log while hidden is what keeps cellRead free of log requests (#1566). */}
-        {visible && logs && !execOpen && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
+        {visible && logs && !panelOpen && <ContainerLog key={sessionId(scope!, selected)} scope={scope!} container={selected} attachable={selectedEligible} live={!unavailable} cellState={cellState} revision={revision} theme={theme} expanded={expanded} />}
         {/* Unmounting the panel closes its terminal's WebSocket, which is what kills the exec process. */}
         {execOpen && <ExecPanel key={currentId} scope={scope!} container={selected} theme={theme} visible={visible} expanded={expanded} onClose={() => setExecFor("")} />}
+        {/* Replay reads the recording over HTTP only; hidden while the workspace is, so cellRead stays request-free. */}
+        {replayOpen && visible && <ReplayPanel key={currentId} scope={scope!} container={selected} live={!unavailable} theme={theme} expanded={expanded} onClose={() => setReplayFor("")} />}
       </div>
     </section>
   </>;

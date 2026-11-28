@@ -263,6 +263,28 @@ button:disabled { cursor: default; opacity: .4; }
 .terminal-log-omitted { flex: 0 0 auto; margin: 0; padding: 6px 16px; font-size: var(--font-sm); color: var(--muted); background: var(--terminal-bg); }
 .terminal-log-status { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 16px; font-size: var(--font-sm); border-bottom: 1px solid var(--line); }
 .terminal-log-status code { font-family: var(--mono); }
+/* Replay (#1783) takes the terminal's place like the Exec panel; its terminal keeps the recorded size and is scaled to fit. */
+.replay-panel { display: flex; flex-direction: column; min-height: 360px; }
+.replay-panel-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.replay-panel-header h2 { margin: 0; font-size: var(--font-lg); font-weight: 600; }
+.replay-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.replay-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: var(--font-sm); }
+.replay-timeline { position: relative; flex: 1 1 220px; min-width: 160px; }
+.replay-timeline input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+.replay-marks { position: absolute; inset: 0; pointer-events: none; }
+.replay-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--accent); opacity: .7; }
+.replay-time { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+.replay-wall, .replay-runs { color: var(--muted); }
+.replay-speed, .replay-idle { display: inline-flex; align-items: center; gap: 6px; }
+.replay-idle input { width: auto; margin: 0; }
+.replay-notice, .replay-status { flex: 0 0 auto; margin: 0; padding: 6px 16px; font-size: var(--font-sm); color: var(--muted); }
+.replay-notice[role="alert"] { color: var(--text); }
+.replay-screen { display: flex; height: min(62dvh, 680px); min-height: 360px; padding: 10px; overflow: hidden; background: var(--terminal-bg); }
+.replay-screen[hidden] { display: none; }
+.replay-mount { flex: 0 0 auto; align-self: flex-start; transform-origin: top left; }
+.replay-mount.is-fitted { flex: 1; align-self: stretch; min-width: 0; min-height: 0; overflow: hidden; }
+.replay-panel.is-expanded { flex: 1; min-height: 0; }
+.replay-panel.is-expanded .replay-screen { height: auto; min-height: 0; flex: 1; }
 .terminal-screens { min-width: 0; }
 .cell-link .state-badge.drift-badge { grid-column: 1 / -1; grid-row: auto; justify-self: start; }
 .cell-terminal-state { grid-column: 1 / -1; font-size: var(--font-sm); color: var(--muted); }

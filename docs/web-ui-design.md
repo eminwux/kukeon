@@ -35,8 +35,26 @@ without a terminal are opt-outs. Terminal sessions belong to the app
 shell: switching cells, container tabs or views keeps inactive attachments mounted,
 and **Detach** explicitly releases one without stopping the workload. Four
 connections and eight retained terminal surfaces can coexist in one browser tab.
-The server attach protocol cannot replay bytes lost during a disconnect or
-guarantee that a terminal process survives reconnection or page reload.
+The server attach protocol cannot resend bytes lost during a disconnect or
+guarantee that a terminal process survives reconnection or page reload; those
+bytes are still in the container's recording, and **Replay** shows them.
+
+**Replay** is offered for an attachable container whether the cell is running
+or stopped. It replaces the terminal or log with a read-only player of the
+container's recording (every retained segment of `capture.cast`, oldest first)
+and opens at the oldest retained output, saying so when retention dropped
+earlier output. The timeline marks each run of the terminal and shows the
+elapsed and wall-clock time; it plays at 1, 2, 4 or 8×, skips idle gaps longer
+than two seconds unless that is turned off, and seeks with the timeline or the
+arrow keys. On a running cell the attached session stays attached and Replay
+uses none of the four connections or eight surfaces: at its end Replay follows
+new output, and **Live** shows the attached terminal again. Nothing typed,
+pasted or resized in Replay reaches the container. **Download** saves the
+recording as one asciicast v2 file. A recording made before asciicast
+(`capture.raw`) has no timing, so Replay shows its output without a timeline,
+and against a kukeond without the recording routes Replay says kukeond must be
+upgraded while the terminal and log keep working. Replay follows the theme,
+resizes with the panel and works with Expand terminal.
 
 Manage replaces the cell list in the sidebar with one flat vertical list:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,

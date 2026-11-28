@@ -20,13 +20,15 @@ function fixture(path, cellCount = 1) {
 }
 // A container with no stream file yet: the log view's neutral empty state.
 const noLog = { status: 404, json: { error: { code: "log_unavailable", message: "container log stream unavailable" } } };
+// A container whose recording has no output yet: the Replay view's empty list (#1783).
+const noRecording = { json: { format: "asciicast", segments: [] } };
 // A cell with no terminal screen to read: the Workbench grid's state-only tile (#1635).
 const noScreen = { status: 404, json: { error: { code: "screen_unavailable", message: "no screen" } } };
 async function mock(page, handler = () => undefined) {
   await page.route("**/api/realms**", async route => {
     const path = new URL(route.request().url()).pathname;
     const result = await handler(path, route.request());
-    await route.fulfill(result ?? (path.endsWith("/log") ? noLog : path.endsWith("/screenshot") ? noScreen : { json: fixture(path) }));
+    await route.fulfill(result ?? (path.endsWith("/log") ? noLog : path.endsWith("/screenshot") ? noScreen : path.endsWith("/recording") ? noRecording : { json: fixture(path) }));
   });
 }
 // One GET …/containers/{name}/log reply: text starting at byte `start`, ending at the stream's end.
@@ -8615,4 +8617,275 @@ test("the embedded console mounts no extensions and reads no capabilities", asyn
   await expect(page.locator(".toolbar-extensions, .extension-card")).toHaveCount(0);
   expect(apiPaths).toContain("/api/realms");
   expect(apiPaths).not.toContain("/api/capabilities");
+});
+
+// Replay (#1783): the recorded terminal of an attachable container, from GET …/recording and its segments.
+const replayPanel = page => page.getByRole("group", { name: "Replay of shell" });
+const replayRows = page => replayPanel(page).locator(".xterm-rows");
+const castLine = value => JSON.stringify(value) + "\n";
+// Two runs an hour apart, the first resized mid-run. Segment 3 is closed and gzip; 4 is live. Segment 2
+// and older were pruned, so retention dropped earlier output.
+const castSegments = () => ({
+  3: Buffer.from(castLine({ version: 2, width: 80, height: 24, timestamp: 1700000000 }) + castLine([0.1, "o", "first run\r\n"]) + castLine([0.2, "r", "100x30"]) + castLine([0.3, "o", "wide line\r\n"])),
+  4: Buffer.from(castLine({ version: 2, width: 100, height: 30, timestamp: 1700000000 }) + castLine([0.5, "o", "end of run one\r\n"]) + castLine({ version: 2, width: 90, height: 20, timestamp: 1700003600 }) + castLine([0.1, "o", "second run \x1b[32mgreen\x1b[0m\r\n"]) + castLine([0.2, "o", "$ "])),
+});
+// Serves a recording: segments maps seq to its raw bytes (closed ones are served gzip). live is the
+// live seq. requests collects every recording request.
+async function mockRecording(page, { segments, live: liveSeq, format = "asciicast", state = "Ready", containers = [{ id: "shell", attachable: true }], requests = [], extra = () => undefined }) {
+  const { gzipSync } = await import("node:zlib");
+  const gzipped = new WeakMap();
+  const cell = "/api/realms/dev/spaces/shared/stacks/services/cells/api";
+  await mock(page, async (path, request) => {
+    const handled = await extra(path, request);
+    if (handled) return handled;
+    if (path.endsWith("/containers")) return { json: containers };
+    if (path === cell) return { json: { ...doc(["dev", "shared", "services", "api"]), status: { state } } };
+    if (path.endsWith("/cells") && path.includes("/dev/")) return { json: fixture(path).map(item => ({ ...item, status: { state } })) };
+    if (!path.includes("/recording")) return;
+    requests.push(path + new URL(request.url()).search);
+    const current = typeof segments === "function" ? segments() : segments;
+    const live = typeof liveSeq === "function" ? liveSeq() : liveSeq;
+    const seqs = Object.keys(current).map(Number).sort((a, b) => a - b);
+    if (path.endsWith("/recording")) return { json: { format, segments: seqs.map(seq => ({ seq, size: current[seq].length, compressed: seq !== live, live: seq === live })) } };
+    const seq = Number(path.split("/").at(-1));
+    if (!(seq in current)) return { status: 404, json: { error: { code: "segment_gone", message: "gone" } } };
+    if (seq !== live && !gzipped.has(current[seq])) gzipped.set(current[seq], gzipSync(current[seq]));
+    const stored = seq === live ? current[seq] : gzipped.get(current[seq]);
+    const params = new URL(request.url()).searchParams;
+    const offset = Number(params.get("offset") ?? 0);
+    const data = stored.subarray(offset, offset + Number(params.get("maxBytes") ?? 64 << 10));
+    const next = offset + data.length;
+    return { json: { data: data.length ? data.toString("base64") : null, start: offset, next, size: stored.length, more: next < stored.length, compressed: seq !== live, live: seq === live } };
+  });
+}
+
+test("Replay plays a stopped cell's recording at its recorded sizes, seeks and downloads one asciicast file", async ({ page }) => {
+  const requests = [];
+  await mockRecording(page, { segments: castSegments(), live: 4, state: "Exited", requests });
+  let opened = 0;
+  await page.routeWebSocket("**/attach", () => { opened++; });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toHaveText("Logs");
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  const panel = replayPanel(page);
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("Earlier output was dropped by retention")).toBeVisible();
+  // Opened at the oldest retained output, paused, at the recording's first size.
+  await expect(panel.getByLabel("Position")).toHaveValue("0");
+  await expect(panel.locator(".replay-mark")).toHaveCount(2);
+  await expect(panel.getByText("2 runs")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Live" })).toHaveCount(0);
+  await expect(panel.getByLabel("Speed").locator("option")).toHaveText(["1×", "2×", "4×", "8×"]);
+  await panel.getByLabel("Speed").selectOption("8");
+  await panel.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(replayRows(page)).toContainText("second run green", { timeout: 10000 });
+  await expect(panel.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  // The second run plays at its own size, 90x20, and its colors survive.
+  await expect(replayRows(page).locator(":scope > div")).toHaveCount(20);
+  await expect(panel.locator(".xterm-fg-2")).toHaveText("green");
+  const played = await replayRows(page).innerText();
+  // The wall-clock time of the position is the second run's.
+  await expect(panel.locator(".replay-wall")).toHaveText(new Date((1700003600 + 0.2) * 1000).toLocaleString());
+  // Back to the start: the first run's size and nothing after it.
+  await panel.getByLabel("Position").focus();
+  await page.keyboard.press("Home");
+  await expect(replayRows(page)).not.toContainText("first run");
+  await expect(replayRows(page).locator(":scope > div")).toHaveCount(24);
+  // Arrow keys step through the recording; at the end the screen equals the played one.
+  await page.keyboard.press("ArrowRight");
+  await expect(replayRows(page)).toContainText("second run green");
+  await expect.poll(() => replayRows(page).innerText()).toBe(played);
+  // Mid-run: the first run's resized screen.
+  await page.locator(".replay-timeline input").evaluate((input, value) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(input, String(value));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, 0.35);
+  await expect(replayRows(page)).toContainText("wide line");
+  await expect(replayRows(page)).not.toContainText("end of run one");
+  await expect(replayRows(page).locator(":scope > div")).toHaveCount(30);
+  // Download: one header and every event, with times that never decrease.
+  const [download] = await Promise.all([page.waitForEvent("download"), panel.getByRole("button", { name: "Download" }).click()]);
+  expect(download.suggestedFilename()).toBe("dev_shared_services_api_shell.cast");
+  const fs = await import("node:fs/promises");
+  const lines = (await fs.readFile(await download.path(), "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+  expect(lines[0]).toEqual({ version: 2, width: 80, height: 24, timestamp: 1700000000 });
+  expect(lines.slice(1).every(line => Array.isArray(line))).toBe(true);
+  expect(lines.slice(1).filter(line => line[1] === "o").map(line => line[2])).toEqual(["first run\r\n", "wide line\r\n", "end of run one\r\n", "second run \x1b[32mgreen\x1b[0m\r\n", "$ "]);
+  expect(lines.slice(1).filter(line => line[1] === "r").map(line => line[2])).toEqual(["100x30", "90x20"]);
+  const times = lines.slice(1).map(line => line[0]);
+  expect(times).toEqual([...times].sort((a, b) => a - b));
+  // Nothing reached the container: no socket, and only recording reads.
+  await replayPanel(page).locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("ls\n");
+  expect(opened).toBe(0);
+  expect(requests.every(path => /\/containers\/shell\/recording(\/segments\/\d+)?(\?|$)/.test(path))).toBe(true);
+  // Close returns to the log view.
+  await panel.getByRole("button", { name: "Close Replay" }).click();
+  await expect(replayPanel(page)).toHaveCount(0);
+  await expect(page.locator("#cell-terminal .terminal-log")).toBeVisible();
+});
+
+test("Replay on a running cell keeps the terminal attached, follows new output and Live returns to it", async ({ page }) => {
+  let live = Buffer.from(castLine({ version: 2, width: 80, height: 24, timestamp: 1700000000 }) + castLine([0.1, "o", "booted\r\n"]));
+  await mockRecording(page, { segments: () => ({ 0: live }), live: 0 });
+  let opened = 0;
+  let closed = 0;
+  const messages = [];
+  await page.routeWebSocket("**/attach", socket => {
+    opened++;
+    socket.onMessage(message => messages.push(message));
+    socket.onClose(() => closed++);
+    socket.send(JSON.stringify({ type: "ready" }));
+    socket.send(Buffer.from("$ "));
+  });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  const sent = messages.length;
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  const panel = replayPanel(page);
+  await expect(panel.getByRole("button", { name: "Live" })).toBeVisible();
+  await panel.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(replayRows(page)).toContainText("booted");
+  // At its end, output the cell produces meanwhile appears.
+  live = Buffer.concat([live, Buffer.from(castLine([0.5, "o", "new output\r\n"]))]);
+  await expect(replayRows(page)).toContainText("new output", { timeout: 10000 });
+  // Typing, pasting and resizing in Replay send nothing on the attached session.
+  await panel.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.type("rm -rf /\n");
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await page.waitForTimeout(300);
+  expect(messages.length).toBe(sent);
+  expect(opened).toBe(1);
+  expect(closed).toBe(0);
+  await panel.getByRole("button", { name: "Live" }).click();
+  await expect(replayPanel(page)).toHaveCount(0);
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await expect(page.locator("#cell-terminal .terminal-session:not([hidden])")).toHaveCount(1);
+  expect(opened).toBe(1);
+});
+
+test("Replay follows the live segment across a rotation without losing or repeating output", async ({ page }) => {
+  const head = castLine({ version: 2, width: 80, height: 24, timestamp: 1700000000 });
+  let segments = { 0: Buffer.from(head + castLine([0.1, "o", "<one>"])) };
+  // After the rotation seq 0 is closed (and served gzip) and seq 1 is live.
+  let live = 0;
+  await mockRecording(page, { segments: () => segments, live: () => live });
+  await page.routeWebSocket("**/attach", socket => socket.send(JSON.stringify({ type: "ready" })));
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  const panel = replayPanel(page);
+  await panel.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(replayRows(page)).toContainText("<one>");
+  // The workload writes more into seq 0, then sbsh rotates it and opens seq 1.
+  segments = { 0: Buffer.concat([segments[0], Buffer.from(castLine([0.2, "o", "<two>"]))]), 1: Buffer.from(head + castLine([0.3, "o", "<three>"])) };
+  live = 1;
+  await expect(replayRows(page)).toContainText("<three>", { timeout: 10000 });
+  await expect.poll(() => replayRows(page).innerText()).toMatch(/^<one><two><three>\s*$/);
+});
+
+test("Replay shows a raw recording without a timeline, and an old kukeond keeps the terminal working", async ({ page }) => {
+  await mockRecording(page, { segments: { 0: Buffer.from("$ \x1b[1mplain\x1b[0m output\r\n") }, live: 0, format: "raw", state: "Exited" });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  const panel = replayPanel(page);
+  await expect(panel.getByText("This recording has no timing")).toBeVisible();
+  await expect(replayRows(page)).toContainText("plain output");
+  await expect(panel.getByLabel("Position")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Play", exact: true })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Close Replay" }).click();
+
+  await page.unroute("**/api/realms**");
+  await mockRecording(page, { segments: {}, extra: path => path.endsWith("/recording") ? { status: 501, json: { error: { code: "daemon_outdated", message: "kukeond does not support this request" } } } : undefined });
+  let opened = 0;
+  await page.routeWebSocket("**/attach", socket => { opened++; socket.send(JSON.stringify({ type: "ready" })); socket.send(Buffer.from("$ ")); });
+  await page.reload();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  await expect(replayPanel(page).getByRole("alert")).toContainText("kukeond must be upgraded");
+  await replayPanel(page).getByRole("button", { name: "Close Replay" }).click();
+  await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  expect(opened).toBe(1);
+});
+
+test("Replay is offered only for attachable containers, in every cell state, and follows theme and Expand", async ({ page }) => {
+  await mockRecording(page, { segments: castSegments(), live: 4, containers: [{ id: "shell", attachable: true }, { id: "web" }] });
+  await page.routeWebSocket("**/attach", socket => socket.send(JSON.stringify({ type: "ready" })));
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).getByRole("button", { name: "Replay" })).toBeVisible();
+  await terminalTools(page).getByLabel("Container").selectOption("web");
+  await expect(terminalTools(page).getByRole("button", { name: "Replay" })).toHaveCount(0);
+  await terminalTools(page).getByLabel("Container").selectOption("shell");
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  // Exec and Replay share the terminal's place: opening one closes the other.
+  await terminalTools(page).getByRole("button", { name: "Exec" }).click();
+  await expect(replayPanel(page)).toHaveCount(0);
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  await expect(page.getByRole("group", { name: "Exec in shell" })).toHaveCount(0);
+  const panel = replayPanel(page);
+  await panel.getByLabel("Speed").selectOption("8");
+  await panel.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(replayRows(page)).toContainText("second run", { timeout: 10000 });
+  const before = await panel.locator(".replay-screen").boundingBox();
+  await terminalTools(page).getByRole("button", { name: "Expand terminal" }).click();
+  await expect(page.locator("#cell-terminal")).toHaveClass(/is-expanded/);
+  await expect.poll(async () => (await panel.locator(".replay-screen").boundingBox())?.height).toBeGreaterThan(before.height);
+  // The scaled terminal stays inside the panel.
+  const screen = await panel.locator(".replay-screen").boundingBox();
+  const xterm = await panel.locator(".xterm-screen").boundingBox();
+  expect(xterm.x + xterm.width).toBeLessThanOrEqual(screen.x + screen.width + 1);
+  expect(xterm.y + xterm.height).toBeLessThanOrEqual(screen.y + screen.height + 1);
+  await setAppearance(page, "Dark");
+  await expect.poll(() => panel.locator(".xterm-viewport").evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe("rgb(248, 250, 252)");
+});
+
+// sbsh's retention limit: 8 closed segments of 8 MiB and a full live one. The page keeps answering
+// while the recording loads and while a seek to its end writes all of it.
+test("Replay stays usable while a recording at sbsh's retention limit loads and seeks", async ({ page }) => {
+  test.setTimeout(180_000);
+  const SEGMENT = 8 << 20;
+  const filler = "x".repeat(200);
+  const segments = {};
+  let line = 0;
+  for (let seq = 1; seq <= 9; seq++) {
+    const parts = [castLine({ version: 2, width: 120, height: 30, timestamp: 1700000000 })];
+    let size = parts[0].length;
+    while (size < SEGMENT) {
+      const event = castLine([line * 0.01, "o", `line ${line} ${filler}\r\n`]);
+      parts.push(event);
+      size += event.length;
+      line++;
+    }
+    segments[seq] = Buffer.from(parts.join(""));
+  }
+  const last = line - 1;
+  await mockRecording(page, { segments, live: 9, state: "Exited" });
+  await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
+  await expect(terminalTools(page).getByRole("button", { name: "Replay" })).toBeVisible();
+  // A heartbeat in the page: the longest gap between its ticks is how long the page stopped answering.
+  await page.evaluate(() => {
+    const state = { last: performance.now(), max: 0 };
+    window.__heartbeat = state;
+    setInterval(() => { const now = performance.now(); state.max = Math.max(state.max, now - state.last); state.last = now; }, 20);
+  });
+  const longestPause = async () => page.evaluate(() => { const value = window.__heartbeat.max; window.__heartbeat.max = 0; return value; });
+  await terminalTools(page).getByRole("button", { name: "Replay" }).click();
+  const panel = replayPanel(page);
+  await expect(panel.getByRole("status").filter({ hasText: "Loading the recording" })).toBeVisible();
+  // While it loads, a control answers.
+  await panel.getByLabel("Speed").selectOption("4");
+  await expect(panel.getByLabel("Speed")).toHaveValue("4");
+  await expect(panel.getByRole("status").filter({ hasText: "Loading the recording" })).toHaveCount(0, { timeout: 120_000 });
+  const loading = await longestPause();
+  // Seek to the end: every byte is written, in pieces, and the controls keep answering meanwhile.
+  await panel.getByLabel("Position").focus();
+  await page.keyboard.press("End");
+  await expect(panel.getByText("Seeking…")).toBeVisible();
+  await panel.getByLabel("Speed").selectOption("2");
+  await expect(panel.getByLabel("Speed")).toHaveValue("2");
+  await expect(panel.getByText("Seeking…")).toHaveCount(0, { timeout: 120_000 });
+  await expect(replayRows(page)).toContainText(`line ${last} `);
+  const seeking = await longestPause();
+  expect(loading).toBeLessThan(1000);
+  expect(seeking).toBeLessThan(1000);
 });
