@@ -4,7 +4,7 @@ import { configRoute, newTeamRoute, sourcesRoute, teamsRoute } from "./teams.mjs
 export const kinds = ["realm", "space", "stack", "cell", "container"];
 export const titles = ["Realms", "Spaces", "Stacks", "Cells"];
 export const catalogTitles: Record<string, string> = { blueprints: "Blueprints", configs: "Configs", volumes: "Volumes", secrets: "Secrets" };
-export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[]; state?: string };
+export type Route = { view: string; scope: string[]; parent: string[]; document: boolean; config?: string[]; blueprint?: string[]; target?: string[]; edit?: boolean; action?: string; identity?: string[]; state?: string; extension?: string; extensionPath?: string };
 
 // Home is the Workbench grid (#1635); the Overview, the first Manage page, lives at #/resources.
 const HOME = (): Route => ({ view: "workbench", scope: [], parent: [], document: false });
@@ -62,6 +62,8 @@ export function readRoute(): Route {
     // majordomo's sweep reports and schedule) and #/daemon/logs. #/health is the historical Health route.
     if (parts[0] === "health") return { view: "health", scope: [], parent: [], document: false };
     if (parts[0] === "daemon") return { view: parts[1] === "logs" ? "daemon-logs" : parts[1] === "health" ? "health" : "daemon", scope: [], parent: [], document: false };
+    // #/ext/<extension id>/<path> is a console extension's route (#1754).
+    if (parts[0] === "ext") return { view: "extension", scope: [], parent: [], document: false, extension: parts[1] ?? "", extensionPath: parts.slice(2).join("/") };
     // #/settings is the Settings page and its one section, Profile (#1745); #/settings/profile and any
     // other section open it too, so links from when General was a section of its own keep working.
     if (parts[0] === "settings") return { view: "settings", scope: [], parent: [], document: false };

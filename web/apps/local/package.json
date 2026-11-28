@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "playwright test browser.spec.mjs majordomo.spec.mjs mount.spec.mjs",
+    "test": "playwright test browser.spec.mjs majordomo.spec.mjs mount.spec.mjs extension.spec.mjs",
     "test:smoke": "playwright test daemon.spec.mjs",
     "test:onboarding": "playwright test onboarding.spec.mjs"
   },

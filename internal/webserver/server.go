@@ -169,6 +169,7 @@ func buildHandler(
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(assets))
 	mux.HandleFunc("GET /api/connection", connectionHandler(endpoint, dial))
+	registerCapabilitiesRoute(mux)
 	mux.HandleFunc("GET /api/realms", realmHandler(dial, false))
 	mux.HandleFunc("GET /api/realms/{name}", realmHandler(dial, true))
 	mux.HandleFunc("GET /api/realms/{name}/images", realmImagesHandler(dial))

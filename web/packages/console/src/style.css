@@ -1051,3 +1051,12 @@ a.rail-agent-glyph:hover, a.rail-agent-glyph[aria-current="page"] { background: 
   .drift-fold-echo { display: block; }
   .drift-empty { display: none; }
 }
+
+/* Console extensions (#1754): the top bar's extension content, Overview cards, a cell's details tabs and the
+   update notice of a route this host cannot run. */
+.toolbar-extensions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cell-details-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.cell-details-tab { min-height: var(--target-min); padding: 4px 12px; border-color: transparent; background: transparent; color: var(--muted); }
+.cell-details-tab[aria-selected="true"] { border-color: var(--line); background: var(--selected); color: var(--text); font-weight: 600; }
+.cell-details-tab:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+.update-host-notice .panel-body p { margin: 0 0 8px; line-height: 1.6; }
