@@ -75,7 +75,10 @@ that its cell mounts them from the test's run path.
 the same target, so the two can't drift. It runs
 `GOWORK=off golangci-lint fmt --diff ./...` over the whole tree, including the
 separate `cmd/kukebuild` module, and fails on a non-zero exit or on any diff.
-`main` is kept fmt-clean (#1501), so any diff it prints comes from your branch.
+It names the cause: a missing `golangci-lint`, a run that failed without
+printing a diff (such as a binary built with an older Go, below), or a real
+formatting diff. `main` is kept fmt-clean (#1501), so any diff it prints comes
+from your branch.
 To apply the fixes, run `GOWORK=off golangci-lint fmt ./...` and commit the
 result.
 
