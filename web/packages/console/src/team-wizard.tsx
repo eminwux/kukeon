@@ -3,6 +3,7 @@ import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { sendJSON, toFailure } from "./connector-ui";
 import { identitiesFor } from "./connectors.mjs";
+import { identityOptions, keepsLoginMethod } from "./assignments.mjs";
 import type { Connector } from "./connectors.mjs";
 import { GitIdentitySelect, OutcomeNotice, PlanView, RefFields } from "./team-plan";
 import {
@@ -241,6 +242,8 @@ function CredentialsStep({ form, connectors, defaultConnectors, missing, inherit
   resolving: boolean; notes: string[]; resolveError?: Failure; disabled: boolean; onForm: (form: TeamForm) => void;
 }) {
   const secrets = useResource<unknown[]>("/catalog/secrets", 0);
+  // A method that keeps its login in the state volume picks a login identity, not a Secret (#1790).
+  const logins = useResource<unknown[]>("/connectors/logins", 0);
   return <div className="wizard-step">
     <label className="schema-check"><input type="checkbox" checked={form.connectors.inherit} disabled={disabled} onChange={event => onForm(withConnectorsInherit(form, event.target.checked, defaultConnectors))} />Use the defaults' connector choices</label>
     {!form.connectors.inherit && <>
@@ -248,11 +251,13 @@ function CredentialsStep({ form, connectors, defaultConnectors, missing, inherit
       <div className="table-scroll"><table aria-label="Connector choices"><thead><tr><th>Connector</th><th>Method</th><th>Identity</th></tr></thead><tbody>
         {(connectors.data ?? []).map(connector => {
           const choice = form.connectors.items[connector.name] ?? {};
-          const identities = identitiesFor(secrets.data, connector.name).filter(identity => identity.realm === "default" && !identity.space);
+          const login = keepsLoginMethod(connector, choice.method);
+          const identities = login ? identityOptions(logins.data, connector, "").map(item => ({ name: item.value, label: `${item.label}${item.state ? ` — ${item.state}` : ""}` }))
+            : identitiesFor(secrets.data, connector.name).filter(identity => identity.realm === "default" && !identity.space).map(identity => ({ name: identity.name, label: identity.name }));
           return <tr key={connector.name}>
             <td>{connector.title || connector.name}</td>
             <td><select aria-label={`Method of ${connector.name}`} value={choice.method ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { method: event.target.value }, defaultConnectors))}><option value="">Default</option>{connector.methods.map(method => <option key={method.name} value={method.name}>{method.name}</option>)}</select></td>
-            <td><select aria-label={`Identity of ${connector.name}`} value={choice.identity ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { identity: event.target.value }, defaultConnectors))}><option value="">From the scope defaults</option>{[...new Set([...identities.map(identity => identity.name), ...(choice.identity ? [choice.identity] : [])])].map(name => <option key={name} value={name}>{name}</option>)}</select></td>
+            <td><select aria-label={`Identity of ${connector.name}`} value={choice.identity ?? ""} disabled={disabled} onChange={event => onForm(withConnector(form, connector.name, { identity: event.target.value }, defaultConnectors))}><option value="">{login ? "Own per role" : "From the scope defaults"}</option>{[...identities, ...(choice.identity && !identities.some(item => item.name === choice.identity) ? [{ name: choice.identity, label: choice.identity }] : [])].map(item => <option key={item.name} value={item.name}>{item.label}</option>)}</select></td>
           </tr>;
         })}
       </tbody></table></div>

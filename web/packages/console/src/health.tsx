@@ -5,7 +5,7 @@ import { AskMajordomo, configScope, harnessLabel, majordomoRole, oneLine, sweepT
 import { ScheduleDetails, cellLinker, when } from "./schedule";
 import type { InventoryResource } from "./inventory";
 import { DaemonNav } from "./daemon";
-import { connectorsLink } from "./connector-ui";
+import { identitiesLink } from "./connector-ui";
 import { InitializePrompt } from "./initialize";
 import { connectorStatuses, stateResolved, type Connector } from "./connectors.mjs";
 import { apiFetch } from "@kukeon/api-client";
@@ -93,7 +93,7 @@ function FilingAccess({ config, connector }: { config: ConfigDoc; connector: Con
   if (!enabled) {
     body = <><strong>{title} access is off.</strong> This sweep cannot file issues. Turn it on for the majordomo role in the <a href={teamsLink(systemTeam, "edit")}>kuke team's Edit team screen</a> (Credentials, Per-role access), or run <code>kuke team connector enable {systemTeam} {filingConnector} --role majordomo</code>.</>;
   } else if (!status || status.state !== stateResolved) {
-    body = <><strong>Token missing.</strong> {title} access is on, but no identity fills it. <a href={connectorsLink(filingConnector)}>Add or choose a {title} identity</a>.</>;
+    body = <><strong>Token missing.</strong> {title} access is on, but no identity fills it. <a href={identitiesLink(filingConnector)}>Add or choose a {title} identity</a>.</>;
   } else {
     body = <><strong>Issue filing has a token:</strong> <code>{status.identity?.name ?? "set"}</code>{status.origin ? ` (${status.origin})` : ""}.</>;
   }

@@ -972,6 +972,37 @@ reaches every team that did not choose, with no re-render. Only identities a
 team chose are written as fills on its Configs. See
 [Connectors → Teams](connectors.md#teams) for the full rules.
 
+#### Mapping teams and roles to identities from the web UI
+
+The web UI's **Identities → Assignments** tab edits these choices for the
+connectors that authenticate a harness, without YAML: one row for the
+TeamDefaults (**All teams**), one per team and one per role, with a column per
+harness connector. A cell picks **Inherit** (the level above), the **System
+default** (the `default` team's `agent` login identity,
+`default-agent-<harness>-state`), **Own per role**, a named login identity, or
+a token method with its harness state. It writes the same fields as above:
+
+```yaml
+# kind: Team — after setting the team to work-max and "Own per role" on pm
+spec:
+  connectors:
+    claude: { method: login, identity: work-max@default }
+  roles:
+    - name: pm
+      # ...
+      connectors:
+        claude: { method: login } # a method and no identity: pm keeps <team>-pm-claude-state
+```
+
+A role entry that names a method replaces the team's choice for that role
+whole, so **Own per role** is the login method with no identity. Every change
+is previewed against each team it recomposes — with the cross-role warning
+when roles would share a login identity — and applied on confirm; running
+cells keep their identity until they restart. A team the user does not touch
+renders exactly as before, and the system teams' picks survive
+`kuke team init --upgrade`. See
+[web server → Assignments tab](https://github.com/eminwux/kukeon/blob/main/docs/web-server.md#assignments-tab).
+
 ## Git identity and credentials
 
 Team cells use [stored git credentials](../guides/git-credentials.md); the host

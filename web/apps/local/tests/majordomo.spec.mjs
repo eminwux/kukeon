@@ -883,7 +883,7 @@ test("the Health page shows the latest report, its findings and the history", as
   await tabs.getByRole("link", { name: "Health" }).click();
   await expect(page).toHaveURL(/#\/daemon\/health$/);
   await expect(page.getByRole("heading", { level: 1, name: "Health" })).toBeVisible();
-  await expect(tabs.getByRole("link")).toHaveText(["Status", "Health", "Logs"]);
+  await expect(tabs.getByRole("link")).toHaveText(["Status", "Health", "Logs", "Connectors"]);
   await expect(tabs.locator('[aria-current="page"]')).toHaveText("Health");
 
   const report = page.getByRole("region", { name: "Health report" });
@@ -1060,7 +1060,7 @@ test("the Health page says whether a sweep can file issues: GitHub access off, t
   state.configs = [sweep(["github"], [{ connector: "github", component: "github", method: "token", delivery: "env", state: "unresolved", required: true }])];
   await page.reload();
   await expect(filing).toContainText("Token missing.");
-  await expect(filing.getByRole("link", { name: "Add or choose a GitHub identity" })).toHaveAttribute("href", "#/connectors/github");
+  await expect(filing.getByRole("link", { name: "Add or choose a GitHub identity" })).toHaveAttribute("href", "#/identities?connector=github");
 
   state.configs = [sweep(["github"], [{ connector: "github", component: "github", method: "token", delivery: "env", state: "resolved", identity: { name: "gh-token", realm: "default" }, origin: "realm" }])];
   await page.reload();

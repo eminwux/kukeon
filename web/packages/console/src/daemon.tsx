@@ -33,12 +33,14 @@ export function HealthBadge({ status }: { status?: string }) {
   return <span className={`state-badge tone-${healthTone(status)}`}><span className="state-dot" aria-hidden="true" />{healthLabel(status)}</span>;
 }
 
-// The Daemon page's tabs (#1635): Status (the connectivity check), Health (the sweep reports) and Logs.
-export function DaemonNav({ current }: { current: "status" | "health" | "logs" }) {
+// The Daemon page's tabs (#1635): Status (the connectivity check), Health (the sweep reports), Logs and
+// Connectors (the connector catalog the server embeds, #1790).
+export function DaemonNav({ current }: { current: "status" | "health" | "logs" | "connectors" }) {
   return <nav className="daemon-tabs" aria-label="Daemon sections">
     <a href={daemonLink()} aria-current={current === "status" ? "page" : undefined}>Status</a>
     <a href={healthLink()} aria-current={current === "health" ? "page" : undefined}>Health</a>
     <a href={daemonLink("logs")} aria-current={current === "logs" ? "page" : undefined}>Logs</a>
+    <a href={daemonLink("connectors")} aria-current={current === "connectors" ? "page" : undefined}>Connectors</a>
   </nav>;
 }
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"slices"
 	"sort"
@@ -126,6 +127,47 @@ func SetDefaults(ctx context.Context, opts Options, roles, harnesses []string) (
 	}
 	all, _ := withLegacy(defaults, stored)
 	if err = checkDefaultsSources(defaults, all); err != nil {
+		return DefaultsChange{}, fmt.Errorf("defaults set: %w", err)
+	}
+	change, err := writeDefaults(ctx, opts.Client, defaults)
+	change.Action = actionUpdated
+	return change, err
+}
+
+// SetDefaultConnectors changes the TeamDefaults' connector choices (issue
+// #1790), the defaults every team that declares no connectors of its own
+// inherits: a choice replaces that connector's entry, nil removes it, and
+// every other entry is kept. The roles and harnesses are left as they are.
+func SetDefaultConnectors(
+	ctx context.Context, opts Options, changes map[string]*config.ConnectorChoice,
+) (DefaultsChange, error) {
+	if err := opts.check(); err != nil {
+		return DefaultsChange{}, err
+	}
+	if len(changes) == 0 {
+		return DefaultsChange{}, errors.New("defaults set: name a connector to change")
+	}
+	defaults, err := Defaults(ctx, opts.Client)
+	if err != nil {
+		return DefaultsChange{}, err
+	}
+	connectors := maps.Clone(defaults.Spec.Defaults.Connectors)
+	for _, name := range slices.Sorted(maps.Keys(changes)) {
+		choice := changes[name]
+		if choice == nil {
+			delete(connectors, name)
+			continue
+		}
+		if connectors == nil {
+			connectors = map[string]config.ConnectorChoice{}
+		}
+		connectors[name] = *choice
+	}
+	if len(connectors) == 0 {
+		connectors = nil
+	}
+	defaults.Spec.Defaults.Connectors = connectors
+	if err = config.ValidateStoredDefaults(defaults); err != nil {
 		return DefaultsChange{}, fmt.Errorf("defaults set: %w", err)
 	}
 	change, err := writeDefaults(ctx, opts.Client, defaults)

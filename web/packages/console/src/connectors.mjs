@@ -84,6 +84,17 @@ export function formatSecretReference(value) {
   return ref ? `${ref.name}@${refScope(ref).join("/")}` : "";
 }
 
+// deliveryText describes a delivery handler — the closed set the UI may branch on.
+export function deliveryText(item) {
+  const delivery = text(item?.delivery);
+  return delivery === deliveryEnv ? `environment variable ${text(item.envName)}`.trim()
+    : delivery === deliveryFile ? `file ${text(item.mountPath)}`.trim()
+    : delivery === deliveryStateVolume ? "login kept in a login identity (a Volume mounted as the harness state directory)"
+    : delivery === deliveryGit ? "the cell's git identity (author, committer, credentials, signing)"
+    : delivery === deliveryRegistry ? "image pulls of a Realm"
+    : delivery;
+}
+
 // identitiesFor lists the identities of one connector: the Secrets tagged with
 // its name. Only the readable part of a Secret is ever looked at.
 export function identitiesFor(secrets, connector) {

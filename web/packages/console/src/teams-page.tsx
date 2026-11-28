@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import { useModalDialog } from "@kukeon/ui";
-import { connectorsLink, sendJSON, toFailure } from "./connector-ui";
+import { connectorCatalogLink, identitiesLink, sendJSON, toFailure } from "./connector-ui";
 import { stateResolved } from "./connectors.mjs";
 import { ScheduleDetails, when } from "./schedule";
 import { OutcomeNotice, PlanView } from "./team-plan";
@@ -28,9 +28,9 @@ function RoleConnectors({ rows, configs }: { rows: RoleConnectorView[]; configs:
     {rows.map(row => { const scope = scopeOf(row.config); const unresolved = row.state !== stateResolved; return <tr key={`${row.config}/${row.connector}`}>
       <td><code>{row.role}</code></td>
       <td>{scope ? <a className="resource-name mono-id" href={configPageLink(scope, row.config)}>{row.config}</a> : <span className="mono-id">{row.config}</span>}</td>
-      <td><a className="resource-name" href={connectorsLink(row.connector)}>{row.connector}</a></td>
+      <td><a className="resource-name" href={connectorCatalogLink(row.connector)}>{row.connector}</a></td>
       <td>{row.method || "—"}</td>
-      <td>{unresolved ? <a className="badge needs-connector" href={connectorsLink(row.connector)}>Needs identity</a> : <span className="mono-id">{row.identity || "—"}</span>}</td>
+      <td>{unresolved ? <a className="badge needs-connector" href={identitiesLink(row.connector)}>Needs identity</a> : <span className="mono-id">{row.identity || "—"}</span>}</td>
       <td>{row.origin || "—"}</td>
       <td>{row.setByTeam ? "Team" : "Role definition"}</td>
     </tr>; })}

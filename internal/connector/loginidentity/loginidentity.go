@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -75,12 +76,15 @@ type Identity struct {
 	UsedBy []ConfigRef
 }
 
-// ConfigRef names a CellConfig and its scope.
+// ConfigRef names a CellConfig and its scope. Role is the team role the
+// Config runs, `<team>/<role>` (apply.RoleName, issue #1790); empty for a
+// Config outside a team.
 type ConfigRef struct {
 	Name  string `json:"name"`
 	Realm string `json:"realm"`
 	Space string `json:"space,omitempty"`
 	Stack string `json:"stack,omitempty"`
+	Role  string `json:"role,omitempty"`
 }
 
 // Status renders the login state for a table: `logged in`, `empty`, or `-`
@@ -144,6 +148,7 @@ func Collect(volumes []v1beta1.VolumeDoc, configs []v1beta1.CellConfigDoc) []Ide
 			user := ConfigRef{
 				Name: cfg.Metadata.Name, Realm: cfg.Metadata.Realm,
 				Space: cfg.Metadata.Space, Stack: cfg.Metadata.Stack,
+				Role: apply.RoleName(cfg.Metadata.Labels, cfg.Metadata.Annotations),
 			}
 			if !containsConfig(id.UsedBy, user) {
 				id.UsedBy = append(id.UsedBy, user)

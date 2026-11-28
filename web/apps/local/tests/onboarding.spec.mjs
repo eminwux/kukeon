@@ -86,20 +86,20 @@ test("a fresh host is set up from the browser: Initialize, git, a login, a first
     // A GitHub token that also serves git, with a fake token: both Secrets are listed.
     await workbench(page).click();
     await expect(step(page, "git-identity")).toHaveAccessibleName(/^Set up .*: Recommended$/);
-    await page.goto(`${server.url}#/connectors/github/new-identity`);
+    await page.goto(`${server.url}#/identities/github/new-identity`);
     const identity = content(page).getByRole("form", { name: "New GitHub identity" });
     await expect(identity.getByLabel(/^Identity name/)).toHaveValue("github-token");
     await identity.getByLabel(/^Token/).fill("ghp_onboardingE2EfakeTokenNotARealOne000");
     await expect(identity.getByRole("checkbox", { name: /Also use this token for git/ })).toBeChecked();
     await identity.getByRole("button", { name: "Create identity" }).click();
-    await expect(page).toHaveURL(/#\/connectors\/github(\?.*)?$/);
+    await expect(page).toHaveURL(/#\/identities\?connector=github$/);
     const secrets = await get("/api/catalog/secrets");
     const tagged = connector => secrets.filter(doc => doc.spec?.connector === connector && doc.metadata.realm === "default").map(doc => doc.metadata.name);
     expect(tagged("github")).toEqual(["github-token"]);
     expect(tagged("git")).toHaveLength(1);
     // Redaction holds on a real daemon: no Secret document carries its value.
     for (const doc of secrets) expect(doc.spec?.data).toBeUndefined();
-    await page.goto(`${server.url}#/connectors/git`);
+    await page.goto(`${server.url}#/identities?connector=git`);
     await expect(content(page).getByRole("region", { name: "Git identities" })).toContainText(tagged("git")[0]);
     await workbench(page).click();
     await expect(step(page, "git-identity")).toHaveAccessibleName(/^Set up .*: Done$/);

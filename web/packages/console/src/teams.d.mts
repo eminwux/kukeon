@@ -16,7 +16,9 @@ export type FormSource = { alias: string; stored?: string; url?: string; refKind
 export type FormTaskHarness = { schedule?: string; suspend: boolean | null };
 export type FormTask = { name: string; schedule?: string; suspend: boolean | null; args?: string; harnesses?: Record<string, FormTaskHarness> };
 export type FormRoleConnector = { name: string; enabled: boolean; identity?: string };
-export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] }; connectors?: FormRoleConnector[] };
+// FormHarnessConnector is a role's choice for a connector that authenticates a harness (#1790).
+export type FormHarnessConnector = { name: string; set: boolean; method?: string; identity?: string; state?: string };
+export type FormRole = { name: string; source: string; path: string; harness?: string; initialPath?: string; image: string[]; tasks: { all: boolean; items: FormTask[] }; connectors?: FormRoleConnector[]; harnessConnectors?: FormHarnessConnector[] };
 export type FormHarness = { name: string; source: string; path: string };
 export type FormConnector = { method?: string; identity?: string; state?: string };
 export type TeamForm = {
@@ -35,7 +37,7 @@ export type ViewTask = { role: string; task: string; harness?: string; config: s
 // RoleConnectorView is one connector a Config of the team resolves (#1649): a row of kuke team connector list.
 export type RoleConnectorView = {
   role: string; config: string; task?: string; connector: string; method?: string; state: string;
-  identity?: string; origin?: string; required?: boolean; fill: string; setByTeam: boolean;
+  identity?: string; origin?: string; required?: boolean; fill: string; setByTeam: boolean; warning?: string;
 };
 export type ViewConfig = { name: string; scope: string[]; role?: string; task?: string };
 export type TeamDetail = {
@@ -56,7 +58,7 @@ export type Plan = {
   create: string[] | null; rerender: string[] | null; prune: string[] | null;
   missingSecrets: string[] | null; createSecrets: string[] | null; notes: string[] | null;
 };
-export type TeamResult = { team: string; resources: number; pruned: string[]; missingSecrets: string[]; notes: string[] };
+export type TeamResult = { team: string; resources: number; pruned: string[]; missingSecrets: string[]; notes: string[]; warnings?: string[] };
 // connectors, on a preview, is what each composed Config would resolve (#1745); connectorNotes names the ones
 // that did not render.
 export type TeamOutcome = { plan: Plan; result?: TeamResult; connectors?: RoleConnectorView[]; connectorNotes?: string[] };

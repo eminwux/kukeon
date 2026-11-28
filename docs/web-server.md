@@ -266,10 +266,10 @@ and report `unsupported`: they are never marked until they are restarted.
 
 On a Manage page the sidebar is one flat list, the **Manage navigation**:
 Overview, Realms, Spaces, Stacks, Cells, Blueprints, Configs, Volumes, Secrets,
-Connectors, Teams, Sources, Images and Daemon. The current page's link is marked: the
+Identities, Teams, Sources, Images and Daemon. The current page's link is marked: the
 kind's link on its list and detail pages, Configs on New Config, Secrets on New
-Secret, Teams on New team and on a team's Edit team and Export screens, Daemon
-on its Status, Health and Logs tabs. No page has a horizontal
+Secret, Identities on its identity forms, Teams on New team and on a team's Edit
+team and Export screens, Daemon on its Status, Health, Logs and Connectors tabs. No page has a horizontal
 navigation row. The breadcrumb root is **Overview** on Manage pages and
 **Workbench** on Workbench pages.
 
@@ -986,88 +986,145 @@ errors use the standard notices and never repeat the submitted token.
 Every realm response (`/api/realms`, `/api/realms/{name}`, and its **View
 document** view) returns registry credentials with an empty `password`.
 
-## Connectors
+## Connectors and identities
 
-**Connectors** in the sidebar lists the [connectors](site/concepts/connectors.md)
-the `kuke` binary embeds: the kinds of access a cell needs. Nothing on the page
-is written per connector — it renders what `GET /api/connectors` returns, so a
-connector added as one `connector.yaml` appears here with its identity form,
-its methods and its defaults.
+The [connectors](site/concepts/connectors.md) the `kuke` binary embeds — the
+kinds of access a cell needs — are a server capability: the catalog is
+read-only data, listed on the [Daemon](#daemon-health) page's **Connectors**
+tab (`#/daemon/connectors`). The credentials that fill them, the
+**identities**, are managed on the **Identities** page (`#/identities`) in the
+sidebar. Nothing on either page is written per connector — both render what
+`GET /api/connectors` returns, so a connector added as one `connector.yaml`
+appears with its identity form, its methods and its defaults.
+
+The historical routes keep working: `#/connectors` and `#/connectors/<name>`
+open the Daemon tab, and `#/connectors/<name>/new-identity` and
+`…/rotate-identity` open the same forms under Identities. A connector page
+opened on a scope (`#/connectors/<name>?scope=[…]`, the old **Set a default**
+link) opens that connector's scope-default editor on Identities.
+
+### Connectors tab
+
+The catalog lists, per connector, how it is delivered (one line per method),
+the Secret types and fields it accepts (and a login identity for a method that
+keeps its login in the harness state directory), the levels it can be defaulted
+at, the harness it authenticates, and how many identities are stored — a link
+to Identities filtered on it. `#/daemon/connectors/<name>` shows one
+connector the same way, with **Manage … identities**. Nothing is created,
+rotated or deleted there. A connector with no identity to use — no Secret
+tagged with it, and no login identity that exists and holds a login — is marked
+**Not set up — recommended**, and its entry says **Not set up — recommended
+for …**, worded from the connector's description. A team's state volume that
+no cell created yet, or that nobody logged in to, does not count.
 
 The list leaves out a connector delivered as a registry credential (no methods,
-`delivery: registry`): opening its page shows a notice linking to the
-[Images](#images) page, where registry credentials are managed. The UI decides
-this by the delivery handler only, never by a connector's name.
+`delivery: registry`): its entry shows a notice linking to the
+[Images](#images) page, where registry credentials are managed, and Identities
+does not list it. The UI decides this by the delivery handler only, never by a
+connector's name.
 
-The list shows, per connector, how it is delivered (one line per method), how
-many identities are stored, how many Configs require it, and how many of those
-have no identity. A connector with no identity to use — no Secret tagged with
-it, and no login identity that exists and holds a login — is marked
-**Not set up — recommended** there, and its page says **Not set up —
-recommended for …**, worded from the connector's description. A team's state
-volume that no cell created yet, or that nobody logged in to, does not count. A connector with such Configs carries a **Needs a default**
-badge and a **Set a default** link that opens the connector on the first
-affected Config's scope.
+### Identities page
 
-A connector's page (`#/connectors/<name>`) has:
+Identities (`#/identities`) has two tabs: **Identities**, described here, and
+[**Assignments**](#assignments-tab). The Identities tab is one table of every
+identity on the host: the
+Secrets tagged with a connector and the
+[login identities](site/concepts/connectors.md#login-identities) — the Volumes
+a harness keeps its login in, a team's own state volumes included. It reads
+`GET /api/catalog/secrets` and `GET /api/connectors/logins`, with the Config
+catalog for the Configs using a Secret. Each row has:
 
-- **Default identity** — for a chosen scope and each method that takes an
-  identity, the identity that resolves there and the level it comes from, or
-  **No default resolves in this scope**. Below it, a Level and an Identity
-  picker set another identity as the default at any level the connector allows
-  (with no identity stored, a link to the new-identity page replaces the picker).
-  **Defaults by level**, a disclosure, holds the per-level table with its
-  **Clear** buttons. The deepest level wins. A change takes effect at once: no
-  Config is re-rendered. A connector that can only be defaulted at some levels
-  says so on the others.
-- **Identities** — the Secrets tagged with the connector: name, scope, type and
-  the readable identity fields. Values are write-only and never returned to the
-  browser. **New identity** opens `#/connectors/<name>/new-identity`. For a
-  connector that imports from the host (git) it starts with three cards:
-  **Import from this machine** (the import form), **Use a … token** (shown when
-  a connector advertises `tokenForGit`; it opens that connector's form) and
-  **Enter a key or password**. The form asks _Where can cells use it?_ —
-  **Everywhere in realm `<realm>`** (preselected), **Only in one space…** or
-  **Only in one stack…**, only the levels the connector accepts, with a realm
-  select only when there is more than one — then shows the identity fields from
-  the connector's descriptor (a token, a username and password, or an SSH key
-  with its optional parts; several secret types are a described choice) and
-  **Make this the default**, on when no default resolves at that scope. On a
-  connector that advertises `tokenForGit` (GitHub) the form also has **Also use
-  this token for git on github.com**, on by default, with an optional **Commit
-  author** and **Username**. **Rotate** opens
-  `#/connectors/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
-  which replaces the value stored under that name. Both return to the connector
-  page on success or Cancel. **Delete** uses the same confirmation as the
-  Secrets catalog, and a Secret still referenced by a cell is refused.
-- **Needs a default** — the Configs that require the connector and resolve to
-  no identity, each with a link that opens the defaults on that Config's scope.
+| Column        | Content                                                                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name          | links to the Secret or the Volume (a state volume no cell created yet says **Not created yet**; a running login says **Login running**)         |
+| Connector     | links to Identities filtered on it                                                                                                              |
+| Method / type | `login` (the method) for a login identity, else the Secret type and its readable identity fields                                                |
+| Role          | the team roles of the Configs using it, `<team>/<role>` — both roles when two share a login identity                                            |
+| Scope         | realm / space / stack                                                                                                                           |
+| Status        | **Logged in**, **Empty** or **Unknown** for a login identity                                                                                    |
+| Used by       | the Configs using it, linked, with a count of Configs and teams, and the Realm, Space or Stack defaults naming it; **Unused** when nothing does |
+| Actions       | **Log in** / **Log in again** or **Rotate**, and **Delete**                                                                                     |
 
-A method that keeps its login in the harness state volume has no default, and
-its identities are [login identities](site/concepts/connectors.md#login-identities)
-— Volumes tagged with the connector. A connector with such a method has a
-**Login identities** panel:
+**Connector** filters the table on one connector
+(`#/identities?connector=<name>`). Values and logins are write-only: only
+names, scopes, types, readable fields and whether a login is present are shown.
 
-- one row per login identity — the tagged Volumes and the state volumes
-  Configs log in through, a team's own included — with its scope, its status
-  (**Logged in**, **Empty**, or **Unknown** when the connector declares no
-  marker) and the Configs using it;
-- **New login identity** — a name and a scope (Realm, Space or Stack) — with
-  **Create and log in** and **Create without logging in**;
-- **Log in** on a row (**Log in again** once it holds a login): the server
-  creates the Volume if needed, starts an identity cell that mounts only that
-  Volume and runs the harness login, and the browser opens that cell's
-  terminal. The cell deletes itself when the login ends; while a session runs
-  the row says **Login running**, its button reads **Open login session** and a
-  second click opens the same session instead of starting another. The row's
-  status is re-read every few seconds while a session runs.
+**System defaults** are pinned first, one row per connector × method: for a
+method that keeps its login in the state volume, the login identity of the
+`default` team's `agent` Config for that harness
+(`default-agent-<harness>-state`), marked **System default**, with **Log in**;
+for a token or key method, and a git-delivered connector, the Realm default of
+the `default` realm — or **Not set up** with **Create one**, which opens the
+connector's New identity page on that realm. They show while the `default`
+realm exists; `kuke init` creates it. On a realm right after `kuke team init`
+the login rows are the two `default-agent-…-state` login identities, `Empty`
+until someone logs in. A System default is a fallback a Config reaches only by
+inheriting it or by a team's pick (see [Teams](#teams)): nothing points
+existing teams at it.
+
+An identity no Config and no Realm, Space or Stack default uses is marked
+**Unused**, so an old per-role Volume can be found and deleted.
+
+**New identity** asks for the connector first — for a connector with both a
+token or key method and a login method, which kind — then opens the
+connector's form: `#/identities/<name>/new-identity` for a Secret, or
+`#/identities/<name>/new-login` for a login identity. Filtered on a connector
+the page links them directly. The identity form: for a connector that imports
+from the host (git) it starts with three cards: **Import from this machine**
+(the import form), **Use a … token** (shown when a connector advertises
+`tokenForGit`; it opens that connector's form) and **Enter a key or
+password**. The form asks _Where can cells use it?_ — **Everywhere in realm
+`<realm>`** (preselected), **Only in one space…** or **Only in one stack…**,
+only the levels the connector accepts, with a realm select only when there is
+more than one — then shows the identity fields from the connector's descriptor
+(a token, a username and password, or an SSH key with its optional parts;
+several secret types are a described choice) and **Make this the default**,
+on when no default resolves at that scope. On a connector that advertises
+`tokenForGit` (GitHub) the form also has **Also use this token for git on
+github.com**, on by default, with an optional **Commit author** and
+**Username**. **Rotate** opens
+`#/identities/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
+which replaces the value stored under that name. New login identity asks for a
+name and a scope (Realm, Space or Stack) and offers **Create and log in** and
+**Create without logging in**. Each returns to Identities, filtered on the
+connector, on success or Cancel.
+
+**Log in** on a login identity's row (**Log in again** once it holds a login):
+the server creates the Volume if needed, starts an identity cell that mounts
+only that Volume and runs the harness login, and the browser opens that cell's
+terminal. The cell deletes itself when the login ends; while a session runs
+the row says **Login running**, its button reads **Open login session** and a
+second click opens the same session instead of starting another. The rows are
+re-read every few seconds while a session runs, so the status follows when it
+ends.
+
+**Delete** uses the same confirmation as the catalog: a Secret through the
+Secret delete route, refused while a cell references it; a login identity's
+Volume, with its login, through the Volume delete route. Rows are selected
+together and deleted in one batch; a row in `kuke-system` is skipped.
+
+A connector with Configs that resolve to no identity is listed under **Needs a
+default** with a **Set a default** link that opens the connector on the first
+affected Config's scope
+(`#/identities?connector=<name>&scope=[realm, space, stack]`). Filtered on a
+connector, the page lists those Configs, each with a link that opens the
+defaults on its scope, and the **Default identity** editor: for a chosen scope
+and each method that takes an identity, the identity that resolves there and
+the level it comes from, or **No default resolves in this scope**. Below it, a
+Level and an Identity picker set another identity as the default at any level
+the connector allows (with no identity stored, a link to the new-identity page
+replaces the picker). **Defaults by level**, a disclosure, holds the per-level
+table with its **Clear** buttons. The deepest level wins. A change takes
+effect at once: no Config is re-rendered. A connector that can only be
+defaulted at some levels says so on the others. A method that keeps its login
+in the harness state volume has no default.
 
 Only whether a login is present is shown. No route returns the content of a
 login.
 
 | Method | Path                                 | Purpose                                                                                                                                                                    |
 | ------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/connectors/logins`             | Every login identity: connector, method, Volume, `exists`, `tagged`, `login`, `usedBy`, running `session`                                                                  |
+| `GET`  | `/api/connectors/logins`             | Every login identity: connector, method, Volume, `exists`, `tagged`, `login`, `usedBy` (each Config with its `role`, `<team>/<role>`), running `session`                   |
 | `POST` | `/api/connectors/{connector}/logins` | Create a login identity. Body `{"name","scope":{"realm","space","stack"},"method"}`                                                                                        |
 | `POST` | `/api/connectors/{connector}/login`  | Same body. Creates the identity if needed, starts the identity cell and returns its coordinates in `identity.session`; `attached: true` when a session was already running |
 
@@ -1106,6 +1163,47 @@ Elsewhere in the UI:
   identity or state uses it for this cell only; the Config and the defaults are not changed. The preview names the
   method and identity each connector resolved to and where it came from, and
   never any material.
+
+### Assignments tab
+
+The Identities page's second tab, **Assignments** (`#/identities/assignments`),
+maps teams and roles to identities. Its rows are **All teams (defaults)**,
+then each stored team with its roles; its columns are the connectors that
+authenticate a harness (`claude`, `codex`). Each cell picks:
+
+- **Inherit** — the level above: All teams for a team, the team for a role
+  (on the All teams row, **Not set — own per role**). The option says what it
+  resolves to, in compose's order: role, then team, then the defaults (only
+  for a team that declares no connector choices of its own), else own per
+  role;
+- **System default** — the login identity of the `default` team's `agent`
+  role for that harness, written as that Volume's name;
+- **Own per role** — the login method with no identity: each role keeps
+  `<team>-<role>-<harness>-state`;
+- a named login identity of the connector;
+- a token method, with a **harness state** choice (persistent or ephemeral).
+
+A cell writes the existing fields and nothing new: the All teams row
+`TeamDefaults.spec.defaults.connectors.<name>` (`POST /api/team-defaults` with
+`connectors`), a team row `Team.spec.connectors.<name>`, a role row
+`Team.spec.roles[].connectors.<name>` (both through the team form). A team that
+inherits the defaults' choices declares them when one of its cells is picked —
+the defaults' entries are copied, so only the picked connector changes — and
+inherits again when its choices match the defaults'; a role pick on a team that
+inherits its roles declares the defaults' roles the same way.
+
+A change is not applied at once. **Preview** composes every team it
+recomposes (`POST /api/teams/preview`): the one team of a team or role row, or
+every team that inherits the defaults' connector choices for the All teams
+row. Pointing a role at a login identity another role already uses shows the
+cross-role warning of #1789, naming the roles. **Apply** stores the change —
+for the All teams row it writes the TeamDefaults and then reapplies each
+inheriting team — and running cells keep their identity until they are
+restarted. Nothing changes until the user picks: a team that sets nothing keeps
+`<team>-<role>-<harness>-state`, and the compose fallback is not changed. The
+system teams `kuke` and `default` are rows like any other; `kuke team init` and
+`--upgrade` recompose their stored declarations, so a pick survives both, and
+`--force` resets it. `kuke team export <team>` prints the choices stored.
 
 ## Teams
 
@@ -1156,7 +1254,11 @@ A secret binding's `source.env` / `source.file` is read by that process.
      edited in **Edit as YAML**; the form keeps it. A role on one harness shows
      no per-harness switch.
   5. **Credentials**: the team's connector choices (method and identity), or
-     the defaults'; **Per-role access** (#1649): per selected role, one row per
+     the defaults' — for a method that keeps its login in the state volume
+     the identity picker lists the connector's login identities (with their
+     status, the system default `default-agent-<harness>-state` among them),
+     and empty is **Own per role**; for a token method it lists the Secrets
+     of realm `default`. **Per-role access** (#1649): per selected role, one row per
      connector a team can give a role (one that authenticates no harness and
      is not a registry credential — `github` and `git` today), with a switch,
      an identity picker (that connector's stored identities, or **Default**)
@@ -1628,6 +1730,12 @@ submitted material.
 - `GET /api/connectors/status` returns, per connector, the number of `configs`
   that require it and `missing`: the Configs that resolve to no identity
   (`config`, `component`, `method`, `slot`, `delivery`, `message`).
+- `GET /api/connectors/logins` returns every login identity (see
+  [Identities page](#identities-page)). Each entry of its `usedBy` names a
+  Config and the team `role` it runs — `<team>/<role>` from its
+  `kukeon.io/team` and `kukeon.io/role` labels, or from the
+  `kukeon.io/agent-team` annotation of a New agent copy; absent outside a team
+  — so the Identities page needs no second read per row.
 - `GET /api/connectors/defaults?realm=&space=&stack=` returns, per connector
   method, the default each level of that scope sets (`levels`, keyed `realm`,
   `space`, `stack`), the `effective` one and its `origin`.
@@ -1693,24 +1801,24 @@ summaries and results are JSON. Every route that fetches from git is a `POST`
 and gets the creation timeout; `POST /api/teams/init` gets the lifecycle
 timeout (five minutes).
 
-| Method | Path                          | Purpose                                                                                                  |
-| ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                  |
-| `POST` | `/api/teams/init`             | `kuke team init`: store the `kuke` and `default` teams. Response `{ "teams", "notes" }`. See below.      |
-| `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.            |
-| `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                         |
-| `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                    |
-| `POST` | `/api/teams`                  | Apply an add or an edit. Response `{ "plan", "result" }`.                                                |
-| `GET`  | `/api/teams/{name}/export`    | `kuke team export NAME`: `{ "document" }`. `?hostFields=1` and `?explicit=1` are its two options.        |
-| `POST` | `/api/teams/{name}/reapply`   | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                       |
-| `POST` | `/api/teams/{name}/delete`    | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                     |
-| `GET`  | `/api/sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source and the `TeamDefaults`' lists.  |
-| `POST` | `/api/sources`                | `kuke create source`. Body `{ "name", "url", "branch"/"tag"/"commit", "identity", "force" }`.            |
-| `POST` | `/api/sources/inspect`        | Fetch a Source that is not stored. Body `{ "url", "branch"/"tag"/"commit", "identity" }`.                |
-| `POST` | `/api/sources/{name}/inspect` | `kuke source show`: fetch a stored Source.                                                               |
-| `POST` | `/api/sources/{name}/delete`  | `kuke delete source`: `{ "deleted" }`; `in_use` (409) while referenced.                                  |
-| `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
-| `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
+| Method | Path                          | Purpose                                                                                                                      |
+| ------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                                      |
+| `POST` | `/api/teams/init`             | `kuke team init`: store the `kuke` and `default` teams. Response `{ "teams", "notes" }`. See below.                          |
+| `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.                                |
+| `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                                             |
+| `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                                        |
+| `POST` | `/api/teams`                  | Apply an add or an edit. Response `{ "plan", "result" }`.                                                                    |
+| `GET`  | `/api/teams/{name}/export`    | `kuke team export NAME`: `{ "document" }`. `?hostFields=1` and `?explicit=1` are its two options.                            |
+| `POST` | `/api/teams/{name}/reapply`   | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                                           |
+| `POST` | `/api/teams/{name}/delete`    | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                                         |
+| `GET`  | `/api/sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source and the `TeamDefaults`' lists.                      |
+| `POST` | `/api/sources`                | `kuke create source`. Body `{ "name", "url", "branch"/"tag"/"commit", "identity", "force" }`.                                |
+| `POST` | `/api/sources/inspect`        | Fetch a Source that is not stored. Body `{ "url", "branch"/"tag"/"commit", "identity" }`.                                    |
+| `POST` | `/api/sources/{name}/inspect` | `kuke source show`: fetch a stored Source.                                                                                   |
+| `POST` | `/api/sources/{name}/delete`  | `kuke delete source`: `{ "deleted" }`; `in_use` (409) while referenced.                                                      |
+| `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                                               |
+| `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`), `{ "connectors" }` or `{ "document" }` (a whole `TeamDefaults`). |
 
 - `POST /api/teams/init` takes an empty JSON object and, like reapply and
   delete, requires `Content-Type: application/json`. Its response lists the
@@ -1759,8 +1867,13 @@ timeout (five minutes).
   `{ "name", "enabled", "identity" }`: `enabled` is on when the role entry
   enables it (a `connectors` entry or a legacy `needs.secrets` name), and
   applying the form changes the entry only where a switch or identity differs
-  from the base, as `kuke team connector` does. The form is a JSON model of its
-  own, never a JSON-encoded Team.
+  from the base, as `kuke team connector` does. A role's `harnessConnectors`
+  (#1790) is one item per connector that authenticates a harness,
+  `{ "name", "set", "method", "identity", "state" }`: `set` says the role entry
+  has a `connectors.<name>` choice, which applying the form writes (or, unset,
+  removes); a form that sends no `harnessConnectors` leaves the entry's
+  choices as they are. The form is a JSON model of its own, never a
+  JSON-encoded Team.
 - The **draft** body is the Project step: `{ "name", "source", "branch" |
 "tag" | "commit", "identity", "useRepoFile", "declaration" }`, where
   `source` is an address or a stored Source's name and `declaration` a pasted
@@ -1787,7 +1900,14 @@ timeout (five minutes).
 - A **plan** is `{ "command", "origin": {"kind","detail"}, "declaration",
 "sources", "pairs", "create", "rerender", "prune", "missingSecrets",
 "createSecrets", "notes" }`; a **result** is `{ "team", "resources",
-"pruned", "missingSecrets", "notes" }`.
+"pruned", "missingSecrets", "notes", "warnings" }`, `warnings` being the
+  risks kukeond reported for what it applied, such as a login identity another
+  role uses (#1789). A preview's `connectors` rows carry the same risk in
+  `warning`.
+- The defaults body `{ "connectors" }` (#1790) maps a connector to its new
+  choice `{ "method", "identity", "state" }`, or `null` to remove it; the
+  connectors it does not name, and the roles and harnesses, are kept. A
+  connector or method the catalog does not know is refused.
 - A defaults change answers `{ "action", "inheriting" }`: the teams that need
   a reapply to see it.
 - A stored Source in the list is `{ "name", "url", "branch" | "tag" |

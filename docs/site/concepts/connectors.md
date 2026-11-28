@@ -149,7 +149,7 @@ an author-only identity (`git-author`). It turns signing on only when
 
 #### New git identity in the web UI
 
-On the Connectors page, the `git` connector's **New identity** page starts with
+On the Identities page, the `git` connector's **New identity** page starts with
 three choices:
 
 - **Import from this machine**: the import below.
@@ -212,7 +212,12 @@ work-github  opaque   github     default  -      -      -     -
 
 The tag and the fields are readable; the material never is.
 
-In the web UI an identity is created on its connector's **New identity** page.
+In the web UI every identity on the host — the Secrets tagged with a connector
+and the [login identities](#login-identities) — is listed on the
+**Identities** page, one table with the roles and Configs using each and an
+**Unused** mark on one nothing uses; the connector catalog itself is read-only
+on the Daemon page's **Connectors** tab. **New identity** there asks for the
+connector, then opens its **New identity** page.
 _Where can cells use it?_ chooses the scope its Secret is stored in:
 **Everywhere in realm `<realm>`** (preselected), **Only in one space…** or
 **Only in one stack…** — only the levels the connector accepts are offered, and
@@ -413,9 +418,28 @@ team-dev-codex        ...  codex=login, git=bot-key (config), github=MISSING
 A required connector with no identity at any level is **unresolved**. Previewing
 or creating a cell from that Config fails with an error naming the connector;
 the web UI shows a _Needs connector_ badge on the Config, counts the affected
-Configs on the Connectors page, and disables _Create_ until a default is set or
+Configs on the Identities page, and disables _Create_ until a default is set or
 an identity is picked. A named identity that is missing, tagged for another
 connector or of the wrong type is an error even for an optional connector.
+
+### The system default set
+
+A fresh host has a default identity per connector × method, which the
+Identities page pins first as **System default**:
+
+- for a method that keeps its login in the state volume (`login`), the login
+  identity of the `default` team's `agent` role for that harness,
+  `default-agent-<harness>-state` — the one every **New agent** shares. Right
+  after `kuke team init` it is `empty` until someone logs in to it;
+- for a token or key method (and `git`), the Realm default of the `default`
+  realm, or nothing (**Not set up**).
+
+Nothing points an existing team at the system default: a team that sets no
+identity keeps its own `<team>-<role>-<harness>-state`. A team, or one of its
+roles, opts in by naming the default's Volume as its login identity — the
+Identities page's **Assignments** tab writes it (see [Teams](#teams)). Repointing the `default`
+team's agent identity later does not move a team that picked it: the pick is
+the Volume's name.
 
 ## Teams
 
@@ -685,8 +709,8 @@ spec:
 ```
 
 With that file the connector appears in `kuke create secret --connector`, team
-`connectors`, `kuke create cell --connector`, and the web UI's Connectors page
-and pickers.
+`connectors`, `kuke create cell --connector`, the web UI's connector catalog
+(the Daemon page's Connectors tab), its Identities page and its pickers.
 
 | Field                     | Meaning                                                                                                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

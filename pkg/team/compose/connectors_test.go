@@ -420,6 +420,14 @@ func TestTeamHarnessState(t *testing.T) {
 			volume: [4]string{"shared-login", "auth", "teams", "core"},
 		},
 		{
+			// "Own per role" on the Identities page's Assignments tab (#1790): a
+			// role entry that names the method and no identity replaces the
+			// team's choice whole, so the role keeps its own state volume.
+			name: "role keeps its own state volume under a team login identity",
+			team: map[string]config.ConnectorChoice{auth: {Identity: "work-max"}},
+			role: map[string]config.ConnectorChoice{auth: {Method: "login"}},
+		},
+		{
 			name:  "ephemeral state with a token method",
 			team:  map[string]config.ConnectorChoice{auth: {Method: "api-key", State: "ephemeral"}},
 			state: "ephemeral",

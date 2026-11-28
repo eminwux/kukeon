@@ -29,6 +29,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -656,6 +657,58 @@ func TestTeamDefaults(t *testing.T) {
 	expectError(t, w, w.Body.Bytes(), http.StatusUnprocessableEntity, "team_failed")
 	if c.writes != writes {
 		t.Fatal("a rejected defaults request wrote")
+	}
+}
+
+// TestTeamDefaultsConnectors: the Identities page's All teams row (issue
+// #1790) changes the defaults' connector choices without a whole document:
+// a choice writes connectors.<name> and nothing else, null removes it, and a
+// connector or method the catalog does not know is refused without a write.
+func TestTeamDefaultsConnectors(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	before := c.storedDefaults(t).Spec.Defaults
+	system := "default-agent-claude-state@default/default/default"
+	w := connectorRequest(t, h, http.MethodPost, "/api/team-defaults", jsonBody(t, map[string]any{
+		"connectors": map[string]any{"claude": map[string]string{"method": "login", "identity": system}},
+	}))
+	change := decodeBody[defaultsChangeView](t, w)
+	if w.Code != http.StatusOK || change.Action != "updated" || strings.Join(change.Inheriting, ",") != "proj" {
+		t.Fatalf("set: %d %s", w.Code, w.Body)
+	}
+	after := c.storedDefaults(t).Spec.Defaults
+	want := config.ConnectorChoice{Method: "login", Identity: system}
+	if len(after.Connectors) != 1 || after.Connectors["claude"] != want {
+		t.Fatalf("connectors = %+v, want claude %+v only", after.Connectors, want)
+	}
+	if !reflect.DeepEqual(after.Roles, before.Roles) || !reflect.DeepEqual(after.Harnesses, before.Harnesses) {
+		t.Fatalf("a connector change touched the roles or harnesses: %+v", after)
+	}
+	// A second connector is added beside it; null removes the first.
+	w = connectorRequest(t, h, http.MethodPost, "/api/team-defaults", jsonBody(t, map[string]any{
+		"connectors": map[string]any{"codex": map[string]string{"method": "login"}, "claude": nil},
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second set: %d %s", w.Code, w.Body)
+	}
+	if got := c.storedDefaults(t).Spec.Defaults.Connectors; len(got) != 1 || got["codex"].Method != "login" {
+		t.Fatalf("connectors = %+v, want codex only", got)
+	}
+	writes := c.writes
+	for _, body := range []string{
+		jsonBody(t, map[string]any{"connectors": map[string]any{"nope": map[string]string{}}}),
+		jsonBody(t, map[string]any{"connectors": map[string]any{"claude": map[string]string{"method": "bogus"}}}),
+		jsonBody(t, map[string]any{"connectors": map[string]any{"claude": map[string]string{"state": "sometimes"}}}),
+		jsonBody(t, map[string]any{"connectors": map[string]any{}}),
+		jsonBody(t, map[string]any{"connectors": map[string]any{"claude": nil}, "roles": []string{"lead"}}),
+	} {
+		w = connectorRequest(t, h, http.MethodPost, "/api/team-defaults", body)
+		if w.Code == http.StatusOK {
+			t.Errorf("%s was accepted", body)
+		}
+	}
+	if c.writes != writes {
+		t.Fatal("a rejected connector change wrote")
 	}
 }
 

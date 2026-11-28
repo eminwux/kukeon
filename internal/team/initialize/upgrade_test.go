@@ -138,6 +138,38 @@ func TestUpgradeRepinsTheKukeonSource(t *testing.T) {
 	}
 }
 
+// TestUpgradeKeepsConnectorPicks: a pick the Identities page's Assignments
+// tab stored for the system teams (issue #1790) — a team's connectors and a
+// role's — is in their stored declarations after kuke team init --upgrade:
+// the upgrade recomposes the stored teams, it does not reset them.
+func TestUpgradeKeepsConnectorPicks(t *testing.T) {
+	a := kukeonAt(commitA, "")
+	opts, f := setupUpgrade(t, true, &a)
+	shared := config.ConnectorChoice{Method: "login", Identity: "work-max@default"}
+	own := config.ConnectorChoice{Method: "login"}
+	for _, name := range []string{"kuke", "default"} {
+		editTeam(t, f, name, func(team *config.Team) {
+			team.Spec.Connectors = map[string]config.ConnectorChoice{"claude": shared}
+			if len(team.Spec.Roles) > 0 {
+				team.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"codex": own}
+			}
+		})
+	}
+	if _, err := Init(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"kuke", "default"} {
+		after := storedTeam(t, f, name)
+		if after.Spec.Connectors["claude"] != shared {
+			t.Errorf("team %s connectors = %+v, want claude %+v", name, after.Spec.Connectors, shared)
+		}
+		if len(after.Spec.Roles) > 0 && after.Spec.Roles[0].Connectors["codex"] != own {
+			t.Errorf("team %s role %s connectors = %+v, want codex %+v",
+				name, after.Spec.Roles[0].Name, after.Spec.Roles[0].Connectors, own)
+		}
+	}
+}
+
 // TestUpgradeConvertsLegacyState is AC13 for --upgrade: the TeamDefaults'
 // sources become Sources, the kuke team's kukeon entry becomes a reference,
 // and the kukeon Source is stored at the build's revision, in one apply.
