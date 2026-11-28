@@ -9,7 +9,8 @@
 # package.json (and into the packages' dependencies on one another), the
 # packages are built, and each is published in dependency order. A version the
 # registry already holds is skipped, so a rerun of the workflow is harmless.
-# Authentication is the caller's: setup-node's .npmrc with NODE_AUTH_TOKEN.
+# Authentication is the caller's: in CI, npm trusted publishing (OIDC) with
+# npm 11.5.1 or newer; locally, an `npm login` session.
 set -euo pipefail
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ] || { [ "$#" -eq 3 ] && [ "$3" != "--dry-run" ]; }; then

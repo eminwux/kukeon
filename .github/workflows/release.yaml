@@ -89,13 +89,16 @@ jobs:
 
   # The web console packages (#1753): @kukeon/api-client, @kukeon/ui and
   # @kukeon/console at the release version (the tag without its v) under the
-  # `latest` dist-tag. NPM_TOKEN is a repository secret holding an npm
-  # automation token for the @kukeon scope.
+  # `latest` dist-tag. There is no token: each package lists this workflow
+  # (release.yaml) as an npm trusted publisher allowed to run `npm publish`,
+  # and npm authenticates the job through GitHub's OIDC token (id-token: write)
+  # and attaches provenance.
   npm_packages:
     name: Publish npm packages
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -108,14 +111,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships npm 10.
+      - name: Upgrade npm
+        run: npm install -g npm@^11.21.0 --no-audit --no-fund && npm --version
+
       - name: Publish @kukeon/api-client, @kukeon/ui and @kukeon/console
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN is not set; the npm packages of ${GITHUB_REF_NAME} are not published"
-            exit 1
-          fi
           cd web
           npm ci --no-audit --no-fund
           ./scripts/publish.sh "${GITHUB_REF_NAME#v}" latest
