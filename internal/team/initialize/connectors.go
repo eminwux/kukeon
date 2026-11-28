@@ -365,6 +365,10 @@ type RoleConnector struct {
 	// SetByTeam reports that the team's role entry enables the connector;
 	// otherwise the role definition or the harness asks for it.
 	SetByTeam bool `json:"setByTeam"`
+	// Warning is the risk kukeond reports for the resolved connector, such
+	// as a login identity another role's Config uses (issue #1789), so a
+	// preview names it before anything is stored (issue #1790).
+	Warning string `json:"warning,omitempty"`
 }
 
 // RoleConnectors reports what each Config of a stored team resolves, from
@@ -476,7 +480,7 @@ func roleConnectorRow(
 	row := RoleConnector{
 		Role: role, Config: md.Name, Task: md.Labels[api.LabelTask], Connector: status.Connector,
 		Method: status.Method, State: status.State, Origin: status.Origin, Required: status.Required,
-		Fill: status.Fill(),
+		Fill: status.Fill(), Warning: status.Warning,
 	}
 	if status.Identity != nil {
 		row.Identity = identityText(*status.Identity, md.Realm)

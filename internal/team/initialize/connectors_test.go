@@ -485,7 +485,10 @@ func TestPlanRoleConnectors(t *testing.T) {
 		}
 		return &api.CellConfigDoc{Metadata: api.CellConfigMetadata{Name: name, Realm: "default", Labels: labels}}
 	}
-	login := api.ConnectorStatus{Connector: "claude", Method: "login", State: api.ConnectorResolved}
+	// The draft render's warning for a login identity another role uses
+	// (#1789) is carried to the row, so a preview names it (#1790).
+	shared := "volume default/work-max is also the login identity of role kuke/majordomo"
+	login := api.ConnectorStatus{Connector: "claude", Method: "login", State: api.ConnectorResolved, Warning: shared}
 	github := api.ConnectorStatus{
 		Connector: "github", Method: "token", State: api.ConnectorResolved, Origin: "realm",
 		Identity: &api.ContainerSecretRef{Name: "gh-token", Realm: "default"},
@@ -505,7 +508,7 @@ func TestPlanRoleConnectors(t *testing.T) {
 	want := []RoleConnector{
 		{
 			Role: "majordomo", Config: "demo-majordomo-claude", Connector: "claude", Method: "login",
-			State: api.ConnectorResolved, Fill: "-",
+			State: api.ConnectorResolved, Fill: "-", Warning: shared,
 		},
 		{
 			Role: "majordomo", Config: "demo-majordomo-claude", Connector: "github", Method: "token",

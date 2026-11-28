@@ -272,6 +272,9 @@ type teamResultView struct {
 	Pruned         []string `json:"pruned"`
 	MissingSecrets []string `json:"missingSecrets"`
 	Notes          []string `json:"notes"`
+	// Warnings are the risks kukeond reported for resources it applied, such
+	// as a login identity another role uses (issue #1789).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type teamOutcomeView struct {
@@ -644,7 +647,7 @@ func (a *teamAPI) outcomeView(
 	if res := outcome.Result; res != nil {
 		view.Result = &teamResultView{
 			Team: res.Team, Resources: res.Resources, Pruned: nonNil(res.Pruned),
-			MissingSecrets: nonNil(res.MissingSecrets), Notes: nonNil(res.Notes),
+			MissingSecrets: nonNil(res.MissingSecrets), Notes: nonNil(res.Notes), Warnings: res.Warnings,
 		}
 	}
 	return view, nil
@@ -714,12 +717,16 @@ func (a *teamAPI) getDefaults(ctx context.Context, client kukeonv1.Client, _ *ht
 	return defaultsView{Exists: got.Exists, Document: string(got.Document)}, nil
 }
 
-// defaultsRequest is either kuke team defaults set (roles, harnesses) or a
-// whole TeamDefaults document (kuke apply -f).
+// defaultsRequest is either kuke team defaults set (roles, harnesses), a
+// change of the defaults' connector choices, or a whole TeamDefaults document
+// (kuke apply -f). Connectors (issue #1790) maps a connector to its new choice;
+// null removes the connector's entry, and connectors it does not name are
+// kept.
 type defaultsRequest struct {
-	Roles     []string `json:"roles"`
-	Harnesses []string `json:"harnesses"`
-	Document  string   `json:"document"`
+	Roles      []string                  `json:"roles"`
+	Harnesses  []string                  `json:"harnesses"`
+	Connectors map[string]*formConnector `json:"connectors"`
+	Document   string                    `json:"document"`
 }
 
 func (a *teamAPI) setDefaults(ctx context.Context, client kukeonv1.Client, r *http.Request) (any, error) {
@@ -732,19 +739,58 @@ func (a *teamAPI) setDefaults(ctx context.Context, client kukeonv1.Client, r *ht
 	var err error
 	switch {
 	case strings.TrimSpace(req.Document) != "":
-		if req.Roles != nil || req.Harnesses != nil {
-			return nil, fmt.Errorf("%w: give a document or roles and harnesses, not both", errdefs.ErrInvalidTeam)
+		if req.Roles != nil || req.Harnesses != nil || req.Connectors != nil {
+			return nil, fmt.Errorf("%w: give a document or roles, harnesses and connectors, not both",
+				errdefs.ErrInvalidTeam)
 		}
 		change, err = initialize.ApplyDefaults(ctx, opts, []byte(req.Document))
+	case req.Connectors != nil:
+		if req.Roles != nil || req.Harnesses != nil {
+			return nil, fmt.Errorf("%w: change the connector choices apart from roles and harnesses",
+				errdefs.ErrInvalidTeam)
+		}
+		var changes map[string]*config.ConnectorChoice
+		if changes, err = a.connectorChanges(req.Connectors); err != nil {
+			return nil, err
+		}
+		change, err = initialize.SetDefaultConnectors(ctx, opts, changes)
 	case req.Roles != nil || req.Harnesses != nil:
 		change, err = initialize.SetDefaults(ctx, opts, req.Roles, req.Harnesses)
 	default:
-		return nil, fmt.Errorf("%w: give a document, roles or harnesses", errdefs.ErrInvalidTeam)
+		return nil, fmt.Errorf("%w: give a document, roles, harnesses or connectors", errdefs.ErrInvalidTeam)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return changeView(change), nil
+}
+
+// connectorChanges checks a defaults request's connector choices against the
+// catalog: a choice names a known connector, and a method one of its methods.
+func (a *teamAPI) connectorChanges(in map[string]*formConnector) (map[string]*config.ConnectorChoice, error) {
+	if len(in) == 0 {
+		return nil, fmt.Errorf("%w: name a connector to change", errdefs.ErrInvalidTeam)
+	}
+	out := make(map[string]*config.ConnectorChoice, len(in))
+	for name, item := range in {
+		conn, ok := a.catalog.Find(name)
+		if !ok {
+			return nil, fmt.Errorf("%w: unknown connector %q", errdefs.ErrInvalidTeam, name)
+		}
+		if item == nil {
+			out[name] = nil
+			continue
+		}
+		choice := config.ConnectorChoice{
+			Method: strings.TrimSpace(item.Method), Identity: strings.TrimSpace(item.Identity),
+			State: strings.TrimSpace(item.State),
+		}
+		if _, known := conn.Method(choice.Method); choice.Method != "" && !known {
+			return nil, fmt.Errorf("%w: connector %q has no method %q", errdefs.ErrInvalidTeam, name, choice.Method)
+		}
+		out[name] = &choice
+	}
+	return out, nil
 }
 
 // errTeamOperation marks a failure of a team operation that carries no

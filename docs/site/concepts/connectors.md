@@ -436,8 +436,8 @@ Identities page pins first as **System default**:
 
 Nothing points an existing team at the system default: a team that sets no
 identity keeps its own `<team>-<role>-<harness>-state`. A team, or one of its
-roles, opts in by naming the default's Volume as its login identity (see
-[Teams](#teams)). Repointing the `default`
+roles, opts in by naming the default's Volume as its login identity — the
+Identities page's **Assignments** tab writes it (see [Teams](#teams)). Repointing the `default`
 team's agent identity later does not move a team that picked it: the pick is
 the Volume's name.
 

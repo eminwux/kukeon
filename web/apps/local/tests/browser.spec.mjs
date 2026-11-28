@@ -6398,7 +6398,7 @@ test("each route family shows its view's sidebar and side of the switch", async 
   await mock(page, path => path.endsWith("/containers") ? { json: [{ id: "shell", attachable: true }] } : undefined);
   await mockCatalog(page);
   const workbench = ["#/", "#/workspace/dev/shared/services/api", "#/new-cell", "#/resource/dev/shared/services/api", "#/resource/dev/shared/services/api?document=1", "#/resource/dev/shared/services/api/web"];
-  const manage = ["#/resources", "#/realms", "#/cells", "#/resource/dev", "#/resource/dev/shared/services", "#/configs", "#/new-config", "#/secrets", "#/identities", "#/daemon/connectors", "#/teams", "#/new-team", "#/sources", "#/images", "#/daemon", "#/daemon/logs", "#/health", "#/daemon/health"];
+  const manage = ["#/resources", "#/realms", "#/cells", "#/resource/dev", "#/resource/dev/shared/services", "#/configs", "#/new-config", "#/secrets", "#/identities", "#/identities/assignments", "#/daemon/connectors", "#/teams", "#/new-team", "#/sources", "#/images", "#/daemon", "#/daemon/logs", "#/health", "#/daemon/health"];
   // The settings routes; each one shows Profile, the only section (#1745).
   const settings = ["#/settings", "#/settings/profile", "#/settings/nothing"];
   for (const hash of [...workbench, ...manage, ...settings]) {
@@ -7167,6 +7167,127 @@ test("at 390×844 the switch shows named icons, the grid is one column and nothi
 });
 
 // Issue #1649: per-role connectors. The catalog the wizard reads offers GitHub, which a team can give a role.
+// #1790 Part 3: the Identities page's Assignments tab maps teams and roles to identities. A cell writes the
+// existing connector fields only — the TeamDefaults', a team's or a role entry's — after a preview of every
+// team it recomposes.
+const harnessCatalog = [
+  { name: "git", title: "Git", delivery: "git", scopes: ["realm"], secretTypes: ["ssh-key"], fields: [], methods: [] },
+  { name: "claude", title: "Claude", harness: "claude", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [
+    { name: "login", component: "claude-login", delivery: "stateVolume", default: true },
+    { name: "api-key", component: "claude-key", delivery: "env", slot: "anthropic-api-key" },
+  ] },
+];
+const systemLogin = "default-agent-claude-state@default/default/default";
+const harnessLogins = [
+  { connector: "claude", method: "login", volume: { name: "default-agent-claude-state", realm: "default", space: "default", stack: "default" }, exists: false, tagged: false, login: { state: "empty" }, usedBy: [{ name: "default-agent-claude", realm: "default", space: "default", stack: "default", role: "default/agent" }] },
+  { connector: "claude", method: "login", volume: { name: "work-max", realm: "default" }, exists: true, tagged: true, login: { state: "logged in" }, usedBy: [{ name: "kuke-majordomo-claude", realm: "default", role: "kuke/majordomo" }] },
+];
+async function mockAssignments(page) {
+  const world = await mockTeams(page);
+  const devRole = { name: "dev", source: "agents", path: "dev", image: ["go"], tasks: { all: true, items: [] }, connectors: [], harnessConnectors: [{ name: "claude", set: false }] };
+  world.webForm = () => ({ ...teamsWorld().webForm(), roles: { inherit: false, items: [structuredClone(devRole)] } });
+  world.sources.defaultForm = { roles: [structuredClone(devRole)], connectors: {} };
+  await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: harnessCatalog }));
+  await page.route(url => url.pathname === "/api/connectors/logins", route => route.fulfill({ json: harnessLogins }));
+  return world;
+}
+
+test("Assignments sets the defaults to the System default after a preview of every inheriting team, writing nothing else", async ({ page }) => {
+  const world = await mockAssignments(page);
+  await page.goto(`${server.url}#/identities`);
+  await page.getByRole("navigation", { name: "Identities sections" }).getByRole("link", { name: "Assignments" }).click();
+  await expect(page).toHaveURL(/#\/identities\/assignments$/);
+  await expect(page.locator(".page-heading h1")).toHaveText("Assignments");
+  const grid = page.getByRole("table", { name: "Team identity assignments" });
+  await expect(grid.getByRole("columnheader")).toHaveText(["Team / role", "Claude"]);
+  await expect(grid.getByRole("rowheader")).toHaveText(["All teams (defaults)", "kuke system", "dev", "web", "dev"]);
+  // Nothing set anywhere: every team keeps its own per-role state volumes.
+  const cell = name => grid.getByRole("combobox", { name, exact: true });
+  await expect(cell("All teams Claude").locator("option:checked")).toHaveText("Not set — own per role");
+  await expect(cell("web Claude").locator("option:checked")).toHaveText("Inherit → own per role");
+  await expect(cell("web/dev Claude").locator("option:checked")).toHaveText("Inherit → own per role");
+  await expect(cell("All teams Claude").getByRole("option")).toHaveText(["Not set — own per role", "System default", "Own per role", "work-max — logged in", "api-key method"]);
+  const reads = world.requests.length;
+
+  await cell("All teams Claude").selectOption({ label: "System default" });
+  const change = page.getByRole("region", { name: "Pending change" });
+  await expect(change).toContainText("Claude for All teams → System default");
+  await expect(change).toContainText("recomposes the teams that inherit it: kuke, web");
+  await expect(change.getByRole("button", { name: "Apply" })).toBeDisabled();
+  await change.getByRole("button", { name: "Preview" }).click();
+  await expect(change.getByRole("region", { name: "Preview: kuke" })).toBeVisible();
+  await expect(change.getByRole("region", { name: "Preview: web" })).toBeVisible();
+  const previews = world.requests.slice(reads).filter(item => item.path === "/api/teams/preview").map(item => item.body);
+  expect(previews.map(body => body.name)).toEqual(["kuke", "web"]);
+  for (const body of previews) expect(body.form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: systemLogin } } });
+  // Previewing wrote nothing.
+  expect(world.requests.slice(reads).filter(item => item.body && item.path !== "/api/teams/preview")).toEqual([]);
+  await change.getByRole("button", { name: "Apply" }).click();
+  await expect(toasts(page).filter({ hasText: "Claude for All teams set to System default; recomposed kuke, web." })).toBeVisible();
+  const writes = world.requests.slice(reads).filter(item => item.body && item.path !== "/api/teams/preview");
+  expect(writes).toEqual([
+    { path: "/api/team-defaults", body: { connectors: { claude: { method: "login", identity: systemLogin } } } },
+    { path: "/api/teams/kuke/reapply", body: {} },
+    { path: "/api/teams/web/reapply", body: {} },
+  ]);
+  await expect(change).toHaveCount(0);
+});
+
+test("Assignments stores a team's identity and Own per role for one of its roles, and warns of a shared login identity", async ({ page }) => {
+  const world = await mockAssignments(page);
+  await page.goto(`${server.url}#/identities/assignments`);
+  const grid = page.getByRole("table", { name: "Team identity assignments" });
+  const cell = name => grid.getByRole("combobox", { name, exact: true });
+  const change = page.getByRole("region", { name: "Pending change" });
+  // The team: work-max, which kuke/majordomo logs in through already — the change says both roles share it.
+  await cell("web Claude").selectOption({ label: "work-max — logged in" });
+  await expect(change).toContainText("Writes spec.connectors.claude of team web.");
+  await expect(change.getByRole("note")).toContainText("Login identity work-max would be shared by roles kuke/majordomo, web/dev.");
+  await change.getByRole("button", { name: "Preview" }).click();
+  await expect(change.getByRole("region", { name: "Preview: web" })).toBeVisible();
+  expect(lastPost(world, "/api/teams/preview").form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: "work-max@default" } } });
+  await change.getByRole("button", { name: "Apply" }).click();
+  await expect(toasts(page).filter({ hasText: "Claude for web set to work-max" })).toBeVisible();
+  const saved = lastPost(world, "/api/teams");
+  expect(saved.name).toBe("web");
+  expect(saved.form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: "work-max@default" } } });
+  // The roles were not touched: the role entry still chooses nothing.
+  expect(saved.form.roles.items[0].harnessConnectors).toEqual([{ name: "claude", set: false }]);
+  // The stored team now has the choice; its role inherits it.
+  world.webForm = () => structuredClone(saved.form);
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(cell("web Claude").locator("option:checked")).toHaveText("work-max — logged in");
+  await expect(cell("web/dev Claude").locator("option:checked")).toHaveText("Inherit → work-max");
+  // Own per role on the role: the role entry names the login method and no identity.
+  await cell("web/dev Claude").selectOption({ label: "Own per role" });
+  await expect(change).toContainText("Writes connectors.claude of role dev in team web.");
+  await change.getByRole("button", { name: "Preview" }).click();
+  await change.getByRole("button", { name: "Apply" }).click();
+  await expect(toasts(page).filter({ hasText: "Claude for web/dev set to own per role" })).toBeVisible();
+  const role = lastPost(world, "/api/teams");
+  expect(role.form.connectors).toEqual(saved.form.connectors);
+  expect(role.form.roles.items[0].harnessConnectors).toEqual([{ name: "claude", set: true, method: "login" }]);
+});
+
+test("the Credentials step lists login identities for a connector's login method", async ({ page }) => {
+  const world = await mockAssignments(page);
+  await page.goto(`${server.url}#/teams/web/edit`);
+  const steps = wizard(page);
+  for (let i = 0; i < 3; i++) await steps.getByRole("button", { name: "Next" }).click();
+  await steps.getByRole("checkbox", { name: "Use the defaults' connector choices" }).uncheck();
+  // The login method (the default): the login identities, with their status; Own per role keeps the state volumes.
+  await expect(steps.getByLabel("Identity of claude", { exact: true }).getByRole("option")).toHaveText(["Own per role", "default-agent-claude-state — empty", "work-max — logged in"]);
+  await steps.getByLabel("Identity of claude", { exact: true }).selectOption({ label: "work-max — logged in" });
+  // A token method lists the Secrets instead.
+  await steps.getByLabel("Method of claude").selectOption("api-key");
+  await expect(steps.getByLabel("Identity of claude", { exact: true }).getByRole("option").first()).toHaveText("From the scope defaults");
+  await steps.getByLabel("Method of claude").selectOption("login");
+  await steps.getByLabel("Identity of claude", { exact: true }).selectOption({ label: "work-max — logged in" });
+  await steps.getByRole("button", { name: "Next" }).click();
+  await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
+  expect(lastPost(world, "/api/teams/preview").form.connectors.items.claude).toEqual({ method: "login", identity: "work-max@default" });
+});
+
 const roleAccessConnectors = [
   { name: "git", title: "Git", delivery: "git", scopes: ["realm"], secretTypes: ["ssh-key"], fields: [], methods: [] },
   { name: "github", title: "GitHub", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "token", component: "github", delivery: "env", default: true }] },

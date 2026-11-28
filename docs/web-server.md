@@ -1025,7 +1025,9 @@ connector's name.
 
 ### Identities page
 
-Identities (`#/identities`) is one table of every identity on the host: the
+Identities (`#/identities`) has two tabs: **Identities**, described here, and
+[**Assignments**](#assignments-tab). The Identities tab is one table of every
+identity on the host: the
 Secrets tagged with a connector and the
 [login identities](site/concepts/connectors.md#login-identities) — the Volumes
 a harness keeps its login in, a team's own state volumes included. It reads
@@ -1162,6 +1164,47 @@ Elsewhere in the UI:
   method and identity each connector resolved to and where it came from, and
   never any material.
 
+### Assignments tab
+
+The Identities page's second tab, **Assignments** (`#/identities/assignments`),
+maps teams and roles to identities. Its rows are **All teams (defaults)**,
+then each stored team with its roles; its columns are the connectors that
+authenticate a harness (`claude`, `codex`). Each cell picks:
+
+- **Inherit** — the level above: All teams for a team, the team for a role
+  (on the All teams row, **Not set — own per role**). The option says what it
+  resolves to, in compose's order: role, then team, then the defaults (only
+  for a team that declares no connector choices of its own), else own per
+  role;
+- **System default** — the login identity of the `default` team's `agent`
+  role for that harness, written as that Volume's name;
+- **Own per role** — the login method with no identity: each role keeps
+  `<team>-<role>-<harness>-state`;
+- a named login identity of the connector;
+- a token method, with a **harness state** choice (persistent or ephemeral).
+
+A cell writes the existing fields and nothing new: the All teams row
+`TeamDefaults.spec.defaults.connectors.<name>` (`POST /api/team-defaults` with
+`connectors`), a team row `Team.spec.connectors.<name>`, a role row
+`Team.spec.roles[].connectors.<name>` (both through the team form). A team that
+inherits the defaults' choices declares them when one of its cells is picked —
+the defaults' entries are copied, so only the picked connector changes — and
+inherits again when its choices match the defaults'; a role pick on a team that
+inherits its roles declares the defaults' roles the same way.
+
+A change is not applied at once. **Preview** composes every team it
+recomposes (`POST /api/teams/preview`): the one team of a team or role row, or
+every team that inherits the defaults' connector choices for the All teams
+row. Pointing a role at a login identity another role already uses shows the
+cross-role warning of #1789, naming the roles. **Apply** stores the change —
+for the All teams row it writes the TeamDefaults and then reapplies each
+inheriting team — and running cells keep their identity until they are
+restarted. Nothing changes until the user picks: a team that sets nothing keeps
+`<team>-<role>-<harness>-state`, and the compose fallback is not changed. The
+system teams `kuke` and `default` are rows like any other; `kuke team init` and
+`--upgrade` recompose their stored declarations, so a pick survives both, and
+`--force` resets it. `kuke team export <team>` prints the choices stored.
+
 ## Teams
 
 **Manage → Teams** (`#/teams`) manages the [teams](site/concepts/team.md)
@@ -1211,7 +1254,11 @@ A secret binding's `source.env` / `source.file` is read by that process.
      edited in **Edit as YAML**; the form keeps it. A role on one harness shows
      no per-harness switch.
   5. **Credentials**: the team's connector choices (method and identity), or
-     the defaults'; **Per-role access** (#1649): per selected role, one row per
+     the defaults' — for a method that keeps its login in the state volume
+     the identity picker lists the connector's login identities (with their
+     status, the system default `default-agent-<harness>-state` among them),
+     and empty is **Own per role**; for a token method it lists the Secrets
+     of realm `default`. **Per-role access** (#1649): per selected role, one row per
      connector a team can give a role (one that authenticates no harness and
      is not a registry credential — `github` and `git` today), with a switch,
      an identity picker (that connector's stored identities, or **Default**)
@@ -1754,24 +1801,24 @@ summaries and results are JSON. Every route that fetches from git is a `POST`
 and gets the creation timeout; `POST /api/teams/init` gets the lifecycle
 timeout (five minutes).
 
-| Method | Path                          | Purpose                                                                                                  |
-| ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                  |
-| `POST` | `/api/teams/init`             | `kuke team init`: store the `kuke` and `default` teams. Response `{ "teams", "notes" }`. See below.      |
-| `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.            |
-| `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                         |
-| `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                    |
-| `POST` | `/api/teams`                  | Apply an add or an edit. Response `{ "plan", "result" }`.                                                |
-| `GET`  | `/api/teams/{name}/export`    | `kuke team export NAME`: `{ "document" }`. `?hostFields=1` and `?explicit=1` are its two options.        |
-| `POST` | `/api/teams/{name}/reapply`   | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                       |
-| `POST` | `/api/teams/{name}/delete`    | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                     |
-| `GET`  | `/api/sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source and the `TeamDefaults`' lists.  |
-| `POST` | `/api/sources`                | `kuke create source`. Body `{ "name", "url", "branch"/"tag"/"commit", "identity", "force" }`.            |
-| `POST` | `/api/sources/inspect`        | Fetch a Source that is not stored. Body `{ "url", "branch"/"tag"/"commit", "identity" }`.                |
-| `POST` | `/api/sources/{name}/inspect` | `kuke source show`: fetch a stored Source.                                                               |
-| `POST` | `/api/sources/{name}/delete`  | `kuke delete source`: `{ "deleted" }`; `in_use` (409) while referenced.                                  |
-| `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                           |
-| `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`) or `{ "document" }` (a whole `TeamDefaults`). |
+| Method | Path                          | Purpose                                                                                                                      |
+| ------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/teams`                  | `{ "teams": [summary] }`: the teams of realm `default`.                                                                      |
+| `POST` | `/api/teams/init`             | `kuke team init`: store the `kuke` and `default` teams. Response `{ "teams", "notes" }`. See below.                          |
+| `GET`  | `/api/teams/{name}`           | `{ "summary", "document", "view", "form" }`: one team; `document` is the stored Team as YAML.                                |
+| `POST` | `/api/teams/draft`            | What an add would start from, read without composing; writes nothing. See below.                                             |
+| `POST` | `/api/teams/preview`          | The plan of an add or an edit; writes nothing. Response `{ "plan" }`.                                                        |
+| `POST` | `/api/teams`                  | Apply an add or an edit. Response `{ "plan", "result" }`.                                                                    |
+| `GET`  | `/api/teams/{name}/export`    | `kuke team export NAME`: `{ "document" }`. `?hostFields=1` and `?explicit=1` are its two options.                            |
+| `POST` | `/api/teams/{name}/reapply`   | Recompose a stored team (`kuke team apply NAME`). Response `{ "plan", "result" }`.                                           |
+| `POST` | `/api/teams/{name}/delete`    | `kuke delete team`. Response `{ "deleted", "removed", "liveCells", "keptVolumes" }`.                                         |
+| `GET`  | `/api/sources`                | `{ "sources", "defaultRoles", "defaultHarnesses" }`: every stored Source and the `TeamDefaults`' lists.                      |
+| `POST` | `/api/sources`                | `kuke create source`. Body `{ "name", "url", "branch"/"tag"/"commit", "identity", "force" }`.                                |
+| `POST` | `/api/sources/inspect`        | Fetch a Source that is not stored. Body `{ "url", "branch"/"tag"/"commit", "identity" }`.                                    |
+| `POST` | `/api/sources/{name}/inspect` | `kuke source show`: fetch a stored Source.                                                                                   |
+| `POST` | `/api/sources/{name}/delete`  | `kuke delete source`: `{ "deleted" }`; `in_use` (409) while referenced.                                                      |
+| `GET`  | `/api/team-defaults`          | `{ "exists", "document" }`: the stored `TeamDefaults` as YAML.                                                               |
+| `POST` | `/api/team-defaults`          | Body `{ "roles", "harnesses" }` (`kuke team defaults set`), `{ "connectors" }` or `{ "document" }` (a whole `TeamDefaults`). |
 
 - `POST /api/teams/init` takes an empty JSON object and, like reapply and
   delete, requires `Content-Type: application/json`. Its response lists the
@@ -1820,8 +1867,13 @@ timeout (five minutes).
   `{ "name", "enabled", "identity" }`: `enabled` is on when the role entry
   enables it (a `connectors` entry or a legacy `needs.secrets` name), and
   applying the form changes the entry only where a switch or identity differs
-  from the base, as `kuke team connector` does. The form is a JSON model of its
-  own, never a JSON-encoded Team.
+  from the base, as `kuke team connector` does. A role's `harnessConnectors`
+  (#1790) is one item per connector that authenticates a harness,
+  `{ "name", "set", "method", "identity", "state" }`: `set` says the role entry
+  has a `connectors.<name>` choice, which applying the form writes (or, unset,
+  removes); a form that sends no `harnessConnectors` leaves the entry's
+  choices as they are. The form is a JSON model of its own, never a
+  JSON-encoded Team.
 - The **draft** body is the Project step: `{ "name", "source", "branch" |
 "tag" | "commit", "identity", "useRepoFile", "declaration" }`, where
   `source` is an address or a stored Source's name and `declaration` a pasted
@@ -1848,7 +1900,14 @@ timeout (five minutes).
 - A **plan** is `{ "command", "origin": {"kind","detail"}, "declaration",
 "sources", "pairs", "create", "rerender", "prune", "missingSecrets",
 "createSecrets", "notes" }`; a **result** is `{ "team", "resources",
-"pruned", "missingSecrets", "notes" }`.
+"pruned", "missingSecrets", "notes", "warnings" }`, `warnings` being the
+  risks kukeond reported for what it applied, such as a login identity another
+  role uses (#1789). A preview's `connectors` rows carry the same risk in
+  `warning`.
+- The defaults body `{ "connectors" }` (#1790) maps a connector to its new
+  choice `{ "method", "identity", "state" }`, or `null` to remove it; the
+  connectors it does not name, and the roles and harnesses, are kept. A
+  connector or method the catalog does not know is refused.
 - A defaults change answers `{ "action", "inheriting" }`: the teams that need
   a reapply to see it.
 - A stored Source in the list is `{ "name", "url", "branch" | "tag" |

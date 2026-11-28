@@ -16,6 +16,7 @@ import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type 
 import { navigate, routeHref } from "./router";
 import { defaultRole, defaultTeam, filterRows, identityRows, kindLogin, kindSecret, markDefaults, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
 import type { IdentityRow, SystemDefault } from "./identities.mjs";
+import { AssignmentsTab } from "./assignments-tab";
 
 // The Identities page (#1790): every credential a cell uses, from the connector catalog
 // (GET /api/connectors), the tagged Secrets and the login identities. A connector added as one
@@ -479,9 +480,19 @@ function NeedsDefault({ connector, missing }: { connector: Connector; missing: C
   </section>;
 }
 
-// IdentitiesPage is #/identities, filtered on a connector with ?connector=, and the identity forms
-// #/identities/<name>/new-identity, …/new-login and …/rotate-identity.
-export function IdentitiesPage({ connector: filter, target, action, identity, revision, inventory, onChanged, onTitle }: { connector?: string; section?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
+// IdentitiesNav is the Identities page's tabs (#1790): every identity, and the Assignments of teams and
+// roles to identities.
+function IdentitiesNav({ current }: { current: "identities" | "assignments" }) {
+  return <nav className="daemon-tabs" aria-label="Identities sections">
+    <a href={identitiesLink()} aria-current={current === "identities" ? "page" : undefined}>Identities</a>
+    <a href={routeHref("/identities/assignments")} aria-current={current === "assignments" ? "page" : undefined}>Assignments</a>
+  </nav>;
+}
+
+// IdentitiesPage is #/identities, filtered on a connector with ?connector=, its Assignments tab
+// #/identities/assignments, and the identity forms #/identities/<name>/new-identity, …/new-login and
+// …/rotate-identity.
+export function IdentitiesPage({ connector: filter, section, target, action, identity, revision, inventory, onChanged, onTitle }: { connector?: string; section?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
   const catalog = useResource<Connector[]>("/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/connectors/status", revision);
   const secrets = useResource<unknown[]>("/catalog/secrets", revision);
@@ -508,6 +519,7 @@ export function IdentitiesPage({ connector: filter, target, action, identity, re
   const configs = inventory.data?.configs;
   const rows = useMemo(() => markDefaults(identityRows({ connectors, secrets: secrets.data, logins: logins.data, configs, scopes }), realmDefaults.data), [connectors, secrets.data, logins.data, configs, scopes, realmDefaults.data]);
   const unknown = catalog.data && filter && !connector;
+  if (section === "assignments") return <><IdentitiesNav current="assignments" /><AssignmentsTab revision={revision} onChanged={onChanged} /></>;
   if (action === "new-login" && connector && loginMethods(connector).length) return <NewLoginIdentityPage key={connector.name} connector={connector} logins={logins.data} target={scope} inventory={inventory} onChanged={onChanged} />;
   if (action && action !== "new-login" && connector && defaultTargets(connector).length > 0) return <IdentityPage key={`${connector.name}:${action}`} connector={connector} connectors={catalog.data ?? []} action={action} identity={identity} target={scope} identities={identitiesFor(secrets.data, connector.name)} secrets={secrets.data} secretsLoading={secrets.loading && !secrets.data} inventory={inventory} onChanged={onChanged} />;
   const shown = connector ? [connector] : filter ? [] : connectors;
@@ -516,6 +528,7 @@ export function IdentitiesPage({ connector: filter, target, action, identity, re
   const errors = [secrets.error && `Identities could not be listed: ${secrets.error.message}`, logins.error && `Login identities could not be listed: ${logins.error.message}`].filter(Boolean).join(" ");
   const title = connector ? connector.title || connector.name : "";
   return <>
+    <IdentitiesNav current="identities" />
     {catalog.loading && !catalog.data && <p role="status">Loading identities…</p>}
     {catalog.error && <ErrorNotice error={catalog.error} kind="Connector" />}
     {catalog.error && catalog.data && <p className="stale">Stale connector catalog — refresh failed.</p>}

@@ -82,6 +82,25 @@ type formRole struct {
 	// Connectors has one item per connector a team can give a role
 	// (initialize.Togglable), whether this entry enables it or not.
 	Connectors []formRoleConnector `json:"connectors"`
+	// HarnessConnectors has one item per connector that authenticates a
+	// harness (issue #1790): the role entry's method, identity and state for
+	// it. Null leaves the entry's choices as they are, so a client that does
+	// not edit them sends none.
+	HarnessConnectors []formHarnessConnector `json:"harnessConnectors"`
+}
+
+// formHarnessConnector is a role entry's choice for a connector that
+// authenticates a harness: Set says the entry has one (connectors.<name>);
+// Method, Identity and State are the choice. An identity of a login method
+// names a login identity, the Volume the role's cells keep their harness
+// state in; a method with no identity keeps the role's own
+// <team>-<role>-<harness>-state.
+type formHarnessConnector struct {
+	Name     string `json:"name"`
+	Set      bool   `json:"set"`
+	Method   string `json:"method,omitempty"`
+	Identity string `json:"identity,omitempty"`
+	State    string `json:"state,omitempty"`
 }
 
 // formRoleConnector is one per-role connector switch: Enabled says the role
@@ -211,6 +230,8 @@ func formOf(team *config.Team, catalog *connector.Catalog) teamForm {
 			InitialPath: role.InitialPath, Image: []string{},
 			Tasks:      formTasks{All: role.Tasks == nil, Items: []formTask{}},
 			Connectors: roleConnectorsOf(&role, catalog),
+
+			HarnessConnectors: roleHarnessConnectorsOf(&role, catalog),
 		}
 		if role.Needs != nil {
 			item.Image = append(item.Image, role.Needs.Image...)
@@ -262,6 +283,26 @@ func roleConnectorsOf(role *config.Role, catalog *connector.Catalog) []formRoleC
 		out = append(out, formRoleConnector{
 			Name: conn.Metadata.Name, Enabled: initialize.RoleConnectorSet(role, conn),
 			Identity: role.Connectors[conn.Metadata.Name].Identity,
+		})
+	}
+	return out
+}
+
+// roleHarnessConnectorsOf is a role entry's choices for the connectors that
+// authenticate a harness, one item per such connector of the catalog.
+func roleHarnessConnectorsOf(role *config.Role, catalog *connector.Catalog) []formHarnessConnector {
+	out := []formHarnessConnector{}
+	if catalog == nil {
+		return out
+	}
+	for i := range catalog.Connectors {
+		conn := &catalog.Connectors[i]
+		if conn.Spec.Harness == "" {
+			continue
+		}
+		choice, set := role.Connectors[conn.Metadata.Name]
+		out = append(out, formHarnessConnector{
+			Name: conn.Metadata.Name, Set: set, Method: choice.Method, Identity: choice.Identity, State: choice.State,
 		})
 	}
 	return out
@@ -356,6 +397,9 @@ func (f teamForm) apply(base *config.Team, inherited []config.Role, catalog *con
 		}
 		for i, item := range f.Roles.Items {
 			if err := item.applyConnectors(&out, &out.Spec.Roles[i], baseRole(item, roles), catalog); err != nil {
+				return nil, err
+			}
+			if err := item.applyHarnessConnectors(&out.Spec.Roles[i], catalog); err != nil {
 				return nil, err
 			}
 		}
@@ -482,6 +526,41 @@ func (r formRole) applyConnectors(
 			return err
 		}
 	}
+	return nil
+}
+
+// applyHarnessConnectors writes the role's choices for the connectors that
+// authenticate a harness onto its entry: a set item replaces the entry's
+// connectors.<name>, an unset one removes it. Without items (a client that
+// does not edit them) the entry keeps what it had.
+func (r formRole) applyHarnessConnectors(entry *config.Role, catalog *connector.Catalog) error {
+	if r.HarnessConnectors == nil {
+		return nil
+	}
+	connectors := maps.Clone(entry.Connectors)
+	for _, item := range r.HarnessConnectors {
+		name := strings.TrimSpace(item.Name)
+		conn, known := catalog.Find(name)
+		if !known || conn.Spec.Harness == "" {
+			return fmt.Errorf("%w: role %s: connector %q authenticates no harness",
+				errdefs.ErrInvalidTeam, entry.Name, name)
+		}
+		if !item.Set {
+			delete(connectors, name)
+			continue
+		}
+		if connectors == nil {
+			connectors = map[string]config.ConnectorChoice{}
+		}
+		connectors[name] = config.ConnectorChoice{
+			Method: strings.TrimSpace(item.Method), Identity: strings.TrimSpace(item.Identity),
+			State: strings.TrimSpace(item.State),
+		}
+	}
+	if len(connectors) == 0 {
+		connectors = nil
+	}
+	entry.Connectors = connectors
 	return nil
 }
 

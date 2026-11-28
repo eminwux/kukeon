@@ -377,6 +377,75 @@ func TestFormRoleConnectors(t *testing.T) {
 	})
 }
 
+// TestFormRoleHarnessConnectors: a role's choice for each connector that
+// authenticates a harness (issue #1790) is a form item; set replaces the role
+// entry's connectors.<name>, unset removes it, and a client that sends no
+// items leaves the entry as it was. "Own per role" is the method without an
+// identity, under a team that names a login identity.
+func TestFormRoleHarnessConnectors(t *testing.T) {
+	catalog := connectortest.Catalog(t)
+	base := config.Majordomo()
+	base.Spec.Connectors = map[string]config.ConnectorChoice{"claude": {Identity: "work-max@default"}}
+	base.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}}
+	form := formOf(base, catalog)
+	items := form.Roles.Items[0].HarnessConnectors
+	var names []string
+	for _, item := range items {
+		names = append(names, item.Name)
+		if item.Set {
+			t.Errorf("%s is set on a role that chose nothing for it", item.Name)
+		}
+	}
+	if strings.Join(names, ",") != "claude,codex" {
+		t.Fatalf("harness connectors = %v, want claude and codex", names)
+	}
+	harness := func(form *teamForm, name string) *formHarnessConnector {
+		for i := range form.Roles.Items[0].HarnessConnectors {
+			if item := &form.Roles.Items[0].HarnessConnectors[i]; item.Name == name {
+				return item
+			}
+		}
+		t.Fatalf("no %s item", name)
+		return nil
+	}
+	*harness(&form, "claude") = formHarnessConnector{Name: "claude", Set: true, Method: "login"}
+	got, err := form.apply(base, nil, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.Majordomo()
+	want.Spec.Connectors = base.Spec.Connectors
+	want.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}, "claude": {Method: "login"}}
+	if marshalTeam(t, got) != marshalTeam(t, want) {
+		t.Fatalf("own per role:\n%s", marshalTeam(t, got))
+	}
+	// Read back, it is set; unset removes it and keeps the switch.
+	again := formOf(got, catalog)
+	if item := harness(&again, "claude"); !item.Set || item.Method != "login" || item.Identity != "" {
+		t.Fatalf("read back = %+v", item)
+	}
+	harness(&again, "claude").Set = false
+	got, err = again.apply(got, nil, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := got.Spec.Roles[0].Connectors; len(c) != 1 || c["github"] != (config.ConnectorChoice{}) {
+		t.Fatalf("unset left %+v", c)
+	}
+	// No items: the entry is untouched.
+	form = formOf(want, catalog)
+	form.Roles.Items[0].HarnessConnectors = nil
+	if got, err = form.apply(want, nil, catalog); err != nil || marshalTeam(t, got) != marshalTeam(t, want) {
+		t.Fatalf("no items changed the role: %v\n%s", err, marshalTeam(t, got))
+	}
+	// Only a harness connector is an item.
+	form = formOf(base, catalog)
+	form.Roles.Items[0].HarnessConnectors = []formHarnessConnector{{Name: "github", Set: true}}
+	if _, err = form.apply(base, nil, catalog); err == nil {
+		t.Fatal("a connector that authenticates no harness was accepted")
+	}
+}
+
 // TestFormTaskHarnesses: the form carries a task entry's per-harness
 // overrides (issue #1668, AC7). A switch set in the form is an override's
 // suspend; an override left with neither a schedule nor a switch is dropped,

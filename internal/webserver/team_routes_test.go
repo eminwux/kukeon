@@ -173,6 +173,48 @@ func TestTeamCreateFromForm(t *testing.T) {
 	}
 }
 
+// TestTeamAssignmentsExport: the Identities page's Assignments tab (issue
+// #1790) edits a team through its form — the team's choice, and "Own per
+// role" on one role — and kuke team export prints what it stored.
+func TestTeamAssignmentsExport(t *testing.T) {
+	c, h := teamFixture(t)
+	c.putProj(t)
+	got := decodeBody[teamView](t, connectorRequest(t, h, http.MethodGet, "/api/teams/proj", ""))
+	if got.Form == nil {
+		t.Fatalf("no form: %+v", got)
+	}
+	form := *got.Form
+	form.Connectors = formConnectors{Items: map[string]formConnector{"claude": {Identity: "work-max@default"}}}
+	for i := range form.Roles.Items[0].HarnessConnectors {
+		if item := &form.Roles.Items[0].HarnessConnectors[i]; item.Name == "claude" {
+			*item = formHarnessConnector{Name: "claude", Set: true, Method: "login"}
+		}
+	}
+	w := connectorRequest(
+		t,
+		h,
+		http.MethodPost,
+		"/api/teams",
+		jsonBody(t, map[string]any{"name": "proj", "form": form}),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("edit: %d %s", w.Code, w.Body)
+	}
+	w = connectorRequest(t, h, http.MethodGet, "/api/teams/proj/export", "")
+	exported := decodeBody[map[string]string](t, w)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", w.Code, w.Body)
+	}
+	team, err := config.DecodeTeamDeclaration(strings.NewReader(exported["document"]))
+	if err != nil {
+		t.Fatalf("export does not decode: %v\n%s", err, exported["document"])
+	}
+	if team.Spec.Connectors["claude"].Identity != "work-max@default" ||
+		team.Spec.Roles[0].Connectors["claude"] != (config.ConnectorChoice{Method: "login"}) {
+		t.Fatalf("export = %s", exported["document"])
+	}
+}
+
 // TestTeamViewAndEdit is AC3 and AC4 over HTTP: GET carries the view (the
 // hydrated team, its task Configs with schedules) and the form (the stored
 // team); an edit switches one schedule off without YAML.
