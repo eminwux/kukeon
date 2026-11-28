@@ -64,8 +64,10 @@ export type ConsoleExtension = {
 export function extensionLink(id: string, path: string): string {
   return routeHref(`/ext/${encodeURIComponent(id)}/${trimPath(path).split("/").map(encodeURIComponent).join("/")}`);
 }
+// trimPath drops empty segments, as readRoute does, in linear time (a /^\/+|\/+$/ trim is quadratic on
+// a long run of "/", and route paths come from the URL hash).
 function trimPath(path: string): string {
-  return path.replace(/^\/+|\/+$/g, "");
+  return path.split("/").filter(Boolean).join("/");
 }
 
 // The state of one extension on this host: checking until the capabilities answer, then available, or
