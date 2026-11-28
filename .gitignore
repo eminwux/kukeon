@@ -12,7 +12,9 @@
 /node_modules/**
 /local/**
 
-/internal/webui/frontend/node_modules/
+# The web/ npm workspace: dependencies, and the packages' published builds.
+/web/**/node_modules/
+/web/packages/*/dist/
 
 # Python bytecode caches from the team harness tests
 __pycache__/

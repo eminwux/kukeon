@@ -1,9 +1,32 @@
 # Web UI development
 
-The frontend foundation lives in `internal/webui/frontend`: a client-rendered
-React and TypeScript application built with Vite. The CLI serves the embedded
-web UI and a same-origin HTTP API backed by kukeond.
+The frontend lives in the npm workspace at `web/`: a client-rendered React and
+TypeScript console built with Vite. The CLI serves the embedded web UI and a
+same-origin HTTP API backed by kukeond.
 See [local server usage](web-server.md).
+
+## Workspace layout
+
+| Member                | Package              | What it holds                                                                                                          |
+| --------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `packages/api-client` | `@kukeon/api-client` | The transport: every API request and attach/exec WebSocket.                                                            |
+| `packages/ui`         | `@kukeon/ui`         | React primitives: icons and row actions, disclosures, state badges, focus helpers.                                     |
+| `packages/console`    | `@kukeon/console`    | The console, `<KukeonConsole transport auth router />` (and `mountConsole`), plus its stylesheet.                      |
+| `apps/local`          | (private)            | The console `kuke serve` embeds: a `main.tsx` that mounts `KukeonConsole` with the defaults, and the Playwright tests. |
+
+`web/package-lock.json` is the one lockfile; run `npm ci` in `web/`. Inside the
+workspace the packages resolve to each other's sources (the `@kukeon/source`
+export condition), so `apps/local` builds into `internal/webui/dist` without
+building the packages first. The three packages also build their published
+form into their own ignored `dist/`: ES modules, type declarations and, for
+`@kukeon/console`, `style.css`, which a host imports once as
+`@kukeon/console/style.css`.
+
+The release workflow publishes the three packages to npmjs.com at the release
+version under the `latest` dist-tag; the edge workflow publishes every merge to
+main as `x.y.z-edge.<sha>` under the `edge` dist-tag (`web/scripts/publish.sh`).
+Both read an npm automation token for the `@kukeon` scope from the `NPM_TOKEN`
+repository secret.
 
 ## Cell lifecycle actions
 
@@ -36,14 +59,17 @@ are left alone.
 ## Build policy
 
 Commit both frontend source and the generated `internal/webui/dist` tree.
-Dependencies are pinned in `package.json` and `package-lock.json`. Do not edit
+Dependencies are pinned in the workspace's `package.json` files and
+`web/package-lock.json`. Do not edit
 `dist` directly. After changing source or dependencies, run from the repo root:
 
 ```sh
 make web-ui
 ```
 
-This runs `npm ci`, TypeScript checking, and a production build. Stage the entire
+This runs `npm ci` and `npm run build` in `web/`: each package's build, with
+`@kukeon/console`'s type declarations (a declaration error fails it), then the
+TypeScript check and production build of `apps/local`. Stage the entire
 `dist` change, including removed hashed filenames. CI runs `make web-ui-check`
 to reject changed, deleted, or newly generated untracked assets. To run that
 check locally for a new change, stage the regenerated output first.
@@ -61,9 +87,9 @@ font, database, or additional runtime is needed by the production bundle.
 ## Frontend development
 
 ```sh
-cd internal/webui/frontend
+cd web
 npm ci
-npm run dev
+npm run dev -w @kukeon/local
 ```
 
 Open the loopback URL Vite prints. `npm run preview` previews the production
@@ -71,16 +97,18 @@ bundle after `make web-ui`. These are development tools, separate from the
 `kuke serve` command, and do not connect to kukeond. Use `make web-ui && make kuke` followed by
 `./kuke serve` to exercise the same-origin API.
 
-`make web-ui-unit` runs `npm run test:unit`, the frontend's Node unit tests,
-which launch no browser or daemon; the `web-ui` CI job runs it after
-`make web-ui-check`. It needs `node_modules` (`make web-ui` or `npm ci`).
+`make web-ui-unit` runs `npm run typecheck` and `npm run test:unit` in `web/`:
+the type check of every workspace member and their Node unit tests, which
+launch no browser or daemon; the `web-ui` CI job runs it after
+`make web-ui-check`. It needs `node_modules` (`make web-ui` or `npm ci` in
+`web/`).
 
 The scoped relationship, manual specification and blueprint-form schemas have
 focused Node unit tests that do not launch a browser or daemon (`npm run
 test:unit` runs them with the other unit tests):
 
 ```sh
-node --test internal/webui/frontend/src/relationships.test.mjs internal/webui/frontend/src/creation-schema.test.mjs internal/webui/frontend/src/config-form.test.mjs
+node --test web/packages/console/src/relationships.test.mjs web/packages/console/src/creation-schema.test.mjs web/packages/console/src/config-form.test.mjs
 ```
 
 ## Go integration and verification
@@ -105,7 +133,7 @@ Install the browser after `make web-ui` (on a minimal Linux host, use
 `npx playwright install --with-deps chromium` to install required system libraries):
 
 ```sh
-(cd internal/webui/frontend && npx playwright install chromium)
+(cd web/apps/local && npx playwright install chromium)
 make web-ui-test
 ```
 
@@ -121,7 +149,7 @@ present, routes a test does not mock reach the real server's daemon path and
 answer `503 unavailable` from the missing socket, as before the login existed;
 the sign-in tests override `/api/session` themselves. These tests do not substitute for the live-daemon
 smoke below. Failed tests retain a Playwright trace in the ignored
-`internal/webui/frontend/test-results` directory.
+`web/apps/local/test-results` directory.
 
 On a host with a running kukeond and at least one realm (for example, after the
 project's `KUKEON_PROFILE=dev make dev-init` smoke), run:

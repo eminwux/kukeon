@@ -1,0 +1,29 @@
+{
+  "name": "@kukeon/api-client",
+  "version": "0.0.0",
+  "description": "Transport of the kukeon web console: API requests and attach/exec WebSockets.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eminwux/kukeon.git",
+    "directory": "web/packages/api-client"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "@kukeon/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  }
+}

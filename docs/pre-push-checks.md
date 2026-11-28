@@ -9,9 +9,9 @@ runs only when the files it covers changed; the rest show as skipped.
 | `Lint (pre-commit)` | anything outside `docs/` and `mkdocs.yml`                                                                              | `pre-commit run --files $(git diff --name-only origin/main...HEAD)` and `make fmt-check`       |
 | `Go unit tests (…)` | Go sources, other files under `cmd/` `internal/` `pkg/` `e2e/` `team/`, `kuketeam.yaml`, `go.mod`/`go.sum`, `Makefile` | `make test` and `make test-race`                                                               |
 | `Go e2e tests (…)`  | the same, plus `Dockerfile` (root required)                                                                            | `make e2e`                                                                                     |
-| `Web UI tests`      | `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                            | `make web-ui-check`, `make web-ui-unit` and `make web-ui-test`                                 |
+| `Web UI tests`      | `web/**`, `internal/webui/**`, `internal/webserver/**`, `go.mod`/`go.sum`, `Makefile`                                  | `make web-ui-check`, `make web-ui-unit` and `make web-ui-test`                                 |
 | `Harness tests`     | `team/harnesses/**`, `pkg/team/harness/**`, `team/team.mk`, …                                                          | `make test-harnesses`                                                                          |
-| `Onboarding e2e`    | `scripts/install.sh`, `internal/team/**`, `internal/webserver/**`, `internal/webui/**`, `team/**`, `pkg/team/**`, …    | `make e2e-onboarding` (root required; see [below](#make-e2e-onboarding))                       |
+| `Onboarding e2e`    | `scripts/install.sh`, `internal/team/**`, `internal/webserver/**`, `internal/webui/**`, `web/**`, `team/**`, …         | `make e2e-onboarding` (root required; see [below](#make-e2e-onboarding))                       |
 | `Installer tests`   | `scripts/install.sh`, `docs/site/install.sh`, `scripts/install-test.sh`, `Makefile`                                    | `make install.sh`, `git diff --exit-code docs/site/install.sh`, `bash scripts/install-test.sh` |
 
 On a pull request the Go unit and e2e jobs run twice, once per architecture:
@@ -19,8 +19,8 @@ On a pull request the Go unit and e2e jobs run twice, once per architecture:
 only the `(amd64)` legs run. Locally you test your host's architecture only;
 the other one is left to CI.
 
-A change under `internal/webui/frontend/` or `internal/webui/dist/` runs the
-web UI job and not the Go jobs. The `Detect changed areas` job at the top of
+A change under `web/` (the frontend's npm workspace) or `internal/webui/dist/`
+runs the web UI job and not the Go jobs. The `Detect changed areas` job at the top of
 `test.yaml` holds the full path list. `mkdocs.yaml` builds the docs site on
 pull requests that touch `docs/site/**` or `mkdocs.yml` (`mkdocs build`).
 
@@ -45,12 +45,11 @@ it is the one job that depends on things no commit changes.
 `make e2e-onboarding` is first-run onboarding against a real daemon: `kuke
 init` with a kukeond image built from your tree, `kuke serve`, and a browser
 that signs in and follows the Workbench's Get started checklist, then enables
-majordomo (`internal/webui/frontend/tests/onboarding.spec.mjs`, started by
+majordomo (`web/apps/local/tests/onboarding.spec.mjs`, started by
 `TestOnboarding_WebUI` in `e2e/`). On top of what `make e2e` needs it needs:
 
 - Node.js with the frontend's dependencies and the Playwright Chromium:
-  `make web-ui`, then `npx playwright install chromium` in
-  `internal/webui/frontend`;
+  `make web-ui`, then `npx playwright install chromium` in `web/apps/local`;
 - `git`, and network access to `github.com` and `ghcr.io`. Team init fetches
   the kukeon source at the revision `kuke` was built from: the commit of a
   clean checkout, which must be on GitHub (push the branch first), or branch

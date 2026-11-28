@@ -87,6 +87,39 @@ jobs:
           $(for image in claude claude-root claude-android codex codex-root opencode opencode-root; do echo "- ${KUKEON_IMAGE_REPO}/${image}:${KUKEON_VERSION}"; done)
           "
 
+  # The web console packages (#1753): @kukeon/api-client, @kukeon/ui and
+  # @kukeon/console at the release version (the tag without its v) under the
+  # `latest` dist-tag. NPM_TOKEN is a repository secret holding an npm
+  # automation token for the @kukeon scope.
+  npm_packages:
+    name: Publish npm packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Publish @kukeon/api-client, @kukeon/ui and @kukeon/console
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is not set; the npm packages of ${GITHUB_REF_NAME} are not published"
+            exit 1
+          fi
+          cd web
+          npm ci --no-audit --no-fund
+          ./scripts/publish.sh "${GITHUB_REF_NAME#v}" latest
+
   kukeon_images:
     name: Build Images
     env:

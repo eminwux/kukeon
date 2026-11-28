@@ -11,6 +11,7 @@ name: Edge Build
 #
 # Job layout: `test` (test.yaml), `image` and `binaries` run side by side;
 # `publish` waits for all three and is the only job that moves the channel.
+# `npm` publishes the web console packages once the tests pass.
 # This workflow is also where the test jobs run for a commit on main:
 # test.yaml has no push trigger of its own.
 on:
@@ -344,14 +345,15 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: internal/webui/frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       - name: Install frontend dependencies and the browser
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: |
-          cd internal/webui/frontend
+          cd web
           npm ci --no-audit --no-fund
+          cd apps/local
           npx playwright install --with-deps chromium
 
       # `make web-ui-smoke` without its `kuke` prerequisite: the binary under
@@ -363,7 +365,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: |
-          cd internal/webui/frontend
+          cd web/apps/local
           sudo env "PATH=$PATH" "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" CI=1 \
             KUKE_WEB_SMOKE_HOST=unix:///run/kukeon/kukeond.sock \
             KUKE_WEB_BINARY=/usr/local/bin/kuke \
@@ -379,6 +381,46 @@ jobs:
               exit 1
             fi
           done
+
+  # The web console packages (#1753): @kukeon/api-client, @kukeon/ui and
+  # @kukeon/console at x.y.z-edge.<short>, where x.y.z is the release the
+  # commit descends from, under the `edge` dist-tag; `latest` stays on the
+  # release. Gated on the tests like the channel itself, beside the publish
+  # job. Publishing needs the NPM_TOKEN repository secret, an npm automation
+  # token for the @kukeon scope; until the operator adds it the job warns and
+  # publishes nothing, so main stays green.
+  npm:
+    name: Publish the edge npm packages
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHORT: ${{ needs.version.outputs.short }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Publish under the edge dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not set; the edge npm packages are not published"
+            exit 0
+          fi
+          base="${VERSION#v}"
+          base="${base%%-*}"
+          cd web
+          npm ci --no-audit --no-fund
+          ./scripts/publish.sh "${base}-edge.${SHORT}" edge
 
   # Keep the newest 20 sha-* images. exclude-tags wins over every other rule,
   # so v*, latest and edge are never deleted; deleting a multi-arch image also

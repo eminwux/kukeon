@@ -103,9 +103,10 @@ jobs:
                   e2e=true ;;
                 go.mod|go.sum)
                   go=true e2e=true webui=true ;;
-                # Frontend source and the generated bundle: web UI job only
-                # (#1437). Go files under internal/webui also run the Go jobs.
-                internal/webui/frontend/*|internal/webui/dist/*)
+                # Frontend source (the web/ npm workspace, #1753) and the
+                # generated bundle: web UI job only (#1437). Go files under
+                # internal/webui also run the Go jobs.
+                web/*|internal/webui/dist/*)
                   webui=true ;;
                 internal/webui/*|internal/webserver/*)
                   webui=true go=true e2e=true ;;
@@ -133,7 +134,7 @@ jobs:
               # above. Makefile and Dockerfile hold its recipe and its daemon
               # image.
               case "$f" in
-                scripts/install.sh|internal/team/*|internal/webserver/*|internal/webui/*|team/*|pkg/team/*)
+                scripts/install.sh|internal/team/*|internal/webserver/*|internal/webui/*|web/*|team/*|pkg/team/*)
                   onboarding=true ;;
                 e2e/e2e_onboarding_test.go|Makefile|Dockerfile|scripts/e2e-preflight.sh)
                   onboarding=true ;;
@@ -408,7 +409,7 @@ jobs:
   # signs in and follows the Workbench's Get started checklist — Initialize, a
   # GitHub token that also serves git, a login, a first agent — then enables
   # majordomo. TestOnboarding_WebUI (e2e/) owns the daemon and starts
-  # internal/webui/frontend/tests/onboarding.spec.mjs.
+  # web/apps/local/tests/onboarding.spec.mjs.
   #
   # Same runner prerequisites as the e2e job above, plus Node.js and Chromium.
   # It is the one job that needs the network at test time: team init fetches
@@ -436,7 +437,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: internal/webui/frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       # As in the e2e job: image pulls through systemd-resolved time out
       # under load, and this job pulls a harness image of several hundred MB.
@@ -482,8 +483,9 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: |
-          cd internal/webui/frontend
+          cd web
           npm ci --no-audit --no-fund
+          cd apps/local
           npx playwright install --with-deps chromium
 
       # The sudo, cache and stdio handling is the e2e job's; see the comments
@@ -521,7 +523,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: internal/webui/frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -530,7 +532,7 @@ jobs:
       - name: Run frontend unit tests
         run: make web-ui-unit
       - name: Install browser
-        run: cd internal/webui/frontend && npx playwright install --with-deps chromium
+        run: cd web/apps/local && npx playwright install --with-deps chromium
       - name: Test browser states against the packaged binary
         run: make web-ui-test
       - name: Test packaged assets outside the checkout

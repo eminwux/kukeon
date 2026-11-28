@@ -1,0 +1,20 @@
+{
+  "name": "@kukeon/local",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test browser.spec.mjs majordomo.spec.mjs mount.spec.mjs",
+    "test:smoke": "playwright test daemon.spec.mjs",
+    "test:onboarding": "playwright test onboarding.spec.mjs"
+  },
+  "dependencies": {
+    "@kukeon/console": "0.0.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}
