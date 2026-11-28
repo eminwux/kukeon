@@ -99,7 +99,10 @@ func VerifyRequest(r *http.Request, pub ed25519.PublicKey, hostID string, now ti
 	if len(users) != 1 || len(times) != 1 || len(sigs) != 1 {
 		return "", fmt.Errorf("%w: each identity header must appear once", ErrIdentityInvalid)
 	}
-	user, ts := users[0], times[0]
+	// Each header appears exactly once, so Get returns that one value. Get
+	// names the header, which marks the user as a plain identity header
+	// rather than a credential to anything reading this code.
+	user, ts := r.Header.Get(HeaderUser), r.Header.Get(HeaderTime)
 	if !ValidUser(user) {
 		return "", fmt.Errorf("%w: malformed user", ErrIdentityInvalid)
 	}
