@@ -17,10 +17,12 @@
 package cell_test
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/kuke/create/cell"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
@@ -39,6 +41,28 @@ func dryRunClient(t *testing.T) *fakeClient {
 			t.Fatal("--dry-run must not create the cell")
 			return kukeonv1.CreateCellResult{}, nil
 		},
+	}
+}
+
+// TestPrintConnectorWarnings: a connector that resolved with a warning — a
+// login identity another role uses (issue #1789) — gets one `warning:` line
+// naming it; the others print nothing.
+func TestPrintConnectorWarnings(t *testing.T) {
+	var buf bytes.Buffer
+	err := cell.PrintConnectorWarnings(&buf, []v1beta1.ConnectorStatus{
+		{Connector: "forge", State: v1beta1.ConnectorResolved},
+		{
+			Connector: "claude",
+			State:     v1beta1.ConnectorResolved,
+			Warning:   "volume v is also the login identity of role a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrintConnectorWarnings: %v", err)
+	}
+	want := "warning: connector \"claude\": volume v is also the login identity of role a\n"
+	if buf.String() != want {
+		t.Errorf("output = %q, want %q", buf.String(), want)
 	}
 }
 

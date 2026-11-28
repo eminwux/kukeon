@@ -800,6 +800,29 @@ func TestApplyOutcomes(t *testing.T) {
 	}
 }
 
+// TestApplyReportsResourceWarnings: a resource kukeond applied with a
+// warning (a login identity another role's Config uses, issue #1789) is
+// reported in the team's result instead of being dropped.
+func TestApplyReportsResourceWarnings(t *testing.T) {
+	const warning = `config "proj-pm-codex": volume "dev-state" is also the login identity of role proj/dev`
+	f := newFake()
+	f.resources = []kukeonv1.ApplyResourceResult{
+		{Kind: "CellBlueprint", Action: "unchanged"},
+		{Kind: "CellConfig", Name: "proj-pm-codex", Action: "updated", Warnings: []string{warning}},
+		{Kind: "Team", Action: "created"},
+	}
+	out, err := apply(t.Context(), f, composition(t, "codex", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(out.warnings, []string{warning}) {
+		t.Fatalf("warnings = %q, want %q", out.warnings, warning)
+	}
+	if slices.Contains(out.notes, warning) {
+		t.Fatalf("warning also reported as a note: %q", out.notes)
+	}
+}
+
 func TestSecretErrorsClassifyNetworkAndShutdown(t *testing.T) {
 	for _, err := range []error{&net.OpError{Op: "read", Net: "unix", Err: io.EOF}, rpc.ErrShutdown, context.Canceled} {
 		got := requestError("lookup", "secret token", err)

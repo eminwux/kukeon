@@ -31,13 +31,16 @@ func TestPrintOutcomeResult(t *testing.T) {
 	err := cli.PrintOutcome(&out, initialize.Outcome{Result: &initialize.Result{
 		Team: "proj", Resources: 5, Pruned: []string{"proj-gone"},
 		MissingSecrets: []string{"default/default/default/gh-token"}, Notes: []string{"a note"},
+		Warnings: []string{`config "proj-pm": volume "dev-state" is also the login identity of role proj/dev`},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "Applied 5 resources; stored team proj.\nPruned configs: proj-gone\nNo cells created or started.\n" +
 		"Missing secrets (cells will not start until they exist):\n  default/default/default/gh-token\n" +
-		"Notes:\n  a note\n"
+		"Notes:\n  a note\n" +
+		"Warnings (applied at the operator's risk):\n" +
+		"  config \"proj-pm\": volume \"dev-state\" is also the login identity of role proj/dev\n"
 	if out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -46,7 +49,7 @@ func TestPrintOutcomeResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "Notes:") || strings.Contains(out.String(), "Missing") ||
-		strings.Contains(out.String(), "Pruned") {
+		strings.Contains(out.String(), "Pruned") || strings.Contains(out.String(), "Warnings") {
 		t.Fatalf("printed empty sections:\n%s", out.String())
 	}
 }

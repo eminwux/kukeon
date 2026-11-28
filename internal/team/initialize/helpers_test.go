@@ -52,6 +52,7 @@ type applied struct {
 	resources int
 	missing   []string
 	notes     []string
+	warnings  []string
 }
 
 // apply runs the preflight and the commit of one composition, the part of a
@@ -62,7 +63,9 @@ func apply(ctx context.Context, client Client, result *compose.Result) (applied,
 		return applied{}, err
 	}
 	res, err := commit(ctx, client, p)
-	return applied{resources: res.Resources, missing: res.MissingSecrets, notes: res.Notes}, err
+	return applied{
+		resources: res.Resources, missing: res.MissingSecrets, notes: res.Notes, warnings: res.Warnings,
+	}, err
 }
 
 // applyMissing applies a composition and returns the missing-secret lines.

@@ -1138,12 +1138,13 @@ func convertResourceResults(results []controller.ResourceResult) []kukeonv1.Appl
 	out := make([]kukeonv1.ApplyResourceResult, 0, len(results))
 	for _, r := range results {
 		item := kukeonv1.ApplyResourceResult{
-			Index:   r.Index,
-			Kind:    r.Kind,
-			Name:    r.Name,
-			Action:  r.Action,
-			Changes: r.Changes,
-			Details: r.Details,
+			Index:    r.Index,
+			Kind:     r.Kind,
+			Name:     r.Name,
+			Action:   r.Action,
+			Changes:  r.Changes,
+			Details:  r.Details,
+			Warnings: r.Warnings,
 		}
 		if r.Error != nil {
 			item.Error = r.Error.Error()

@@ -25,7 +25,6 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/connector/scopedefaults"
 	"github.com/eminwux/kukeon/internal/controller/runner"
-	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -86,10 +85,12 @@ type CellKey struct {
 // OtherRoleOnStateVolume returns a role, other than own's role, that uses ref
 // as its login identity — through a stored Config naming it as its state
 // volume, or a cell that picked it (`--connector <connector>=<volume>`, kept
-// in the cell's provenance); empty when none does. One login identity serves
-// one role: the harness state directory also holds role content the role
-// rewrites on every start. Configs and cells without a role may share a
-// volume with each other, and one that cannot be read is skipped. self is the
+// in the cell's provenance); empty when none does. Roles may share a login
+// identity at the operator's risk — the harness state directory also holds
+// role content each role rewrites on every start — and this names the other
+// role for the warning that says so (issue #1789). Configs and cells without
+// a role may share a volume with each other, and one that cannot be read is
+// skipped. self is the
 // cell being rendered, whose own pick does not count; zero when there is none.
 func OtherRoleOnStateVolume(r runner.Runner, ref ext.VolumeRef, own ext.CellConfigMetadata, self CellKey) string {
 	ownRole := RoleName(own.Labels, own.Annotations)
@@ -202,32 +203,45 @@ func readConfig(r runner.Runner, md intmodel.CellConfigMetadata) (ext.CellConfig
 	return doc, true
 }
 
-// validateLoginIdentityRole refuses to store a Config that binds, through a
-// method that keeps its login in the state volume, a login identity Configs of
-// another role already use. Refusing the bind — rather than every later render
-// — keeps the role that already uses the identity working.
-func validateLoginIdentityRole(r runner.Runner, cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc) error {
+// LoginIdentityRoleWarning warns when a Config binds, through a method that
+// keeps its login in the state volume, a login identity a Config or cell of
+// another role already uses; empty when none does. Sharing one is allowed at
+// the operator's risk (issue #1789): the harness keeps role content in its
+// state directory, so each role's start rewrites it, and a Codex refresh token
+// is single-use, so one role's refresh can sign the other out.
+func LoginIdentityRoleWarning(r runner.Runner, cfgDoc ext.CellConfigDoc, bpDoc ext.CellBlueprintDoc) string {
 	ref := StateVolumeRef(cfgDoc.Spec.Values)
 	if ref == nil || RoleName(cfgDoc.Metadata.Labels, cfgDoc.Metadata.Annotations) == "" {
-		return nil
+		return ""
 	}
 	keepsLogin := slices.ContainsFunc(bpDoc.Spec.Components, func(comp ext.BlueprintComponent) bool {
 		return comp.Connector != nil && comp.Connector.Delivery == ext.ConnectorDeliveryStateVolume &&
 			(!comp.Optional || slices.Contains(cfgDoc.Spec.Components, comp.Name))
 	})
 	if !keepsLogin {
-		return nil
+		return ""
 	}
-	if other := OtherRoleOnStateVolume(r, *ref, cfgDoc.Metadata, CellKey{}); other != "" {
-		return fmt.Errorf(
-			"%w: config %q: volume %q is the login identity of role %s; role %s cannot share it "+
-				"(the harness keeps role content in its state directory)",
-			errdefs.ErrVolumeIdentity,
-			cfgDoc.Metadata.Name,
-			ref.Name,
+	other := OtherRoleOnStateVolume(r, *ref, cfgDoc.Metadata, CellKey{})
+	if other == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"config %q: %s",
+		cfgDoc.Metadata.Name,
+		SharedLoginIdentityWarning(
+			fmt.Sprintf("%q", ref.Name),
 			other,
 			RoleName(cfgDoc.Metadata.Labels, cfgDoc.Metadata.Annotations),
-		)
-	}
-	return nil
+		),
+	)
+}
+
+// SharedLoginIdentityWarning says that role own uses volume, the login
+// identity of role other, and what sharing it risks.
+func SharedLoginIdentityWarning(volume, other, own string) string {
+	return fmt.Sprintf(
+		"volume %s is also the login identity of role %s; role %s shares it at the operator's risk: "+
+			"each role's start rewrites its role content in the harness state directory, "+
+			"and a single-use refresh token (Codex) refreshed by one role signs the other out",
+		volume, other, own)
 }

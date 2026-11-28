@@ -706,8 +706,9 @@ func connectorStatuses(
 // loginVolumeStatus checks the Volume a stateVolume connector keeps its login
 // in and reports its login state. A Volume the Config names need not exist —
 // the cell's start creates it — but one the cell itself picked must; a Volume
-// tagged for another connector, or already used by Configs of another role,
-// cannot be used. Only the Volume's tag and the marker's existence are read.
+// tagged for another connector cannot be used. One a cell picks that another
+// role already uses is used with a warning. Only the Volume's tag and the
+// marker's existence are read.
 func loginVolumeStatus(
 	r runner.Runner, status *v1beta1.ConnectorStatus, desc v1beta1.BlueprintConnector, hs harnessState,
 ) {
@@ -748,15 +749,14 @@ func loginVolumeStatus(
 		}
 		status.Login = loginStatusOf(r, got, desc)
 	}
-	// One role per login identity. A Config's own binding is checked when the
-	// Config is stored (apply.validateLoginIdentityRole), so the role already
-	// using an identity keeps working; a cell's pick is checked here.
+	// Roles may share a login identity at the operator's risk (issue #1789).
+	// A Config's own binding is warned about when the Config is stored
+	// (apply.LoginIdentityRoleWarning); a cell's pick is warned about here.
 	if !hs.cellVolume[desc.Name] {
 		return
 	}
 	if other := applypkg.OtherRoleOnStateVolume(r, *ref, hs.cfg, hs.self); other != "" {
-		fail("volume %s is the login identity of role %s; role %s cannot share it "+
-			"(the harness keeps role content in its state directory)",
+		status.Warning = applypkg.SharedLoginIdentityWarning(
 			where, other, applypkg.RoleName(hs.cfg.Labels, hs.cfg.Annotations))
 	}
 }

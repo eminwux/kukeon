@@ -192,6 +192,7 @@ func runApplyFile(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags) 
 		if structured {
 			result.Resources = append(result.Resources, kukeonv1.ApplyResourceResult{
 				Kind: string(v1beta1.KindTeam), Name: out.Result.Team, Action: "applied",
+				Warnings: out.Result.Warnings,
 			})
 			continue
 		}
@@ -323,6 +324,13 @@ func printApplyResult(cmd *cobra.Command, result kukeonv1.ApplyDocumentsResult) 
 			cmd.Printf("%s %q: failed\n", resource.Kind, resource.Name)
 			if resource.Error != "" {
 				cmd.Printf("  Error: %s\n", resource.Error)
+			}
+		}
+		// A warned resource was applied: the warning names a risk the
+		// operator accepted by applying it (issue #1789).
+		for _, warning := range resource.Warnings {
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning); err != nil {
+				return err
 			}
 		}
 	}

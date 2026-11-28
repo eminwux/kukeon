@@ -313,20 +313,21 @@ and the Configs using them. **New login identity** creates one; **Log in** (or
 **Log in again**) starts the identity cell and opens its terminal in the
 browser, and the row's status follows when the session ends.
 
-#### One role per login identity
+#### Sharing a login identity across roles
 
-A login identity serves one role. The state directory also holds role content
-— Claude Code skills under `$HOME/.claude/skills`, Codex's
-`$CODEX_HOME/AGENTS.md` — which the role rewrites on every start, so two roles
-on one Volume would overwrite each other. kukeon enforces it where the
-identity is bound: a Config that names, as its state volume, a login identity
-Configs of another `kukeon.io/role` already use is refused when it is applied —
-so the role already using it is not affected — and so is a cell that picks one
-with `--connector`. The error names both roles. Configs of the same role (a
-role's task Configs) share its identity, and Configs without a role label may
-share with each other. For one subscription across roles use a
-token method — see
-[Why login volumes are not shared across roles](#why-login-volumes-are-not-shared-across-roles).
+A login identity normally serves one role. The state directory also holds role
+content — Claude Code skills under `$HOME/.claude/skills`, Codex's
+`$CODEX_HOME/AGENTS.md` — which the role rewrites on every start. Configs of the
+same role (a role's task Configs) share its identity, and Configs without a role
+label may share with each other.
+
+Roles may also share one, at the operator's risk. A Config that names, as its
+state volume, a login identity a Config or cell of another `kukeon.io/role`
+already uses is stored, and `kuke apply` prints a warning naming both roles; a
+cell that picks one with `--connector` is created the same way, with the same
+warning, and its connector reports `resolved` with the Volume's login state.
+What sharing risks is in
+[Sharing login volumes across roles](#sharing-login-volumes-across-roles).
 
 ### Harness state: persistent or ephemeral
 
@@ -589,8 +590,10 @@ cell's state volume. A name without a scope is a realm-scoped Volume of the
 Config's realm. It is recorded in `spec.provenance.connectorVolumes` — a
 separate map from `connectorOverrides`, so the entry says it names a Volume —
 and kept by `kuke restart`, a reconcile-driven recreate and `--clone`. A Volume
-that does not exist, one tagged for another connector, and one Configs of
-another role already use are rejected before anything is created.
+that does not exist and one tagged for another connector are rejected before
+anything is created. One a Config or cell of another role already uses is
+accepted with a warning naming both roles — see
+[Sharing login volumes across roles](#sharing-login-volumes-across-roles).
 
 `--state persistent|ephemeral` picks the
 [harness state](#harness-state-persistent-or-ephemeral) of this one cell. It is
@@ -622,27 +625,26 @@ allowed on a team-owned Config too: only the Config's own page shows its
 identities read-only, because applying the team re-renders it; that page links
 the team, whose declaration is edited on the Teams page.
 
-## Why login volumes are not shared across roles
+## Sharing login volumes across roles
 
-The `login` methods keep the session in a [login identity](#login-identities),
-and a login identity serves one role — `kuke-majordomo-claude` and
-`team-dev-claude` each have their own and each log in once
-(`kuke connector login`). Sharing one across roles is not supported, and kukeon
-refuses it: binding a login identity that Configs of another role already use
-— applying a Config that names it, or picking it for a cell — fails with an
-error naming both roles.
+The `login` methods keep the session in a [login identity](#login-identities).
+By default each role has its own — `kuke-majordomo-claude` and
+`team-dev-claude` each log in once (`kuke connector login`). A role may use
+another role's login identity instead, for example to reuse a working login:
+applying a Config that names it, or picking it for a cell, succeeds with a
+warning naming both roles. kukeon does not refuse it; the operator accepts the
+risks:
 
 - The state directory also holds the role itself — settings, skills and
-  instructions the role's launch installs there — so a shared volume would let
-  one role's content overwrite another's. Lifting the rule needs that content
-  moved out of the state directory first.
-- A Codex login's refresh token is single-use. Two cells refreshing one copied
-  login invalidate each other.
+  instructions the role's launch installs there — so each role's start
+  overwrites the content the other role installed.
+- A Codex login's refresh token is single-use. Two cells refreshing one login
+  invalidate each other, and one of them is signed out.
 
-A team may still point a role at a login identity of its choosing —
+A team may point a role at a login identity of its choosing —
 `connectors.<name>.identity` with `method: login` names the Volume, and leaving
-it empty keeps `<team>-<role>-<harness>-state` — as long as no other role uses
-it.
+it empty keeps `<team>-<role>-<harness>-state`. One another role uses is
+accepted with the same warning.
 
 When several roles must start authenticated without an interactive login each,
 use a token method instead: a Realm-default `claude-subscription` identity

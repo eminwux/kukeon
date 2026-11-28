@@ -59,6 +59,7 @@ func printOutcome(w io.Writer, out initialize.Outcome) error {
 	p.linef("No cells created or started.")
 	p.list("Missing secrets (cells will not start until they exist):", r.MissingSecrets)
 	p.list("Notes:", r.Notes)
+	p.list("Warnings (applied at the operator's risk):", r.Warnings)
 	return p.err
 }
 

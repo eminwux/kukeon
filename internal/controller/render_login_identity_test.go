@@ -15,8 +15,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tests for login identities in the daemon-side CellConfig render (issue
 // #1685): the Volume a stateVolume connector keeps its login in, the per-cell
-// `--connector <connector>=<volume>` override, the one-role guard, and the
-// persistent or ephemeral harness state of a token method.
+// `--connector <connector>=<volume>` override, sharing one across roles with a
+// warning (#1789), and the persistent or ephemeral harness state of a token
+// method.
 
 package controller_test
 
@@ -27,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/controller"
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -202,12 +204,56 @@ func TestPreview_LoginIdentityOverride(t *testing.T) {
 	}
 }
 
-// TestPreview_OneRolePerLoginIdentity: a login identity Configs of another
-// role already use is refused, and the error names both roles — when a Config
-// binds it (checked where the Config is stored, so the role already using it
-// keeps working) and when one cell picks it. Configs of the same role, and
-// Configs without a role, may share.
-func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
+// assertSharedWarning checks warning is the cross-role login identity warning
+// and mentions each of want (issue #1789).
+func assertSharedWarning(t *testing.T, warning string, want ...string) {
+	t.Helper()
+	if warning == "" {
+		t.Fatal("no warning, want one naming both roles")
+	}
+	for _, w := range append(want, "operator's risk") {
+		if !strings.Contains(warning, w) {
+			t.Errorf("warning %q does not mention %s", warning, w)
+		}
+	}
+}
+
+// storeLoginConfig applies cfg as `kuke apply` does, with fx's Configs and
+// cells already stored, checks it was stored, and returns its warning.
+func storeLoginConfig(t *testing.T, fx *connectorFixture, cfg ext.CellConfigDoc) string {
+	t.Helper()
+	mock := newConnectorRunner(t, fx, cfg)
+	mock.GetBlueprintFn = func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+		return blueprintCarrier(t, loginBlueprint()), nil
+	}
+	wrote := false
+	mock.WriteConfigFn = func(intmodel.CellConfig) (bool, error) {
+		wrote = true
+		return true, nil
+	}
+	result, err := applypkg.ReconcileConfig(mock, configCarrier(t, cfg))
+	if err != nil {
+		t.Fatalf("ReconcileConfig: %v", err)
+	}
+	if !wrote || result.Action != "created" {
+		t.Fatalf("config not stored: action %q, wrote %v", result.Action, wrote)
+	}
+	if len(result.Warnings) > 1 {
+		t.Fatalf("warnings = %q, want at most one", result.Warnings)
+	}
+	if len(result.Warnings) == 0 {
+		return ""
+	}
+	return result.Warnings[0]
+}
+
+// TestLoginIdentitySharedAcrossRoles: a login identity a Config or cell of
+// another role already uses may be shared at the operator's risk (issue
+// #1789). Storing a Config that binds it stores the Config with a warning
+// naming both roles, and a cell that picks it renders resolved, with its login
+// state and the same warning. Configs of the same role, and Configs without a
+// role, share without a warning.
+func TestLoginIdentitySharedAcrossRoles(t *testing.T) {
 	other := func(name, role string) ext.CellConfigDoc {
 		cfg := loginConfig("agent-login")
 		cfg.Metadata.Name = name
@@ -218,22 +264,10 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 	}
 	own := loginConfig("agent-login")
 	own.Metadata.Labels = map[string]string{ext.LabelTeam: "kukeon", ext.LabelRole: "dev"}
-	refused := func(t *testing.T, err error) {
-		t.Helper()
-		if !errors.Is(err, errdefs.ErrVolumeIdentity) {
-			t.Fatalf("error = %v, want ErrVolumeIdentity", err)
-		}
-		for _, want := range []string{"kukeon/pm", "kukeon/dev"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q does not name role %s", err, want)
-			}
-		}
-	}
-
 	// Binding: a Config being saved names the volume another role uses.
 	for name, tc := range map[string]struct {
 		configs []ext.CellConfigDoc
-		refused bool
+		warned  bool
 	}{
 		"another role":    {[]ext.CellConfigDoc{other("kukeon-pm", "pm")}, true},
 		"the same role":   {[]ext.CellConfigDoc{other("kukeon-dev-task", "dev")}, false},
@@ -241,15 +275,19 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		"no other config": {nil, false},
 	} {
 		t.Run("a config binding it: "+name, func(t *testing.T) {
-			ctrl := newLoginController(t, &connectorFixture{configs: tc.configs}, own)
+			warning := storeLoginConfig(t, &connectorFixture{configs: tc.configs}, own)
+			if tc.warned {
+				assertSharedWarning(t, warning, "kukeon/pm", "kukeon/dev", "kukeon-dev-state")
+			} else if warning != "" {
+				t.Fatalf("warning = %q, want none", warning)
+			}
+			// A draft of it previews, as saving it would succeed.
 			req := previewRequest()
 			draft := own
 			req.Draft = &draft
-			_, err := ctrl.PreviewCellFromConfig(req)
-			if tc.refused {
-				refused(t, err)
-			} else if err != nil {
-				t.Fatalf("PreviewCellFromConfig: %v", err)
+			if _, err := newLoginController(t, &connectorFixture{configs: tc.configs}, own).
+				PreviewCellFromConfig(req); err != nil {
+				t.Fatalf("PreviewCellFromConfig of the draft: %v", err)
 			}
 		})
 	}
@@ -259,7 +297,7 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 	// login identity. Without the annotation it is another role.
 	for name, tc := range map[string]struct {
 		annotations map[string]string
-		refused     bool
+		warned      bool
 	}{
 		"a New agent copy of the template": {map[string]string{ext.AnnotationAgentTeam: "kukeon"}, false},
 		"a copy of another team's role":    {map[string]string{ext.AnnotationAgentTeam: "web"}, true},
@@ -271,32 +309,30 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 			copied.Metadata.Name = "kukeon-dev-1a2b3c"
 			copied.Metadata.Labels = map[string]string{ext.LabelRole: "dev"}
 			copied.Metadata.Annotations = tc.annotations
-			ctrl := newLoginController(t, &connectorFixture{configs: []ext.CellConfigDoc{template}}, copied)
-			req := previewRequest()
-			req.Draft = &copied
-			_, err := ctrl.PreviewCellFromConfig(req)
-			if !tc.refused {
-				if err != nil {
-					t.Fatalf("PreviewCellFromConfig: %v", err)
-				}
-				return
-			}
-			if !errors.Is(err, errdefs.ErrVolumeIdentity) || !strings.Contains(err.Error(), "role kukeon/dev") {
-				t.Fatalf("error = %v, want ErrVolumeIdentity naming role kukeon/dev", err)
+			warning := storeLoginConfig(t, &connectorFixture{configs: []ext.CellConfigDoc{template}}, copied)
+			if tc.warned {
+				assertSharedWarning(t, warning, "role kukeon/dev")
+			} else if warning != "" {
+				t.Fatalf("warning = %q, want none", warning)
 			}
 		})
 	}
 
-	// The role that already uses the identity is not locked out by another
-	// role's stored Config: its own cells still render.
+	// The role that already used the identity keeps rendering, without a
+	// warning: its cells did not pick the identity.
 	t.Run("the first role keeps rendering", func(t *testing.T) {
 		ctrl := newLoginController(t, &connectorFixture{configs: []ext.CellConfigDoc{other("kukeon-pm", "pm")}}, own)
-		if _, err := ctrl.PreviewCellFromConfig(previewRequest()); err != nil {
+		preview, err := ctrl.PreviewCellFromConfig(previewRequest())
+		if err != nil {
 			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		if status := connectorStatus(t, preview.Connectors, "agent"); status.Warning != "" {
+			t.Errorf("warning = %q, want none", status.Warning)
 		}
 	})
 
-	// Picking: one cell of role dev picks the identity role pm uses.
+	// Picking: one cell of role dev picks the identity role pm uses. It
+	// resolves, reports the volume's login state, and warns.
 	t.Run("a cell picking it", func(t *testing.T) {
 		pm := other("kukeon-pm", "pm")
 		pm.Spec.Values["STATE_VOLUME"] = "pm-login"
@@ -304,13 +340,32 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		fx := &connectorFixture{
 			configs: []ext.CellConfigDoc{pm},
 			volumes: map[string]intmodel.Volume{
-				"kuke-system///pm-login": {Spec: intmodel.VolumeSpec{Connector: "agent", Method: "login"}},
+				"kuke-system///pm-login": {
+					Spec: intmodel.VolumeSpec{Connector: "agent", Method: "login", LoginMarker: "auth.json"},
+					Status: intmodel.VolumeStatus{
+						Login: &intmodel.LoginStatus{State: ext.LoginStateLoggedIn, Since: "2026-11-25T10:00:00Z"},
+					},
+				},
 			},
 		}
 		req := previewRequest()
 		req.ConnectorOverrides = map[string]ext.ContainerSecretRef{"agent": {Name: "pm-login"}}
-		_, err := newLoginController(t, fx, own).PreviewCellFromConfig(req)
-		refused(t, err)
+		preview, err := newLoginController(t, fx, own).PreviewCellFromConfig(req)
+		if err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		status := connectorStatus(t, preview.Connectors, "agent")
+		if status.State != ext.ConnectorResolved || status.Message != "" {
+			t.Fatalf("status = %+v, want resolved", status)
+		}
+		if status.Login == nil || status.Login.State != ext.LoginStateLoggedIn {
+			t.Errorf("login = %+v, want the volume's logged-in state", status.Login)
+		}
+		assertSharedWarning(t, status.Warning, "kukeon/pm", "kukeon/dev", "pm-login@kuke-system")
+		want := ext.VolumeRef{Name: "pm-login", Realm: "kuke-system"}
+		if got := stateMount(preview.Cell); got == nil || *got != want {
+			t.Errorf("state mount = %+v, want %+v", got, want)
+		}
 	})
 
 	// A cell's pick counts too: a cell of role pm picked a Volume no Config
@@ -345,9 +400,20 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		req.ConnectorOverrides = map[string]ext.ContainerSecretRef{"agent": {Name: "shared-login"}}
 		return req
 	}
+	pickWarning := func(t *testing.T, fx *connectorFixture) string {
+		t.Helper()
+		preview, err := newLoginController(t, fx, own).PreviewCellFromConfig(pickShared())
+		if err != nil {
+			t.Fatalf("PreviewCellFromConfig: %v", err)
+		}
+		status := connectorStatus(t, preview.Connectors, "agent")
+		if status.State != ext.ConnectorResolved {
+			t.Fatalf("status = %+v, want resolved", status)
+		}
+		return status.Warning
+	}
 	t.Run("a cell picking what a cell of another role picked", func(t *testing.T) {
-		_, err := newLoginController(t, pickFixture(pmCell("teams", "pm-1")), own).PreviewCellFromConfig(pickShared())
-		refused(t, err)
+		assertSharedWarning(t, pickWarning(t, pickFixture(pmCell("teams", "pm-1"))), "kukeon/pm", "kukeon/dev")
 	})
 	t.Run("a config binding what a cell of another role picked", func(t *testing.T) {
 		shared.Space, shared.Stack = "teams", "kukeon"
@@ -355,16 +421,30 @@ func TestPreview_OneRolePerLoginIdentity(t *testing.T) {
 		draft := own
 		draft.Spec.Values = maps.Clone(own.Spec.Values)
 		draft.Spec.Values["STATE_VOLUME"] = "shared-login"
-		req := previewRequest()
-		req.Draft = &draft
-		_, err := newLoginController(t, pickFixture(pmCell("teams", "pm-1")), own).PreviewCellFromConfig(req)
-		refused(t, err)
+		assertSharedWarning(
+			t,
+			storeLoginConfig(t, pickFixture(pmCell("teams", "pm-1")), draft),
+			"kukeon/pm",
+			"kukeon/dev",
+		)
 	})
 	// The cell being rendered does not conflict with its own pick.
 	t.Run("the cell's own pick", func(t *testing.T) {
-		self := pmCell("default", previewRequest().Name)
-		if _, err := newLoginController(t, pickFixture(self), own).PreviewCellFromConfig(pickShared()); err != nil {
-			t.Fatalf("PreviewCellFromConfig: %v", err)
+		if warning := pickWarning(t, pickFixture(pmCell("default", previewRequest().Name))); warning != "" {
+			t.Fatalf("warning = %q, want none", warning)
+		}
+	})
+
+	// Sharing across roles does not lift the connector tag: a Volume tagged
+	// for another connector is still refused when a cell picks it.
+	t.Run("a cell picking a volume of another connector", func(t *testing.T) {
+		fx := pickFixture()
+		fx.volumes["kuke-system///shared-login"] = intmodel.Volume{
+			Spec: intmodel.VolumeSpec{Connector: "other", Method: "login"},
+		}
+		_, err := newLoginController(t, fx, own).PreviewCellFromConfig(pickShared())
+		if !errors.Is(err, errdefs.ErrVolumeIdentity) || !strings.Contains(err.Error(), `"other"`) {
+			t.Fatalf("error = %v, want ErrVolumeIdentity naming connector other", err)
 		}
 	})
 }
