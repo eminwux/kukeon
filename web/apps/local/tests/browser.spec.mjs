@@ -8474,6 +8474,9 @@ test("activity is polled only on Workbench routes while the tab is visible, one 
   expect(activity.requests.length).toBe(1);
   activity.hold(null);
   release();
+  // The held request is answered a few microtasks after release; count it before ticking, or tick's
+  // baseline misses it and the late answer ends the wait before the next poll is sent (#1803).
+  await expect.poll(() => activity.answered()).toBe(1);
   await tick(page, activity);
   expect(activity.requests.length).toBe(2);
 
