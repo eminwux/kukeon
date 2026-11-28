@@ -39,6 +39,7 @@ type containerLogChunk struct {
 	Size      int64  `json:"size"`
 	Truncated bool   `json:"truncated"`
 	More      bool   `json:"more"`
+	Stream    string `json:"stream"`
 }
 
 // registerContainerLogRoute exposes ReadContainerLog (issue #1620) so the
@@ -89,6 +90,16 @@ func containerLogRequest(r *http.Request) (kukeonv1.ContainerLogRequest, error) 
 			)
 		}
 		req.MaxBytes = maxBytes
+	}
+	// stream=supervisor reads the terminal supervisor's log (issue #1721).
+	switch raw := query.Get("stream"); raw {
+	case "", kukeonv1.ContainerLogStreamTerminal, kukeonv1.ContainerLogStreamSupervisor:
+		req.Stream = raw
+	default:
+		return req, fmt.Errorf(
+			"%w: stream must be %q or %q", errdefs.ErrConfig,
+			kukeonv1.ContainerLogStreamTerminal, kukeonv1.ContainerLogStreamSupervisor,
+		)
 	}
 	return req, nil
 }

@@ -17,7 +17,7 @@
 
 ## Why the nested-mode redirect
 
-The parent daemon bind-mounts `/run/kukeon/tty/<container>/` into the nested cell at `/run/kukeon/tty/`. A nested daemon publishing under `/run/kukeon/` would share that parent directory and break the host's `kuke attach <this-cell>` plumbing on script exit (issues #547, #545). Publishing under `/run/kukeon-dev/` keeps the two lifecycles disjoint. The script's `EXIT` trap (`verify_parent_attach_intact`) sha256-snapshots the parent's `/.kukeon/kuketty/metadata.json` up front and re-checks it on every exit path, so a botched re-bootstrap fails loud here rather than at the operator's next `kuke attach`.
+The parent daemon bind-mounts `/run/kukeon/tty/<container>/` into the nested cell at `/run/kukeon/tty/`. A nested daemon publishing under `/run/kukeon/` would share that parent directory and break the host's `kuke attach <this-cell>` plumbing on script exit (issues #547, #545). Publishing under `/run/kukeon-dev/` keeps the two lifecycles disjoint. The script's `EXIT` trap (`verify_parent_attach_intact`) sha256-snapshots the parent's `/.kukeon/kuketty/container.json` (`/.kukeon/kuketty/metadata.json` when the parent runs a kukeon from before #1721) up front and re-checks it on every exit path, so a botched re-bootstrap fails loud here rather than at the operator's next `kuke attach`.
 
 ## Nested egress: the dev profile's space-subnet redirect (#1079)
 

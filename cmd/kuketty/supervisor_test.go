@@ -330,7 +330,12 @@ func TestExitCodeAndRecordRunError(t *testing.T) {
 		{"workload", &workloadExitError{code: 9}, 9, false},
 		{"required repo", errRequiredRepoFailed, exitCodeInternal, false},
 		{"required stage", errRequiredStageFailed, exitCodeInternal, false},
-		{"internal", errors.New("listen on /run/kukeon/tty/socket: denied"), exitCodeInternal, true},
+		{
+			"internal",
+			errors.New("listen on /run/kukeon/tty/terminals/main/control.sock: denied"),
+			exitCodeInternal,
+			true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -19,6 +19,7 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/daemon"
@@ -68,7 +69,7 @@ func TestLogContainer_ContainerNotFound_RPCSurfacesSentinel(t *testing.T) {
 }
 
 func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
-	const wantPath = "/opt/kukeon/default/default/default/cellA/work/tty/capture"
+	const wantPath = "/opt/kukeon/default/default/default/cellA/work/tty/terminals/main/capture.raw"
 	core := &logClientFake{result: kukeonv1.LogContainerResult{HostCapturePath: wantPath}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
@@ -89,7 +90,7 @@ func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
 // passthrough of HostLogPath added in issue #203 — the field for the
 // containerd-shim cio.LogFile branch.
 func TestLogContainer_NonAttachable_RPCReturnsLogPath(t *testing.T) {
-	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
+	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/container.log"
 	core := &logClientFake{result: kukeonv1.LogContainerResult{HostLogPath: wantPath}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
@@ -173,7 +174,7 @@ func (c *containerLogClientFake) ReadContainerLog(
 
 func TestReadContainerLog_RPCForwardsDocRequestAndResult(t *testing.T) {
 	core := &containerLogClientFake{result: kukeonv1.ContainerLogResult{
-		Source: "/opt/kukeon/r/s/st/c/work/tty/capture",
+		Source: "/opt/kukeon/r/s/st/c/work/tty/terminals/main/capture.raw",
 		Data:   []byte("$ \xff"), Start: 4, Next: 7, Size: 7,
 	}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
@@ -215,5 +216,43 @@ func TestReadContainerLog_RPCSurfacesSentinels(t *testing.T) {
 		if reply.Result.Source != "/missing/capture" {
 			t.Fatalf("Source %q not carried alongside the error", reply.Result.Source)
 		}
+	}
+}
+
+type containerLogStreamFake struct {
+	kukeonv1.FakeClient
+
+	req kukeonv1.ContainerLogRequest
+}
+
+func (c *containerLogStreamFake) ReadContainerLog(
+	_ context.Context, _ v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
+) (kukeonv1.ContainerLogResult, error) {
+	c.req = req
+	return kukeonv1.ContainerLogResult{Data: []byte("x"), Next: 1, Size: 1, Stream: req.Stream},
+		fmt.Errorf("%w: outside /run/kukeon/tty", errdefs.ErrSupervisorLogUnreadable)
+}
+
+// TestReadContainerLog_RPCForwardsStream pins that the supervisor stream
+// request reaches the core and that both its echo and the typed error come
+// back through the service (issue #1721).
+func TestReadContainerLog_RPCForwardsStream(t *testing.T) {
+	core := &containerLogStreamFake{}
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
+	args := &kukeonv1.ReadContainerLogArgs{Request: kukeonv1.ContainerLogRequest{
+		Stream: kukeonv1.ContainerLogStreamSupervisor,
+	}}
+	reply := &kukeonv1.ReadContainerLogReply{}
+	if err := svc.ReadContainerLog(args, reply); err != nil {
+		t.Fatalf("ReadContainerLog returned transport error: %v", err)
+	}
+	if core.req.Stream != kukeonv1.ContainerLogStreamSupervisor {
+		t.Errorf("core got Stream %q", core.req.Stream)
+	}
+	if reply.Result.Stream != kukeonv1.ContainerLogStreamSupervisor {
+		t.Errorf("reply Stream = %q", reply.Result.Stream)
+	}
+	if !errors.Is(kukeonv1.FromAPIError(reply.Err), errdefs.ErrSupervisorLogUnreadable) {
+		t.Errorf("wire error %v does not unwrap to ErrSupervisorLogUnreadable", reply.Err)
 	}
 }

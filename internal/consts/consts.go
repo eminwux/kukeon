@@ -142,16 +142,34 @@ const (
 	// host-visible.
 	KukeonContainerTTYDir = "tty"
 
-	// KukeonContainerSocketFile is the basename of the per-container sbsh
-	// terminal socket inside KukeonContainerTTYDir. The container sees the
-	// same inode at /run/kukeon/tty/socket via the directory bind mount
-	// injected by Attachable=true specs.
-	KukeonContainerSocketFile = "socket"
+	// KukeonContainerTerminalsDir is the directory inside KukeonContainerTTYDir
+	// that holds one subdirectory per terminal kuketty serves. Each terminal's
+	// files (control socket, capture, sbsh's metadata document) live in its own
+	// directory, so the supervisor-level files (supervisor.json,
+	// supervisor.log) and the terminal-level files never share a name space.
+	// Issue #1721.
+	KukeonContainerTerminalsDir = "terminals"
+
+	// KukeonContainerMainTerminal is the ID of the one terminal kuketty serves
+	// today: its files live in tty/terminals/main/.
+	KukeonContainerMainTerminal = "main"
+
+	// KukeonContainerSocketFile is the basename of a terminal's sbsh control
+	// socket inside its terminal directory (tty/terminals/<id>/). The
+	// container sees the same inode at /run/kukeon/tty/terminals/main/
+	// control.sock via the tty directory bind mount injected by
+	// Attachable=true specs.
+	KukeonContainerSocketFile = "control.sock"
+
+	// KukeonContainerTerminalFile is the basename of the metadata document
+	// sbsh writes for a terminal inside its terminal directory (sbsh's
+	// TerminalSpec.MetadataFile). Issue #1721.
+	KukeonContainerTerminalFile = "terminal.json"
 
 	// KukeonSocketSymlinkSubdir is the basename of the per-RunPath directory
 	// that holds SUN_PATH-safe symlinks to the deep per-container kuketty
 	// sockets (`<RunPath>/data/<realm>/<space>/<stack>/<cell>/<container>/
-	// tty/socket`). Linux `connect(2)` caps the path passed in
+	// tty/terminals/main/control.sock`). Linux `connect(2)` caps the path passed in
 	// sockaddr_un.sun_path at 108 bytes including the terminator (issue #521),
 	// and the deep metadata-rooted path overflows on long RunPaths or
 	// long realm/space/stack/cell IDs. The daemon stages a short symlink at
@@ -206,13 +224,15 @@ const (
 	// rather than at first `kuke attach` (issue #521).
 	KukeonMaxSocketPath = 107
 
-	// KukeonContainerCaptureFile is the basename of the per-container sbsh
-	// capture file inside KukeonContainerTTYDir. sbsh writes the full tty
-	// byte stream — every byte the workload produced and every byte typed
-	// by an attached operator — into this file. `kuke log` tails the host
-	// path that resolves to the same inode as the in-container path
-	// /run/kukeon/tty/capture (see ctr.AttachableCapturePath).
-	KukeonContainerCaptureFile = "capture"
+	// KukeonContainerCaptureFile is the basename of a terminal's sbsh capture
+	// file inside its terminal directory. sbsh writes the full tty byte
+	// stream — every byte the workload produced and every byte typed by an
+	// attached operator — into this file, in its default raw format (kukeon
+	// sets no other). `kuke log` tails the host path that resolves to the
+	// same inode as the in-container path
+	// /run/kukeon/tty/terminals/main/capture.raw (see
+	// ctr.AttachableCapturePath).
+	KukeonContainerCaptureFile = "capture.raw"
 
 	// KukeonContainerLogFile is the basename of the per-container stdout/
 	// stderr log file written by the containerd runtime shim via cio.LogFile
@@ -220,22 +240,20 @@ const (
 	// through sbsh's capture file instead). The shim is the writer; kuke
 	// only reads it. `kuke log` tails this file when targeting a non-
 	// Attachable container.
-	KukeonContainerLogFile = "log"
+	KukeonContainerLogFile = "container.log"
 
-	// KukeonContainerKukettyLogFile is the basename of the per-Attachable-
-	// container kuketty wrapper's own slog output, inside KukeonContainerTTYDir
-	// (peer to the socket and capture files, same bind-mount visibility). The
-	// path is daemon-controlled — operators do not pick it, the same way they
-	// do not pick where `capture` lands — so kuketty always writes here and an
-	// operator who needs to debug an attach session knows exactly where to
-	// look. Distinct from the workload-capture file (KukeonContainerCaptureFile,
-	// "capture"), which carries the workload's tty byte stream and stays
-	// opt-in for the workload side. Issue #599.
-	KukeonContainerKukettyLogFile = "kuketty.log"
+	// KukeonContainerSupervisorLogFile is the basename of the terminal
+	// supervisor's (kuketty's) own slog output, inside KukeonContainerTTYDir
+	// next to supervisor.json. The default path is daemon-controlled; an
+	// operator may move it with spec.containers[].tty.logFile. `kuke log
+	// --supervisor` prints it. Distinct from the workload capture
+	// (KukeonContainerCaptureFile), which carries the workload's tty byte
+	// stream. Issues #599, #1721.
+	KukeonContainerSupervisorLogFile = "supervisor.log"
 
 	// KukeonContainerSupervisorFile is the basename of the status document
 	// (kind: TerminalSupervisor) an Attachable container's kuketty writes
-	// inside KukeonContainerTTYDir, peer to the socket, capture and log files.
+	// inside KukeonContainerTTYDir, next to supervisor.log.
 	// kuketty rewrites it through a temporary file and a rename on every
 	// change; kukeond reads it on every status refresh and deletes a leftover
 	// one before the task starts. Issue #1711.

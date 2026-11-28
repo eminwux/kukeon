@@ -733,6 +733,14 @@ func (c *UnixClient) ReadContainerLog(
 	if err := c.call(ctx, MethodReadContainerLog, args, reply); err != nil {
 		return ContainerLogResult{}, err
 	}
+	// A kukeond that predates ContainerLogRequest.Stream ignores the field and
+	// serves the terminal stream; it never echoes Stream (issue #1721).
+	if req.Stream == ContainerLogStreamSupervisor && reply.Result.Stream != ContainerLogStreamSupervisor {
+		return ContainerLogResult{}, fmt.Errorf(
+			"%w: kukeond does not support kuke log --supervisor; upgrade kukeond",
+			errdefs.ErrDaemonMethodUnsupported,
+		)
+	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)
 	}

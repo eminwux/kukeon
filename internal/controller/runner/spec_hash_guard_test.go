@@ -538,3 +538,61 @@ func contains(haystack, needle string) bool {
 	}
 	return false
 }
+
+// TestReuseOrRefuseExistingChildContainer_TTYLayout locks issue #1721: an
+// Attachable container whose record does not carry the current tty layout was
+// created with bind mounts kuketty no longer reads, so it is refused rather
+// than reused. A non-Attachable container is never checked.
+func TestReuseOrRefuseExistingChildContainer_TTYLayout(t *testing.T) {
+	attachable := intmodel.ContainerSpec{Image: "alpine", Command: "sleep", Attachable: true}
+	plain := intmodel.ContainerSpec{Image: "alpine", Command: "sleep"}
+	cases := []struct {
+		name       string
+		spec       intmodel.ContainerSpec
+		layout     string
+		wantRefuse bool
+	}{
+		{name: "attachable pre-#1721 record", spec: attachable, layout: "", wantRefuse: true},
+		{name: "attachable other layout", spec: attachable, layout: "1", wantRefuse: true},
+		{name: "attachable current layout", spec: attachable, layout: TTYLayoutVersion},
+		{name: "non-attachable without label", spec: plain},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			labels := map[string]string{
+				SpecHashLabelKey:        ComputeContainerSpecHash(tc.spec),
+				SpecHashVersionLabelKey: SpecHashDomainVersion,
+			}
+			if tc.layout != "" {
+				labels[TTYLayoutLabelKey] = tc.layout
+			}
+			fake := &specHashFakeClient{
+				getContainerFn: func(_, id string) (containerd.Container, error) {
+					return stubLabeledContainer{id: id, labels: labels}, nil
+				},
+			}
+			r := newSpecHashTestExec(fake)
+			reuse, err := r.reuseOrRefuseExistingChildContainer("ns", "id", "cell", tc.spec)
+			if tc.wantRefuse {
+				if !errors.Is(err, errdefs.ErrContainerLegacyTTYLayout) || reuse {
+					t.Fatalf("reuse=%v err=%v, want refusal with ErrContainerLegacyTTYLayout", reuse, err)
+				}
+				return
+			}
+			if err != nil || !reuse {
+				t.Fatalf("reuse=%v err=%v, want reuse", reuse, err)
+			}
+		})
+	}
+}
+
+// TestSpecHashLabels_StampsTTYLayout pins that every create path's label set
+// carries the tty layout for an Attachable container only (issue #1721).
+func TestSpecHashLabels_StampsTTYLayout(t *testing.T) {
+	if got := specHashLabels(intmodel.ContainerSpec{Attachable: true})[TTYLayoutLabelKey]; got != TTYLayoutVersion {
+		t.Errorf("attachable %s = %q, want %q", TTYLayoutLabelKey, got, TTYLayoutVersion)
+	}
+	if _, ok := specHashLabels(intmodel.ContainerSpec{})[TTYLayoutLabelKey]; ok {
+		t.Errorf("non-attachable container carries %s", TTYLayoutLabelKey)
+	}
+}

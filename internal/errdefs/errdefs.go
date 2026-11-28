@@ -154,6 +154,21 @@ var (
 	// container exists but whose output stream file does not (yet): the
 	// runtime shim or sbsh has not opened it (issue #1537).
 	ErrContainerLogUnavailable = errors.New("container log stream unavailable")
+
+	// ErrNoSupervisor marks a `kuke log --supervisor` request for a container
+	// that has no terminal supervisor (a non-Attachable container). Issue
+	// #1721.
+	ErrNoSupervisor = errors.New("container has no terminal supervisor")
+
+	// ErrSupervisorLogUnreadable marks a `kuke log --supervisor` request for a
+	// container whose spec.containers[].tty.logFile points outside the
+	// per-container tty directory, which is the only part of the container
+	// kukeond can read. Issue #1721.
+	ErrSupervisorLogUnreadable = errors.New("supervisor log is outside the tty directory kukeond can read")
+
+	// ErrContainerLogStreamInvalid marks a ReadContainerLog request naming a
+	// stream other than "terminal" or "supervisor". Issue #1721.
+	ErrContainerLogStreamInvalid = errors.New("unknown container log stream")
 	// ErrHealthReportNotFound marks a ReadHealthReport for an id kukeond
 	// does not hold, or for the newest report when none is stored (#1509).
 	ErrHealthReportNotFound = errors.New("health report not found")
@@ -234,6 +249,12 @@ var (
 	// message names the diverged hash pair and points at `kuke apply -f`.
 	// Issue #867.
 	ErrCellSpecHashDrift = errors.New("cell spec hash diverges from containerd record")
+
+	// ErrContainerLegacyTTYLayout is raised when kukeond would reuse an
+	// Attachable container created before issue #1721 changed the
+	// per-container tty file layout. Its bind mounts were fixed at create
+	// time and point kuketty at the old paths, so it must be recreated.
+	ErrContainerLegacyTTYLayout = errors.New("container was created with the pre-#1721 tty layout")
 
 	// Volume-related errors.
 
@@ -373,7 +394,7 @@ var (
 	// ErrAttachNotSupported is returned when an attach request targets a
 	// container that was not created with Attachable=true. The sbsh wrapper
 	// is only injected on opt-in; non-Attachable containers have no
-	// /run/kukeon/tty/socket to connect to.
+	// /run/kukeon/tty/terminals/main/control.sock to connect to.
 	ErrAttachNotSupported = errors.New("container is not attachable; recreate with attachable=true")
 
 	// ErrInvalidWritePayload is returned by `kuke write` when its text

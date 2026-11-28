@@ -58,7 +58,7 @@ func TestContainerTTYDir(t *testing.T) {
 func TestContainerSocketPath(t *testing.T) {
 	got := fs.ContainerSocketPath("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
 	want := "/opt/kukeon/" + consts.KukeonMetadataSubdir + "/realm/space/stack/cell/c1/" +
-		consts.KukeonContainerTTYDir + "/" + consts.KukeonContainerSocketFile
+		consts.KukeonContainerTTYDir + "/terminals/main/" + consts.KukeonContainerSocketFile
 	if got != want {
 		t.Errorf("ContainerSocketPath = %q, want %q", got, want)
 	}
@@ -152,9 +152,35 @@ func TestContainerMetadataDir_AnchorsContainerTTYDir(t *testing.T) {
 		t.Errorf("tty dir = %q, want it under container metadata dir = %q", ttyDir, wantTTY)
 	}
 	sock := fs.ContainerSocketPath("/opt/kukeon", "r", "s", "st", "c", "co")
-	wantSock := wantTTY + "/" + consts.KukeonContainerSocketFile
+	wantSock := wantTTY + "/terminals/main/" + consts.KukeonContainerSocketFile
 	if sock != wantSock {
-		t.Errorf("socket path = %q, want it under tty dir = %q", sock, wantSock)
+		t.Errorf("socket path = %q, want it under the main terminal dir = %q", sock, wantSock)
+	}
+}
+
+// TestContainerFileLayout pins the per-container file names of issue #1721:
+// files are named after the level they belong to, and a terminal's files
+// sit in that terminal's directory.
+func TestContainerFileLayout(t *testing.T) {
+	const run, r, sp, st, c, co = "/opt/kukeon", "r", "s", "st", "c", "co"
+	base := fs.ContainerMetadataDir(run, r, sp, st, c, co)
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"log", fs.ContainerLogPath(run, r, sp, st, c, co), base + "/container.log"},
+		{"supervisor log", fs.ContainerSupervisorLogPath(run, r, sp, st, c, co), base + "/tty/supervisor.log"},
+		{"supervisor doc", fs.ContainerSupervisorPath(run, r, sp, st, c, co), base + "/tty/supervisor.json"},
+		{"main terminal dir", fs.ContainerMainTerminalDir(run, r, sp, st, c, co), base + "/tty/terminals/main"},
+		{"terminal dir", fs.ContainerTerminalDir(run, r, sp, st, c, co, "t2"), base + "/tty/terminals/t2"},
+		{"socket", fs.ContainerSocketPath(run, r, sp, st, c, co), base + "/tty/terminals/main/control.sock"},
+		{"capture", fs.ContainerCapturePath(run, r, sp, st, c, co), base + "/tty/terminals/main/capture.raw"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
 	}
 }
 

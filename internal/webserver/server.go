@@ -332,7 +332,9 @@ func apiErrorStatus(err error) (int, string) {
 	case errors.Is(err, errdefs.ErrDaemonMethodUnsupported):
 		status, code = http.StatusNotImplemented, "daemon_outdated"
 	case errors.Is(err, errdefs.ErrDaemonLogUnavailable),
-		errors.Is(err, errdefs.ErrContainerLogUnavailable):
+		errors.Is(err, errdefs.ErrContainerLogUnavailable),
+		errors.Is(err, errdefs.ErrNoSupervisor),
+		errors.Is(err, errdefs.ErrSupervisorLogUnreadable):
 		status, code = http.StatusNotFound, "log_unavailable"
 	case errors.Is(err, errdefs.ErrCellAlreadyExists),
 		errors.Is(err, errdefs.ErrSecretAlreadyExists):
@@ -364,6 +366,7 @@ func apiErrorStatus(err error) (int, string) {
 		errors.Is(err, errdefs.ErrImageNotFound):
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, errdefs.ErrConfig),
+		errors.Is(err, errdefs.ErrContainerLogStreamInvalid),
 		errors.Is(err, errdefs.ErrBlueprintNameRequired),
 		errors.Is(err, errdefs.ErrConfigNameRequired),
 		errors.Is(err, errdefs.ErrVolumeNameRequired),

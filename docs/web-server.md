@@ -1386,9 +1386,9 @@ route answers it 404, which the console treats as listing no features.
 - If kukeond has no log file to read, the error code is `log_unavailable`
   (404).
 
-`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/log?offset={n}&maxBytes={m}`
+`/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/containers/{name}/log?offset={n}&maxBytes={m}&stream={s}`
 returns one chunk of a container's output stream as `{ "source", "data",
-"start", "next", "size", "truncated", "more" }`. It reads the same stream as
+"start", "next", "size", "truncated", "more", "stream" }`. It reads the same stream as
 `kuke log`: the terminal capture of an attachable container, or the runtime
 log of any other container. The stream is found from the cell's
 specification, so a stopped cell's last output can still be read.
@@ -1405,9 +1405,15 @@ specification, so a stopped cell's last output can still be read.
   output past `next` was already available. A `size` smaller than the
   caller's cursor means the stream was truncated or replaced; read the tail
   again.
-- A container with no stream file yet returns `log_unavailable` (404). A
-  missing cell or container returns `not_found` (404), and a kukeond that
-  predates the route returns `daemon_outdated` (501).
+- `stream` defaults to `terminal`. `stream=supervisor` reads the terminal
+  supervisor's (kuketty's) own log instead, as `kuke log --supervisor` does;
+  any other value is `invalid_request` (400). `stream` in the reply echoes
+  what was served. The web UI has no control for it yet.
+- A container with no stream file yet returns `log_unavailable` (404), as do
+  `stream=supervisor` on a non-attachable container and on a supervisor log
+  that `tty.logFile` moved outside `/run/kukeon/tty`. A missing cell or
+  container returns `not_found` (404), and a kukeond that predates the route,
+  or `stream=supervisor`, returns `daemon_outdated` (501).
 
 `/api/realms/{realm}/spaces/{space}/stacks/{stack}/cells/{cell}/screenshot?container={name}`
 returns a cell's rendered terminal screen as text, the same sbsh `Screenshot`

@@ -20,6 +20,7 @@ By default, `kuke log` prints the current contents of the capture file and exits
 | `--space`        | `default`   | Space that owns the cell                                                          |
 | `--stack`        | `default`   | Stack that owns the cell                                                          |
 | `--follow`, `-f` | `false`     | Tail the file until SIGINT instead of printing current contents and exiting       |
+| `--supervisor`   | `false`     | Print the terminal supervisor's (kuketty's) own log instead of the output stream  |
 
 Plus all [global flags](kuke.md).
 
@@ -30,6 +31,8 @@ Plus all [global flags](kuke.md).
 `kuke log` shows the live capture only: when sbsh has rotated older output into closed segments, those are not reassembled.
 
 With `KUKEON_NO_DAEMON=true` (or an explicit `--run-path`), `kuke log` reads the same stream in-process from the host's `/opt/kukeon`. Against a kukeond too old to serve the chunked read, `kuke log` falls back to resolving the file's host path through the daemon and opening it directly, which again requires the host's `/opt/kukeon`.
+
+`--supervisor` prints the log kuketty, the terminal supervisor of an attachable container, writes about itself: config loading, repo clones, stages, the terminal's lifecycle. It is read through kukeond the same way, works for a running or stopped container and over `--host`, and follows with `-f`. Its default path is the container's `tty/supervisor.log`; when `spec.containers[].tty.logFile` moves it under `/run/kukeon/tty/`, kukeond reads it there, and for any other path `kuke log --supervisor` fails naming that path, which kukeond cannot read. A non-attachable container has no supervisor, and a kukeond too old to serve `--supervisor` is reported as such (there is no host-path fallback).
 
 Container selection: if the cell has exactly one non-root container, `--container` can be omitted. Otherwise, pass `--container` explicitly.
 
@@ -47,6 +50,9 @@ sudo kuke log web --container nginx -f
 
 # Non-default realm/space/stack
 sudo kuke log wp --realm default --space blog --stack wordpress
+
+# kuketty's own log, e.g. why an attachable container failed to start
+sudo kuke log agent --container work --supervisor
 ```
 
 ## kuke log vs. kuke daemon logs

@@ -96,7 +96,7 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 //   - registers a metadata renderer that fires from inside the OCI
 //     args-wrap closure once containerd has resolved the workload argv,
 //     producing the per-container api/model/v1beta1.ContainerDoc at
-//     <containerDir>/kuketty-metadata.json that the bind mount maps onto
+//     <containerDir>/container.json that the bind mount maps onto
 //     kuketty's fixed in-container metadata path.
 //
 // The tty directory is created with mode 02750 owned by root:kukeon group
@@ -157,6 +157,15 @@ func (r *Exec) attachableBuildOpts(
 			return nil, fmt.Errorf("chown %q to root:%d: %w", ttyDir, gid, err)
 		}
 	}
+	// The main terminal's directory (tty/terminals/main/) holds its control
+	// socket, capture and sbsh's terminal.json. sbsh does not create an
+	// embedder-owned metadata directory, so it must exist before kuketty
+	// claims the socket (issue #1721). Same mode and group as the tty dir;
+	// attachablePostCreateChown re-owns it, and terminals/ above it, to the
+	// container uid on every start (#850).
+	if err := ensureAttachableTerminalDir(ttyDir, mode, gid); err != nil {
+		return nil, err
+	}
 
 	// Every path that starts the task builds its options here, so this is
 	// where a supervisor document left by the previous run is removed: the
@@ -185,6 +194,28 @@ func (r *Exec) attachableBuildOpts(
 			RenderMetadata:    renderer,
 		}),
 	}, nil
+}
+
+// ensureAttachableTerminalDir creates tty/terminals/ and the main terminal's
+// directory under ttyDir, applying mode (and the kukeon group when gid > 0)
+// to both explicitly, like the tty dir itself.
+func ensureAttachableTerminalDir(ttyDir string, mode os.FileMode, gid int) error {
+	terminalsDir := filepath.Join(ttyDir, consts.KukeonContainerTerminalsDir)
+	terminalDir := filepath.Join(terminalsDir, consts.KukeonContainerMainTerminal)
+	if err := os.MkdirAll(terminalDir, mode); err != nil {
+		return err
+	}
+	for _, dir := range []string{terminalsDir, terminalDir} {
+		if err := os.Chmod(dir, mode); err != nil {
+			return fmt.Errorf("chmod %q to %v: %w", dir, mode, err)
+		}
+		if gid > 0 {
+			if err := os.Chown(dir, 0, gid); err != nil {
+				return fmt.Errorf("chown %q to root:%d: %w", dir, gid, err)
+			}
+		}
+	}
+	return nil
 }
 
 // writeKukettyDoc renders the per-container ContainerDoc and writes it
@@ -602,13 +633,12 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 	// Restart-path complement to the ttyDir chown above (#850). The leaf
 	// dir chown covers a fresh provision (MkdirAll just made the dir
 	// empty), but on a restart the dir already holds stale files from the
-	// prior run — kuketty.log (#599), sbsh's capture/metadata.json/.meta-
-	// *.tmp anchored to attachableTTYDir (#672), and any pre-#672
-	// terminals/<id>/ subtree — all root-owned because the daemon wrote
-	// them. When the work image's resolved USER is non-root (e.g. claude:
+	// prior run — supervisor.log (#599), and the terminals/main/ subtree
+	// with sbsh's capture.raw, terminal.json and its temp files (#672,
+	// #1721) — all root-owned because the daemon wrote them. When the work image's resolved USER is non-root (e.g. claude:
 	// latest → 1000), kuketty inside the container then hits EACCES at
 	// openTerminalLogger trying to O_RDWR-reopen the stale root-owned
-	// kuketty.log and exits with code 70 before claiming the socket
+	// supervisor.log and exits with code 70 before claiming the socket
 	// listener; `kuke attach` later dials the freshly-bound but
 	// listenerless socket and gets "connection refused". Walking and
 	// chowning every leaf child to the resolved container uid covers the
@@ -631,9 +661,9 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 // The walk uses Lchown so a stray symlink (none today, defense-in-depth)
 // is chowned at the link, never its target. Per-entry ENOENT is tolerated
 // (a concurrent unlink during the walk is a benign race — the inode is
-// already gone, the chown is moot). Subdirectories are walked too: any
-// pre-#672 terminals/<id>/ subtree left over from an older daemon gets
-// covered in the same pass.
+// already gone, the chown is moot). Subdirectories are walked too, so the
+// terminals/main/ directory attachableBuildOpts creates (and everything
+// sbsh wrote in it) is re-owned in the same pass (#1721).
 //
 // The root dir itself is intentionally skipped — the caller chowned it
 // explicitly with its own error surface, and re-chowning is wasteful.

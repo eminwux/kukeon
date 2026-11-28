@@ -142,6 +142,7 @@ func TestContainerLogEncodesRawBytesAsBase64(t *testing.T) {
 func TestContainerLogRejectsInvalidBounds(t *testing.T) {
 	for _, query := range []string{
 		"offset=-2", "offset=x", "maxBytes=0", "maxBytes=x", fmt.Sprintf("maxBytes=%d", kukeonv1.ContainerLogMaxBytes+1),
+		"stream=bogus",
 	} {
 		c := &containerLogClient{}
 		w := serveDaemon(t, containerLogDial(c), containerLogURL+"?"+query)
@@ -180,6 +181,14 @@ func TestContainerLogErrorCodes(t *testing.T) {
 			fmt.Errorf("%w: KukeonV1.ReadContainerLog", errdefs.ErrDaemonMethodUnsupported),
 			http.StatusNotImplemented, "daemon_outdated",
 		},
+		{
+			fmt.Errorf("%w: container \"web\" is not attachable", errdefs.ErrNoSupervisor),
+			http.StatusNotFound, "log_unavailable",
+		},
+		{
+			fmt.Errorf("%w: container \"web\" writes it to /var/log/k.log", errdefs.ErrSupervisorLogUnreadable),
+			http.StatusNotFound, "log_unavailable",
+		},
 	}
 	for _, tc := range cases {
 		w := serveDaemon(t, containerLogDial(&containerLogClient{err: tc.err}), containerLogURL)
@@ -192,5 +201,20 @@ func TestContainerLogErrorCodes(t *testing.T) {
 		if w.Code != tc.status || body.Error.Code != tc.code || body.Error.Message != tc.err.Error() {
 			t.Fatalf("%v: status %d body %+v", tc.err, w.Code, body)
 		}
+	}
+}
+
+// TestContainerLogSupervisorStream pins stream=supervisor (issue #1721): it is
+// passed to the daemon and its echo reaches the browser.
+func TestContainerLogSupervisorStream(t *testing.T) {
+	c := &containerLogClient{res: kukeonv1.ContainerLogResult{
+		Data: []byte("level=INFO\n"), Next: 11, Size: 11, Stream: kukeonv1.ContainerLogStreamSupervisor,
+	}}
+	chunk := decodeContainerLog(t, serveDaemon(t, containerLogDial(c), containerLogURL+"?stream=supervisor"))
+	if c.req.Stream != kukeonv1.ContainerLogStreamSupervisor {
+		t.Fatalf("req %+v", c.req)
+	}
+	if chunk.Stream != kukeonv1.ContainerLogStreamSupervisor {
+		t.Fatalf("chunk %+v", chunk)
 	}
 }

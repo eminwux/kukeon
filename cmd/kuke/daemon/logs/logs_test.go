@@ -53,7 +53,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-const kukeondHostLogPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
+const kukeondHostLogPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/container.log"
 
 type fakeClient struct {
 	kukeonv1.FakeClient
@@ -392,7 +392,7 @@ func TestDaemonLogs_EmptyLogPath_Errors(t *testing.T) {
 func TestDaemonLogs_CapturePathFallback(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	const capturePath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/work/tty/capture"
+	const capturePath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/work/tty/terminals/main/capture.raw"
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{Cell: readyCell(), MetadataExists: true}, nil

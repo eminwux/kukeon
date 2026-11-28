@@ -145,15 +145,15 @@ type ContainerSpec struct {
 	// [/.kukeon/bin/kuketty] — no CLI flags, every runtime input flows
 	// through the bind-mounted metadata file — bind-mounts the kuketty
 	// binary read-only at /.kukeon/bin/kuketty, bind-mounts a per-container
-	// tty directory at /run/kukeon/tty (kuketty owns the attach socket
-	// inside it; capture and log files land in later phases), and
-	// bind-mounts the per-container metadata file read-only at
-	// /.kukeon/kuketty/metadata.json (carries this ContainerDoc with the
+	// tty directory at /run/kukeon/tty (kuketty's supervisor.json and
+	// supervisor.log, and the terminal's control socket and capture under
+	// terminals/main/), and bind-mounts the per-container container.json
+	// read-only at /.kukeon/kuketty/container.json (carries this ContainerDoc with the
 	// resolved workload argv baked into Spec.Command / Spec.Args, from which
 	// kuketty builds the sbsh TerminalSpec it serves — issue #641). The
 	// host-visible peer of the tty directory lives in the per-container
-	// metadata dir and its `socket` entry is what `kuke attach` connects
-	// to. Default false — no behavior change for existing specs.
+	// metadata dir and its terminals/main/control.sock entry is what
+	// `kuke attach` connects to. Default false — no behavior change for existing specs.
 	Attachable bool `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
 	// Tty configures shell-UX (prompt, init scripts) for the kuketty
 	// wrapper when Attachable=true. The container model already owns
@@ -163,7 +163,7 @@ type ContainerSpec struct {
 	Tty *ContainerTty `json:"tty,omitempty"                    yaml:"tty,omitempty"`
 	// KukeonGroupGID is a daemon-stamped transport field, not user-authored
 	// config. It carries the resolved kukeon-group GID into the ContainerDoc
-	// the daemon mounts at /.kukeon/kuketty/metadata.json so kuketty can apply
+	// the daemon mounts at /.kukeon/kuketty/container.json so kuketty can apply
 	// the kukeon-group ownership (socket / capture / log GID + mode) the daemon
 	// used to fold into the rendered TerminalSpec — a value not knowable from
 	// inside the container. Zero means no kukeon group is configured (kuketty
@@ -194,11 +194,14 @@ type ContainerTty struct {
 	OnInit []TtyStage `json:"onInit,omitempty"   yaml:"onInit,omitempty"`
 	// LogFile is an optional operator override for the in-container path
 	// the kuketty wrapper writes its slog output to. Empty (the default)
-	// makes the daemon stamp ctr.AttachableKukettyLogPath
-	// (/run/kukeon/tty/kuketty.log inside the bind mount — peer to the
-	// capture file), which is always present after first attach. Set this
-	// to a different in-container path when the cell needs the log to
-	// land somewhere else (custom bind mount, fixed external mount). Mode
+	// makes kuketty write ctr.AttachableSupervisorLogPath
+	// (/run/kukeon/tty/supervisor.log inside the bind mount — next to
+	// supervisor.json), which is always present after first attach and
+	// which `kuke log --supervisor` prints. Set this to a different
+	// in-container path when the cell needs the log to land somewhere else
+	// (custom bind mount, fixed external mount); `kuke log --supervisor`
+	// still reads a path under /run/kukeon/tty/, but reports any other
+	// path as unreadable by kukeond. Mode
 	// and GID are not user-configurable — the daemon applies its
 	// AttachableLogFileMode and the kukeon-group GID, gated on the
 	// kukeon group being configured (matches socket/capture treatment).
@@ -209,8 +212,8 @@ type ContainerTty struct {
 	// falls through to the daemon-wide kuketty.logLevel set on
 	// ServerConfigurationSpec, which itself defaults to "info". The path
 	// the log lands at is daemon-controlled (peer to capture inside the
-	// per-container tty directory — see ctr.AttachableKukettyLogPath and
-	// fs.ContainerKukettyLogPath); operators only pick the verbosity.
+	// per-container tty directory — see ctr.AttachableSupervisorLogPath and
+	// fs.ContainerSupervisorLogPath); operators only pick the verbosity.
 	// Validation rejects unknown values at apply time rather than
 	// silently coercing. Issue #599.
 	LogLevel string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`

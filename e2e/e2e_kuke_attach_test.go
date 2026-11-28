@@ -629,7 +629,7 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 	// root:kukeon, SGID 0o750. The per-container TTY inode already lands
 	// at 0o660 root:kukeon (via the chown plumbing in #911), but
 	// connect(2) resolves the `<runPath>/s/<id>` symlink to the deep
-	// `<runPath>/data/<realm>/<space>/<stack>/<cell>/<container>/tty/socket`
+	// `<runPath>/data/<realm>/<space>/<stack>/<cell>/<container>/tty/terminals/main/control.sock`
 	// inode, so every directory on that path must grant search to the
 	// caller. The daemon creates data/ and the realm/space/stack/cell
 	// dirs at 0o750 without chowning them; on a real host they inherit

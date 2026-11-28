@@ -575,9 +575,11 @@ func cellScopeSecretsDir(path string) bool {
 //   - the tty directory (consts.KukeonContainerTTYDir) and everything inside
 //     it — the live attach socket bound 0o660, the capture transcript, the
 //     kuketty log, and kuketty's own runtime metadata it rewrites in place;
-//   - the rendered per-container kuketty metadata file
-//     (ctr.AttachableMetadataFile), chown'd to the container uid so the
-//     in-container wrapper can read it through the bind mount.
+//   - the rendered per-container ContainerDoc kuketty reads
+//     (ctr.AttachableMetadataFile, container.json), chown'd to the container
+//     uid so the in-container wrapper can read it through the bind mount.
+//     The name is generic, so it is skipped only inside a container
+//     directory, i.e. next to a tty/ directory (issue #1721).
 //
 // The blanket sweep treated a live socket as "just a file": it chmodded it
 // 0o660 → 0o640 (stripping group-write, so every kukeon-group operator got
@@ -585,11 +587,15 @@ func cellScopeSecretsDir(path string) bool {
 // attachablePostCreateChown. Because `make dev-init` runs `kuke init` on every
 // iteration, the sweep re-broke attach for every pre-existing cell each time
 // (issue #1207). Returning true for the tty directory prunes the whole subtree.
-func skipLiveCellState(_ string, info os.FileInfo) bool {
+func skipLiveCellState(path string, info os.FileInfo) bool {
 	if info.IsDir() {
 		return info.Name() == consts.KukeonContainerTTYDir
 	}
-	return info.Name() == ctr.AttachableMetadataFile
+	if info.Name() != ctr.AttachableMetadataFile {
+		return false
+	}
+	tty, err := os.Lstat(filepath.Join(filepath.Dir(path), consts.KukeonContainerTTYDir))
+	return err == nil && tty.IsDir()
 }
 
 func runInit(cmd *cobra.Command, _ []string) error {
