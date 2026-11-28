@@ -1025,70 +1025,104 @@ connector's name.
 
 ### Identities page
 
-Identities lists each connector's identities; **Connector** filters it on one
-(`#/identities?connector=<name>`). A connector with Configs that resolve to no
-identity carries a **Needs a default** badge and a **Set a default** link that
-opens the connector on the first affected Config's scope
+Identities (`#/identities`) is one table of every identity on the host: the
+Secrets tagged with a connector and the
+[login identities](site/concepts/connectors.md#login-identities) — the Volumes
+a harness keeps its login in, a team's own state volumes included. It reads
+`GET /api/catalog/secrets` and `GET /api/connectors/logins`, with the Config
+catalog for the Configs using a Secret. Each row has:
+
+| Column        | Content                                                                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name          | links to the Secret or the Volume (a state volume no cell created yet says **Not created yet**; a running login says **Login running**)         |
+| Connector     | links to Identities filtered on it                                                                                                              |
+| Method / type | `login` (the method) for a login identity, else the Secret type and its readable identity fields                                                |
+| Role          | the team roles of the Configs using it, `<team>/<role>` — both roles when two share a login identity                                            |
+| Scope         | realm / space / stack                                                                                                                           |
+| Status        | **Logged in**, **Empty** or **Unknown** for a login identity                                                                                    |
+| Used by       | the Configs using it, linked, with a count of Configs and teams, and the Realm, Space or Stack defaults naming it; **Unused** when nothing does |
+| Actions       | **Log in** / **Log in again** or **Rotate**, and **Delete**                                                                                     |
+
+**Connector** filters the table on one connector
+(`#/identities?connector=<name>`). Values and logins are write-only: only
+names, scopes, types, readable fields and whether a login is present are shown.
+
+**System defaults** are pinned first, one row per connector × method: for a
+method that keeps its login in the state volume, the login identity of the
+`default` team's `agent` Config for that harness
+(`default-agent-<harness>-state`), marked **System default**, with **Log in**;
+for a token or key method, and a git-delivered connector, the Realm default of
+the `default` realm — or **Not set up** with **Create one**, which opens the
+connector's New identity page on that realm. They show while the `default`
+realm exists; `kuke init` creates it. On a realm right after `kuke team init`
+the login rows are the two `default-agent-…-state` login identities, `Empty`
+until someone logs in. A System default is a fallback a Config reaches only by
+inheriting it or by a team's pick (see [Teams](#teams)): nothing points
+existing teams at it.
+
+An identity no Config and no Realm, Space or Stack default uses is marked
+**Unused**, so an old per-role Volume can be found and deleted.
+
+**New identity** asks for the connector first — for a connector with both a
+token or key method and a login method, which kind — then opens the
+connector's form: `#/identities/<name>/new-identity` for a Secret, or
+`#/identities/<name>/new-login` for a login identity. Filtered on a connector
+the page links them directly. The identity form: for a connector that imports
+from the host (git) it starts with three cards: **Import from this machine**
+(the import form), **Use a … token** (shown when a connector advertises
+`tokenForGit`; it opens that connector's form) and **Enter a key or
+password**. The form asks _Where can cells use it?_ — **Everywhere in realm
+`<realm>`** (preselected), **Only in one space…** or **Only in one stack…**,
+only the levels the connector accepts, with a realm select only when there is
+more than one — then shows the identity fields from the connector's descriptor
+(a token, a username and password, or an SSH key with its optional parts;
+several secret types are a described choice) and **Make this the default**,
+on when no default resolves at that scope. On a connector that advertises
+`tokenForGit` (GitHub) the form also has **Also use this token for git on
+github.com**, on by default, with an optional **Commit author** and
+**Username**. **Rotate** opens
+`#/identities/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
+which replaces the value stored under that name. New login identity asks for a
+name and a scope (Realm, Space or Stack) and offers **Create and log in** and
+**Create without logging in**. Each returns to Identities, filtered on the
+connector, on success or Cancel.
+
+**Log in** on a login identity's row (**Log in again** once it holds a login):
+the server creates the Volume if needed, starts an identity cell that mounts
+only that Volume and runs the harness login, and the browser opens that cell's
+terminal. The cell deletes itself when the login ends; while a session runs
+the row says **Login running**, its button reads **Open login session** and a
+second click opens the same session instead of starting another. The rows are
+re-read every few seconds while a session runs, so the status follows when it
+ends.
+
+**Delete** uses the same confirmation as the catalog: a Secret through the
+Secret delete route, refused while a cell references it; a login identity's
+Volume, with its login, through the Volume delete route. Rows are selected
+together and deleted in one batch; a row in `kuke-system` is skipped.
+
+A connector with Configs that resolve to no identity is listed under **Needs a
+default** with a **Set a default** link that opens the connector on the first
+affected Config's scope
 (`#/identities?connector=<name>&scope=[realm, space, stack]`). Filtered on a
-connector, the page has:
-
-- **Default identity** — for a chosen scope and each method that takes an
-  identity, the identity that resolves there and the level it comes from, or
-  **No default resolves in this scope**. Below it, a Level and an Identity
-  picker set another identity as the default at any level the connector allows
-  (with no identity stored, a link to the new-identity page replaces the picker).
-  **Defaults by level**, a disclosure, holds the per-level table with its
-  **Clear** buttons. The deepest level wins. A change takes effect at once: no
-  Config is re-rendered. A connector that can only be defaulted at some levels
-  says so on the others.
-- **Identities** — the Secrets tagged with the connector: name, scope, type and
-  the readable identity fields. Values are write-only and never returned to the
-  browser. **New identity** opens `#/identities/<name>/new-identity`. For a
-  connector that imports from the host (git) it starts with three cards:
-  **Import from this machine** (the import form), **Use a … token** (shown when
-  a connector advertises `tokenForGit`; it opens that connector's form) and
-  **Enter a key or password**. The form asks _Where can cells use it?_ —
-  **Everywhere in realm `<realm>`** (preselected), **Only in one space…** or
-  **Only in one stack…**, only the levels the connector accepts, with a realm
-  select only when there is more than one — then shows the identity fields from
-  the connector's descriptor (a token, a username and password, or an SSH key
-  with its optional parts; several secret types are a described choice) and
-  **Make this the default**, on when no default resolves at that scope. On a
-  connector that advertises `tokenForGit` (GitHub) the form also has **Also use
-  this token for git on github.com**, on by default, with an optional **Commit
-  author** and **Username**. **Rotate** opens
-  `#/identities/<name>/rotate-identity?identity=[realm, space?, stack?, name]`,
-  which replaces the value stored under that name. Both return to Identities,
-  filtered on the connector, on success or Cancel. **Delete** uses the same confirmation as the
-  Secrets catalog, and a Secret still referenced by a cell is refused.
-- **Needs a default** — the Configs that require the connector and resolve to
-  no identity, each with a link that opens the defaults on that Config's scope.
-
-A method that keeps its login in the harness state volume has no default, and
-its identities are [login identities](site/concepts/connectors.md#login-identities)
-— Volumes tagged with the connector. A connector with such a method has a
-**Login identities** panel:
-
-- one row per login identity — the tagged Volumes and the state volumes
-  Configs log in through, a team's own included — with its scope, its status
-  (**Logged in**, **Empty**, or **Unknown** when the connector declares no
-  marker) and the Configs using it;
-- **New login identity** — a name and a scope (Realm, Space or Stack) — with
-  **Create and log in** and **Create without logging in**;
-- **Log in** on a row (**Log in again** once it holds a login): the server
-  creates the Volume if needed, starts an identity cell that mounts only that
-  Volume and runs the harness login, and the browser opens that cell's
-  terminal. The cell deletes itself when the login ends; while a session runs
-  the row says **Login running**, its button reads **Open login session** and a
-  second click opens the same session instead of starting another. The row's
-  status is re-read every few seconds while a session runs.
+connector, the page lists those Configs, each with a link that opens the
+defaults on its scope, and the **Default identity** editor: for a chosen scope
+and each method that takes an identity, the identity that resolves there and
+the level it comes from, or **No default resolves in this scope**. Below it, a
+Level and an Identity picker set another identity as the default at any level
+the connector allows (with no identity stored, a link to the new-identity page
+replaces the picker). **Defaults by level**, a disclosure, holds the per-level
+table with its **Clear** buttons. The deepest level wins. A change takes
+effect at once: no Config is re-rendered. A connector that can only be
+defaulted at some levels says so on the others. A method that keeps its login
+in the harness state volume has no default.
 
 Only whether a login is present is shown. No route returns the content of a
 login.
 
 | Method | Path                                 | Purpose                                                                                                                                                                    |
 | ------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/connectors/logins`             | Every login identity: connector, method, Volume, `exists`, `tagged`, `login`, `usedBy`, running `session`                                                                  |
+| `GET`  | `/api/connectors/logins`             | Every login identity: connector, method, Volume, `exists`, `tagged`, `login`, `usedBy` (each Config with its `role`, `<team>/<role>`), running `session`                   |
 | `POST` | `/api/connectors/{connector}/logins` | Create a login identity. Body `{"name","scope":{"realm","space","stack"},"method"}`                                                                                        |
 | `POST` | `/api/connectors/{connector}/login`  | Same body. Creates the identity if needed, starts the identity cell and returns its coordinates in `identity.session`; `attached: true` when a session was already running |
 
@@ -1649,6 +1683,12 @@ submitted material.
 - `GET /api/connectors/status` returns, per connector, the number of `configs`
   that require it and `missing`: the Configs that resolve to no identity
   (`config`, `component`, `method`, `slot`, `delivery`, `message`).
+- `GET /api/connectors/logins` returns every login identity (see
+  [Identities page](#identities-page)). Each entry of its `usedBy` names a
+  Config and the team `role` it runs — `<team>/<role>` from its
+  `kukeon.io/team` and `kukeon.io/role` labels, or from the
+  `kukeon.io/agent-team` annotation of a New agent copy; absent outside a team
+  — so the Identities page needs no second read per row.
 - `GET /api/connectors/defaults?realm=&space=&stack=` returns, per connector
   method, the default each level of that scope sets (`levels`, keyed `realm`,
   `space`, `stack`), the `effective` one and its `origin`.

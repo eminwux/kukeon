@@ -249,7 +249,9 @@ export function loginIdentities(world) {
         const stored = (world.volumes ?? []).find(volume => refPath(volume) === refPath(status.volumeRef));
         Object.assign(item, { connector: status.connector, method: status.method, exists: !!stored, login: { state: stored?.state ?? "empty" } });
       }
-      item.usedBy.push({ name: config.metadata.name, realm: config.metadata.realm, ...(config.metadata.space ? { space: config.metadata.space } : {}), ...(config.metadata.stack ? { stack: config.metadata.stack } : {}) });
+      // Each user names the team role it runs (#1790), as the server's apply.RoleName does.
+      const role = roleOf(config) || (config.metadata.labels?.["kukeon.io/role"] && config.metadata.annotations?.["kukeon.io/agent-team"] ? `${config.metadata.annotations["kukeon.io/agent-team"]}/${config.metadata.labels["kukeon.io/role"]}` : "");
+      item.usedBy.push({ name: config.metadata.name, realm: config.metadata.realm, ...(config.metadata.space ? { space: config.metadata.space } : {}), ...(config.metadata.stack ? { stack: config.metadata.stack } : {}), ...(role ? { role } : {}) });
     }
   }
   for (const item of out) { const session = world.sessions?.[refPath(item.volume)]; if (session) item.session = session; }
@@ -435,6 +437,7 @@ export async function mockConnectorAPI(page, world) {
     record(request);
     if (kind === "secrets") world.secrets = world.secrets.filter(secret => refPath(secret) !== refPath({ ...found.metadata }));
     if (kind === "configs") world.configs = world.configs.filter(config => config.metadata !== found.metadata && refPath(config.metadata) !== refPath(found.metadata));
+    if (kind === "volumes") world.volumes = (world.volumes ?? []).filter(volume => refPath(volume) !== refPath({ ...found.metadata }));
     return route.fulfill({ json: { kind, name: found.metadata.name, deleted: true } });
   });
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -188,6 +189,62 @@ func TestLoginIdentitiesList(t *testing.T) {
 	}
 	if logins == 0 {
 		t.Error("the catalog marks no method as a login")
+	}
+}
+
+// TestLoginIdentityRolesInUsedBy: each Config in usedBy names the team role
+// it runs (issue #1790), `<team>/<role>` from its labels, or from the
+// kukeon.io/agent-team annotation of a New agent copy, so the Identities page
+// needs no second read per row. A Volume two roles share names both; a Config
+// outside a team names none.
+func TestLoginIdentityRolesInUsedBy(t *testing.T) {
+	name := loginConnectorName(t)
+	shared := v1beta1.VolumeRef{Name: "work-max", Realm: "dev"}
+	uses := func(cfg string, labels, annotations map[string]string) v1beta1.CellConfigDoc {
+		return v1beta1.CellConfigDoc{
+			Metadata: v1beta1.CellConfigMetadata{
+				Name: cfg, Realm: "dev", Labels: labels, Annotations: annotations,
+			},
+			Status: &v1beta1.CellConfigStatus{Connectors: []v1beta1.ConnectorStatus{{
+				Connector: name, Method: "login", Delivery: v1beta1.ConnectorDeliveryStateVolume,
+				State: v1beta1.ConnectorResolved, Volume: shared.Name, VolumeRef: &shared,
+			}}},
+		}
+	}
+	c := &loginClient{connectorClient: *devScopes()}
+	c.volumes = map[string]v1beta1.VolumeDoc{
+		"dev///work-max": {
+			Metadata: v1beta1.VolumeMetadata{Name: shared.Name, Realm: "dev"},
+			Spec:     v1beta1.VolumeSpec{Connector: name, Method: "login", LoginMarker: "marker"},
+		},
+	}
+	c.configs = []v1beta1.CellConfigDoc{
+		uses("kukeon-dev", map[string]string{v1beta1.LabelTeam: "kukeon", v1beta1.LabelRole: "dev"}, nil),
+		uses("kuke-majordomo", map[string]string{v1beta1.LabelTeam: "kuke", v1beta1.LabelRole: "majordomo"}, nil),
+		uses("my-agent", map[string]string{v1beta1.LabelRole: "agent"},
+			map[string]string{v1beta1.AnnotationAgentTeam: "default"}),
+		uses("plain", nil, nil),
+	}
+	w := connectorRequest(t, loginHandler(t, c), http.MethodGet, "/api/connectors/logins", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	got := decodeBody[[]loginIdentityView](t, w)
+	if len(got) != 1 {
+		t.Fatalf("identities = %+v, want the one shared Volume", got)
+	}
+	roles := map[string]string{}
+	for _, user := range got[0].UsedBy {
+		roles[user.Name] = user.Role
+	}
+	want := map[string]string{
+		"kukeon-dev": "kukeon/dev", "kuke-majordomo": "kuke/majordomo", "my-agent": "default/agent", "plain": "",
+	}
+	if !reflect.DeepEqual(roles, want) {
+		t.Errorf("usedBy roles = %v, want %v", roles, want)
+	}
+	if body := w.Body.String(); strings.Count(body, `"role":`) != 3 {
+		t.Errorf("a Config outside a team carries a role in %s", body)
 	}
 }
 

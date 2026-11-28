@@ -1,19 +1,21 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ErrorNotice, useResource, type Failure } from "./request";
 import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, levelLabel, newIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
+import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, levelLabel, newIdentityLink, newLoginIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
 import { Disclosure } from "@kukeon/ui";
 import { connectorSetUp, notSetUpText } from "./onboarding.mjs";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryText, identitiesFor, importPayload, importsFromHost,
-  isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, sharedLoginNote, targetScope, usageFor,
+  listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, sharedLoginNote, targetScope, usageFor,
 } from "./connectors.mjs";
-import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
+import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 import { navigate, routeHref } from "./router";
+import { defaultRole, defaultTeam, filterRows, identityRows, kindLogin, kindSecret, markDefaults, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
+import type { IdentityRow, SystemDefault } from "./identities.mjs";
 
 // The Identities page (#1790): every credential a cell uses, from the connector catalog
 // (GET /api/connectors), the tagged Secrets and the login identities. A connector added as one
@@ -93,99 +95,155 @@ function ImportFromHost({ connector, inventory, initiallyOpen = false, onChanged
 }
 
 const identityNoun = countNoun("identity", "identities");
-// IdentitiesPanel lists a connector's identities — the Secrets tagged with it —
-// and deletes them. Creating and rotating one are pages of their own.
-function IdentitiesPanel({ connector, identities, secretsError, revision, inventory, target, onChanged }: {
-  connector: Connector;
-  identities: Identity[];
-  secretsError: Failure | undefined;
+function deleteKind(row: IdentityRow): "secrets" | "volumes" { return row.kind === kindLogin ? "volumes" : "secrets"; }
+function rowNoun(row: IdentityRow): string { return `${row.title} ${row.kind === kindLogin ? "login identity" : "identity"}`; }
+
+// UsedBy names the Configs using an identity — linked, with their team role — and the scope defaults
+// naming it; an identity nothing uses says Unused.
+function UsedBy({ row }: { row: IdentityRow }) {
+  const { configs, teams } = usedByCount(row);
+  if (row.unused) return <span className="badge identity-unused" title="No Config and no default uses it: it can be deleted.">Unused</span>;
+  return <div className="identity-used-by">
+    {configs > 0 && <span className="description">{configs} {configs === 1 ? "Config" : "Configs"}{teams.length > 0 && <> · {teams.length} {teams.length === 1 ? "team" : "teams"}</>}</span>}
+    {row.usedBy.map(config => <a className="badge label-badge" key={configLink(config)} href={configLink(config)} title={config.role ? `Role ${config.role}` : undefined}>{config.name}</a>)}
+    {row.defaults.map(item => <span className="badge" key={`${item.level}:${item.scope.join("/")}:${item.slot}`}>{`${item.level[0].toUpperCase()}${item.level.slice(1)} default`} {item.scope.join(" / ")}</span>)}
+  </div>;
+}
+
+function Roles({ roles }: { roles: string[] }) {
+  return roles.length ? <>{roles.map(role => <span className="badge label-badge" key={role}>{role}</span>)}</> : <span className="description">—</span>;
+}
+
+// IdentityCells are the cells of one identity's row after its name: connector, method or type, role,
+// scope, status and users.
+function IdentityCells({ row }: { row: IdentityRow }) {
+  return <>
+    <td><a href={identitiesLink(row.connector)}>{row.title}</a></td>
+    <td><code>{row.kind === kindLogin ? row.method : row.type}</code>{Object.entries(row.fields).flatMap(([name, value]) => [" ", <span className="badge label-badge" key={name}>{name}: {value}</span>])}</td>
+    <td><Roles roles={row.roles} /></td>
+    <td className="scope-cell">{scopeLabel(row)}</td>
+    <td>{row.kind === kindLogin ? <><LoginStateBadge state={row.status} />{row.since && <span className="description"> since {new Date(row.since).toLocaleString()}</span>}</> : <span className="description">—</span>}</td>
+    <td><UsedBy row={row} /></td>
+  </>;
+}
+
+function IdentityName({ row }: { row: IdentityRow }) {
+  return <>{row.kind === kindSecret ? <a className="resource-name" href={identityLink(row.ref)}>{row.name}</a> : row.exists ? <a className="resource-name" href={volumeLink(row.ref)}>{row.name}</a> : <span className="resource-name">{row.name}</span>}
+    {row.kind === kindLogin && !row.exists && <> <span className="badge">Not created yet</span></>}
+    {row.session && <> <span className="badge">Login running</span></>}</>;
+}
+
+function RowActions({ row, target, pending, onDelete, onChanged }: { row: IdentityRow; target: Scope | undefined; pending: boolean; onDelete: (row: IdentityRow) => void; onChanged: () => void }) {
+  const label = `${rowNoun(row)} ${refLabel(row.ref)}`;
+  return <td className="connector-row-actions">
+    {row.kind === kindLogin ? <LoginButton connector={row.connector} title={row.title} volume={row.ref} state={row.status} running={!!row.session} method={row.method || undefined} onStarted={onChanged} />
+      : <a className="subtle-button" href={rotateIdentityLink(row.connector, row.ref, target)} aria-label={`Rotate ${label}`}>Rotate</a>}
+    {row.exists && <button type="button" className="subtle-button danger-action" aria-label={`Delete ${label}`} disabled={pending} onClick={() => onDelete(row)}>{pending ? "Deleting…" : "Delete"}</button>}
+  </td>;
+}
+
+// SystemDefaultRow is a pinned row: the identity a connector × method falls back to on a fresh realm —
+// the default team's agent login identity, or the default realm's Realm default — or Not set up.
+function SystemDefaultRow({ item, connector, target, pending, onDelete, onChanged }: { item: SystemDefault; connector: Connector | undefined; target: Scope | undefined; pending: (row: IdentityRow) => boolean; onDelete: (row: IdentityRow) => void; onChanged: () => void }) {
+  const row = item.row;
+  const label = `System default for ${item.title}${item.method ? ` ${item.method}` : ""}`;
+  if (row) return <tr className="system-default" aria-label={label}>
+    <td className="bulk-column" />
+    <td><IdentityName row={row} /> <span className="badge system-default-badge">System default</span></td>
+    <IdentityCells row={row} />
+    <RowActions row={row} target={target} pending={pending(row)} onDelete={onDelete} onChanged={onChanged} />
+  </tr>;
+  const login = item.kind === kindLogin;
+  return <tr className="system-default" aria-label={label}>
+    <td className="bulk-column" />
+    <td>{login && connector?.harness ? <span className="resource-name">{`${defaultTeam}-${defaultRole}-${connector.harness}-state`}</span> : <span className="description">Not set up</span>} <span className="badge system-default-badge">System default</span></td>
+    <td><a href={identitiesLink(item.connector)}>{item.title}</a></td>
+    <td><code>{item.method || (login ? "login" : "—")}</code></td>
+    <td>{login ? <span className="badge label-badge">{`${defaultTeam}/${defaultRole}`}</span> : <span className="description">—</span>}</td>
+    <td className="scope-cell">{defaultScopeName}</td>
+    <td>{login ? <span className="description">The default team is not applied: <code>kuke team init</code> applies it.</span> : <span className="description">No Realm default</span>}</td>
+    <td><span className="description">—</span></td>
+    <td className="connector-row-actions">{!login && <a className="subtle-button" href={newIdentityLink(item.connector, { realm: defaultScopeName })} aria-label={`Set up the ${label}`}>Create one</a>}</td>
+  </tr>;
+}
+
+// IdentitiesTable is every identity in one table — the tagged Secrets and the login identities — with
+// the system defaults pinned first. Rotate, Log in, Delete and bulk delete are row actions; creating one
+// is a page of its own.
+function IdentitiesTable({ label, rows, pinned, connectors, target, error, revision, inventory, onChanged }: {
+  label: string;
+  rows: IdentityRow[];
+  pinned: SystemDefault[];
+  connectors: Connector[];
+  target: Scope | undefined;
+  error: string;
   revision: number;
   inventory: InventoryResource;
-  target: Scope | undefined;
   onChanged: () => void;
 }) {
-  const title = connector.title || connector.name;
-  const registry = isRegistry(connector);
-  const [confirming, setConfirming] = useState<Identity>();
+  const [confirming, setConfirming] = useState<IdentityRow>();
   // The identities being deleted, and the failed deletes still shown: a batch deletes several at once (#1745).
   const [pending, setPending] = useState<Set<string>>(() => new Set());
   const [failures, setFailures] = useState<{ target: string; message: string }[]>([]);
   const { notify } = useNotify();
-  const fieldNames = connector.fields.map(field => field.name);
-
   // remove deletes one identity and resolves to its outcome; quiet leaves the toast and the failure notice
   // to a batch, which reports every row once.
-  async function remove(identity: Identity, quiet = false): Promise<{ ok: boolean; message: string }> {
-    const ref = secretRef(identity)!;
-    const key = refKey(ref);
-    const target = refLabel(ref);
-    if (pending.has(key)) return { ok: false, message: "A delete of it is still running." };
-    setPending(old => new Set(old).add(key));
+  async function remove(row: IdentityRow, quiet = false): Promise<{ ok: boolean; message: string }> {
+    const target = `${rowNoun(row)} ${refLabel(row.ref)}`;
+    if (pending.has(row.key)) return { ok: false, message: "A delete of it is still running." };
+    setPending(old => new Set(old).add(row.key));
     setFailures(old => old.filter(item => item.target !== target));
     try {
-      await sendJSON(catalogDeleteAPI("secrets", [...refScope(ref), ref.name]), "{}");
-      if (!quiet) notify({ key: `identity-delete:${key}`, tone: "success", message: `${title} identity ${ref.name} deleted.` });
+      await sendJSON(catalogDeleteAPI(deleteKind(row), [...refScope(row.ref), row.ref.name]), "{}");
+      if (!quiet) notify({ key: `identity-delete:${row.key}`, tone: "success", message: `${rowNoun(row)} ${row.name} deleted.` });
       return { ok: true, message: "" };
     } catch (caught) {
       const message = toFailure(caught).message;
       if (!quiet) setFailures(old => [...old, { target, message }]);
       return { ok: false, message };
     } finally {
-      setPending(old => { const next = new Set(old); next.delete(key); return next; });
+      setPending(old => { const next = new Set(old); next.delete(row.key); return next; });
       onChanged();
     }
   }
-  // Row selection and bulk delete (#1745); Rotate stays a row action.
-  const byKey = new Map(identities.map(identity => [refKey(identity), identity]));
-  const selection = useSelection([...byKey.keys()], !secretsError);
-  type IdentityRow = BulkRow & { identity: Identity };
-  const selectedRows: IdentityRow[] = identities.filter(identity => selection.has(refKey(identity))).map(identity => ({ key: refKey(identity), scope: [...refScope(identity), identity.name], label: refLabel(identity), identity }));
-  const bulkDelete: BulkAction<IdentityRow>[] = [{ name: "delete", verb: "Delete", danger: true,
-    consequence: `Deletes each ${title} identity's Secret; a cell or team that uses one loses its credential.`,
-    reasonOf: row => pending.has(row.key) ? "a delete of it is still running" : "",
+  // Row selection and bulk delete (#1745); a login identity not created yet has nothing to delete.
+  const deletable = rows.filter(row => row.exists);
+  const byKey = new Map(deletable.map(row => [row.key, row]));
+  const selection = useSelection([...byKey.keys()], !error);
+  type SelectedRow = BulkRow & { row: IdentityRow };
+  const selectedRows: SelectedRow[] = deletable.filter(row => selection.has(row.key)).map(row => ({ key: row.key, scope: [...row.scope, row.name], label: refLabel(row.ref), row }));
+  const bulkDelete: BulkAction<SelectedRow>[] = [{ name: "delete", verb: "Delete", danger: true,
+    consequence: "Deletes each identity: a Secret, or a login identity's Volume with its login. A cell or team that uses one loses its credential.",
+    reasonOf: item => pending.has(item.key) ? "a delete of it is still running" : "",
     acknowledgment: "I understand this permanently deletes every identity listed." }];
-
-  return <section className="panel connector-identities" aria-label={`${title} identities`}>
-    <div className="panel-heading"><h2>Identities</h2><span className="badge">{identities.length} stored</span>{!registry && <a className="document-action" href={newIdentityLink(connector.name, target)}>New identity</a>}</div>
+  const find = (name: string) => connectors.find(item => item.name === name);
+  return <section className="panel connector-identities" aria-label={label}>
+    <div className="panel-heading"><h2>{label}</h2><span className="badge">{rows.length} stored</span></div>
     <div className="panel-body">
-      <p className="description">An identity is a Secret tagged <code>{connector.name}</code>. Only its name, scope, type and readable fields are shown: values are write-only and never returned to the browser.</p>
-      {secretsError && <p className="stale">Identities could not be listed: {secretsError.message}</p>}
+      <p className="description">An identity is a Secret tagged with a connector, or a login identity — a Volume the harness keeps its login in. Only names, scopes, types, readable fields and whether a login is present are shown: values and logins are never returned to the browser. {sharedLoginNote}</p>
+      {error && <p className="stale">{error}</p>}
       {failures.map(failure => <div key={failure.target} className="error" role="alert"><strong>Delete failed: {failure.target}</strong><p>{failure.message}</p></div>)}
-      <BulkActions rows={selectedRows} actions={bulkDelete} noun={identityNoun} selection={selection} run={row => remove(row.identity, true)} />
-      {identities.length ? <div className="table-scroll"><table aria-label={`${title} identities`}><thead><tr><th scope="col" className="bulk-column"><SelectAllBox selection={selection} matching={[...byKey.keys()]} label={`Select all ${identityNoun(identities.length)}`} /></th><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Type</th><th scope="col">Identity</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-        {identities.map(identity => <tr key={refKey(identity)}>
-          <td className="bulk-column"><SelectRowBox selection={selection} rowKey={refKey(identity)} label={`Select ${title} identity ${refLabel(identity)}`} /></td>
-          <td><a className="resource-name" href={identityLink(identity)}>{identity.name}</a></td>
-          <td className="scope-cell">{refScope(identity).join(" / ")}</td>
-          <td>{identity.type}</td>
-          <td>{[...fieldNames.filter(name => name in identity.identity), ...Object.keys(identity.identity).filter(name => !fieldNames.includes(name))].map(name => <span className="badge label-badge" key={name}>{name}: {identity.identity[name]}</span>)}{!Object.keys(identity.identity).length && <span className="description">—</span>}</td>
-          <td className="connector-row-actions">
-            <a className="subtle-button" href={rotateIdentityLink(connector.name, identity, target)} aria-label={`Rotate ${title} identity ${refLabel(identity)}`}>Rotate</a>
-            <button type="button" className="subtle-button danger-action" aria-label={`Delete ${title} identity ${refLabel(identity)}`} disabled={pending.has(refKey(identity))} onClick={() => setConfirming(identity)}>{pending.has(refKey(identity)) ? "Deleting…" : "Delete"}</button>
-          </td>
-        </tr>)}
-      </tbody></table></div> : <p>No {title} identities are stored.{!registry && <> <a href={newIdentityLink(connector.name, target)}>Create one</a>.</>}</p>}
+      <BulkActions rows={selectedRows} actions={bulkDelete} noun={identityNoun} selection={selection} run={item => remove(item.row, true)} />
+      {rows.length || pinned.length ? <div className="table-scroll"><table aria-label={label}><thead><tr><th scope="col" className="bulk-column"><SelectAllBox selection={selection} matching={[...byKey.keys()]} label={`Select all ${identityNoun(byKey.size)}`} /></th><th scope="col">Name</th><th scope="col">Connector</th><th scope="col">Method / type</th><th scope="col">Role</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Used by</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
+        {pinned.length > 0 && <tbody className="system-defaults" aria-label="System defaults">{pinned.map(item => <SystemDefaultRow key={item.key} item={item} connector={find(item.connector)} target={target} pending={row => pending.has(row.key)} onDelete={setConfirming} onChanged={onChanged} />)}</tbody>}
+        <tbody>{rows.map(row => <tr key={row.key}>
+          <td className="bulk-column">{row.exists && <SelectRowBox selection={selection} rowKey={row.key} label={`Select ${rowNoun(row)} ${refLabel(row.ref)}`} />}</td>
+          <td><IdentityName row={row} /></td>
+          <IdentityCells row={row} />
+          <RowActions row={row} target={target} pending={pending.has(row.key)} onDelete={setConfirming} onChanged={onChanged} />
+        </tr>)}</tbody>
+      </table></div> : <p>No identities are stored.</p>}
     </div>
-    {confirming && <CatalogDeleteConfirmation kind="secrets" doc={{ metadata: { name: confirming.name, realm: confirming.realm, ...(confirming.space ? { space: confirming.space } : {}), ...(confirming.stack ? { stack: confirming.stack } : {}) } }} revision={revision} inventory={inventory} onCancel={() => setConfirming(undefined)} onConfirm={() => { const identity = confirming; setConfirming(undefined); void remove(identity); }} />}
+    {confirming && <CatalogDeleteConfirmation kind={deleteKind(confirming)} doc={{ metadata: { name: confirming.ref.name, realm: confirming.ref.realm, ...(confirming.ref.space ? { space: confirming.ref.space } : {}), ...(confirming.ref.stack ? { stack: confirming.ref.stack } : {}) } }} revision={revision} inventory={inventory} onCancel={() => setConfirming(undefined)} onConfirm={() => { const row = confirming; setConfirming(undefined); void remove(row); }} />}
   </section>;
 }
 
-// LoginIdentitiesPanel lists a connector's login identities (#1685) — the
-// Volumes that hold a harness login — with whether each holds one and the
-// Configs using it, creates one, and logs in to one: "Log in" starts an
-// identity cell that mounts only that Volume and opens its terminal. A team's
-// state volume is listed with the same action. Nothing of a login is shown.
-function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, target, onChanged }: {
-  connector: Connector;
-  logins: LoginIdentity[];
-  loginsError: Failure | undefined;
-  inventory: InventoryResource;
-  target: Scope | undefined;
-  onChanged: () => void;
-}) {
+// NewLoginIdentityPage is #/identities/<name>/new-login (#1685, #1790): a name and a scope, with Create and
+// log in — the identity cell's terminal — or Create without logging in. It returns to Identities.
+function NewLoginIdentityPage({ connector, logins, target, inventory, onChanged }: { connector: Connector; logins: unknown[] | undefined; target: Scope | undefined; inventory: InventoryResource; onChanged: () => void }) {
   const title = connector.title || connector.name;
   const methods = loginMethods(connector);
-  const [creating, setCreating] = useState(false);
+  const back = identitiesLink(connector.name, target);
   const [name, setName] = useState("");
   const [method, setMethod] = useState("");
   const [scope, setScope] = useScope(inventory, target && scopeAt(target, scopeLevels[0]));
@@ -193,7 +251,7 @@ function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, targe
   const [error, setError] = useState<Failure>();
   const { notify } = useNotify();
   const problem = loginNameError(name);
-  const taken = logins.some(item => refKey(item.volume) === refKey({ name: name.trim(), ...scope }));
+  const taken = loginIdentitiesFor(logins, connector.name).some(item => refKey(item.volume) === refKey({ name: name.trim(), ...scope }));
   async function create(event: FormEvent, login: boolean) {
     event.preventDefault();
     if (pending) return;
@@ -204,19 +262,17 @@ function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, targe
       else {
         await sendJSON(connectorAPI(connector.name, "logins"), loginBody(name, scope, method || undefined));
         notify({ key: `login-identity:${connector.name}:${name.trim()}`, tone: "success", message: `${title} login identity ${name.trim()} created in ${scopeParts(scope).join(" / ")}.` });
-        setName(""); setCreating(false);
+        navigate(back);
       }
       onChanged();
     } catch (caught) { setError(toFailure(caught)); }
     finally { setPending(""); }
   }
-  return <section className="panel connector-logins" aria-label={`${title} login identities`}>
-    <div className="panel-heading"><h2>Login identities</h2><span className="badge">{logins.length} stored</span><button type="button" className="document-action" aria-expanded={creating} onClick={() => { setCreating(value => !value); setError(undefined); }}>{creating ? "Hide new login identity" : "New login identity"}</button></div>
-    <div className="panel-body">
-      <p className="description">A login identity is a Volume tagged <code>{connector.name}</code>: the harness keeps its login in its state directory, and that directory is the Volume. <strong>Log in</strong> opens a short-lived identity cell that mounts only that Volume and runs the {title} login; the cell is deleted when the login ends. Only whether a login is present is shown — never the login itself. {sharedLoginNote}</p>
-      {loginsError && <p className="stale">Login identities could not be listed: {loginsError.message}</p>}
-      {creating && <form className="creation-form identity-form" aria-label={`New ${title} login identity`} method="post" autoComplete="off" onSubmit={event => void create(event, false)}>
-        <h3>New {title} login identity</h3>
+  return <>
+    <div className="detail-actions"><a href={back}>← Back to {title}</a></div>
+    <section className="panel connector-identity-page" aria-label={`New ${title} login identity`}><div className="panel-body">
+      <form className="creation-form identity-form" aria-label={`New ${title} login identity`} method="post" autoComplete="off" onSubmit={event => void create(event, false)}>
+        <p className="description">A login identity is a Volume tagged <code>{connector.name}</code>: the harness keeps its login in its state directory, and that directory is the Volume. <strong>Create and log in</strong> opens a short-lived identity cell that mounts only that Volume and runs the {title} login; the cell is deleted when the login ends. Only whether a login is present is shown — never the login itself. {sharedLoginNote}</p>
         <ScopeGroup title="Login identity scope" description={<>Where the Volume is stored: a Realm, or a Space or Stack of it.</>}><ScopePicker label="Login identity" inventory={inventory} levels={scopeLevels} value={scope} disabled={!!pending} onChange={setScope} /></ScopeGroup>
         <div className="schema-fields">
           <label className="schema-field"><span>Login identity name<b aria-label="required"> *</b></span><input value={name} placeholder="personal" disabled={!!pending} autoComplete="off" spellCheck={false} aria-invalid={(!!name && !!problem) || undefined} onChange={event => { setName(event.target.value); setError(undefined); }} /><small>{taken ? "A login identity of this name already exists here: logging in logs in to it again." : "The Volume's name. It is created retained, so it outlives a purge of its scope."}</small></label>
@@ -225,21 +281,42 @@ function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, targe
         <div className="connector-actions">
           <button type="button" disabled={!!pending || !scope.realm || !name.trim()} onClick={event => void create(event, true)}>{pending === "login" ? "Starting…" : "Create and log in"}</button>
           <button type="submit" className="subtle-button" disabled={!!pending || !scope.realm || !name.trim()}>{pending === "create" ? "Creating…" : "Create without logging in"}</button>
-          <button type="button" className="subtle-button" disabled={!!pending} onClick={() => setCreating(false)}>Cancel</button>
+          <a className="subtle-button" href={back}>Cancel</a>
         </div>
         {error && <ErrorNotice error={error} kind="Identity" />}
-      </form>}
-      {logins.length ? <div className="table-scroll"><table aria-label={`${title} login identities`}><thead><tr><th scope="col">Name</th><th scope="col">Scope</th><th scope="col">Status</th><th scope="col">Used by</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-        {logins.map(login => <tr key={refKey(login.volume)}>
-          <td>{login.exists ? <a className="resource-name" href={volumeLink(login.volume)}>{login.volume.name}</a> : <span className="resource-name">{login.volume.name}</span>}{!login.exists && <> <span className="badge">Not created yet</span></>}{login.session && <> <span className="badge">Login running</span></>}</td>
-          <td className="scope-cell">{refScope(login.volume).join(" / ")}</td>
-          <td><LoginStateBadge state={login.state} />{login.since && <span className="description"> since {new Date(login.since).toLocaleString()}</span>}</td>
-          <td>{login.usedBy.length ? login.usedBy.map(config => <a className="badge label-badge" key={configLink(config)} href={configLink(config)}>{config.name}</a>) : <span className="description">—</span>}</td>
-          <td className="connector-row-actions"><LoginButton connector={connector.name} title={title} volume={login.volume} state={login.state} running={!!login.session} method={login.method || undefined} onStarted={onChanged} /></td>
-        </tr>)}
-      </tbody></table></div> : <p>No {title} login identities are stored.{!creating && <> <button type="button" className="subtle-button" onClick={() => setCreating(true)}>Create one</button>.</>}</p>}
-    </div>
-  </section>;
+      </form>
+    </div></section>
+  </>;
+}
+
+// newIdentityChoices are the ways to add an identity of a connector: a Secret for a connector with a
+// default target (a token, a key, a git identity), a login identity for one with a login method.
+function newIdentityChoices(connector: Connector): { label: string; href: (scope?: Partial<Scope>) => string }[] {
+  const title = connector.title || connector.name;
+  return [
+    ...(defaultTargets(connector).length ? [{ label: loginMethods(connector).length ? `${title} token or key` : `${title} identity`, href: (scope?: Partial<Scope>) => newIdentityLink(connector.name, scope) }] : []),
+    ...(loginMethods(connector).length ? [{ label: `${title} login identity`, href: (scope?: Partial<Scope>) => newLoginIdentityLink(connector.name, scope) }] : []),
+  ];
+}
+
+// NewIdentity asks for the connector first, then opens today's forms: the identity form (with the git
+// cards for a git-delivered connector) or New login identity. Filtered on a connector it links them.
+function NewIdentity({ connectors, connector, target }: { connectors: Connector[]; connector: Connector | undefined; target: Scope | undefined }) {
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState("");
+  if (connector) {
+    const choices = newIdentityChoices(connector);
+    return <div className="connector-actions">{choices.map((choice, i) => <a key={choice.label} className="document-action" href={choice.href(target)}>{i === 0 && defaultTargets(connector).length ? "New identity" : "New login identity"}</a>)}</div>;
+  }
+  const choices = connectors.flatMap(item => newIdentityChoices(item).map(choice => ({ ...choice, key: `${item.name}:${choice.label}` })));
+  const chosen = choices.find(choice => choice.key === picked);
+  return <div className="connector-actions new-identity">
+    <button type="button" className="document-action" aria-expanded={open} onClick={() => setOpen(value => !value)}>New identity</button>
+    {open && <form className="creation-form" aria-label="New identity" onSubmit={event => { event.preventDefault(); if (chosen) navigate(chosen.href(target)); }}>
+      <label className="schema-field"><span>Connector</span><select aria-label="New identity connector" value={picked} onChange={event => setPicked(event.target.value)}><option value="">Choose a connector…</option>{choices.map(choice => <option key={choice.key} value={choice.key}>{choice.label}</option>)}</select></label>
+      <div className="connector-actions"><button type="submit" disabled={!chosen}>Continue</button><button type="button" className="subtle-button" onClick={() => setOpen(false)}>Cancel</button></div>
+    </form>}
+  </div>;
 }
 
 // IdentityPage is #/identities/<name>/new-identity — where the identity is
@@ -402,39 +479,8 @@ function NeedsDefault({ connector, missing }: { connector: Connector; missing: C
   </section>;
 }
 
-// ConnectorIdentities are one connector's identities on the Identities page: its login identities and
-// its tagged Secrets. With the page filtered on the connector, its Configs without an identity and its
-// scope-default editor follow.
-function ConnectorIdentities({ connector, filtered, usage, secrets, logins, loginsError, secretsError, target, revision, inventory, onChanged }: {
-  connector: Connector;
-  filtered: boolean;
-  usage: ConnectorUsage[] | undefined;
-  secrets: unknown[] | undefined;
-  logins: unknown[] | undefined;
-  loginsError: Failure | undefined;
-  secretsError: Failure | undefined;
-  target: Scope | undefined;
-  revision: number;
-  inventory: InventoryResource;
-  onChanged: () => void;
-}) {
-  const title = connector.title || connector.name;
-  const { missing } = usageFor(usage, connector.name);
-  const identities = identitiesFor(secrets, connector.name);
-  const storesIdentity = defaultTargets(connector).length > 0;
-  const keepsLogins = loginMethods(connector).length > 0;
-  return <>
-    {!filtered && <h2 className="identities-connector-heading"><a href={identitiesLink(connector.name)}>{title}</a> <a className="badge" href={connectorCatalogLink(connector.name)} aria-label={`${title} in the connector catalog`}>{connector.name}</a>{missing.length > 0 && <> <span className="badge needs-connector">Needs a default</span> <a className="document-action" href={identitiesLink(connector.name, targetScope(missing[0].config))} aria-label={`Set a default for ${title}`}>Set a default</a></>}</h2>}
-    {filtered && secrets && logins && !connectorSetUp(connector, secrets, logins) && <p className="connector-not-set-up" role="note">{notSetUpText(connector)}</p>}
-    {filtered && <NeedsDefault connector={connector} missing={missing} />}
-    {filtered && <DefaultsPanel key={`defaults:${scopeParts(target).join("/")}`} connector={connector} identities={identities} revision={revision} inventory={inventory} initialScope={target} onChanged={onChanged} />}
-    {keepsLogins && <LoginIdentitiesPanel connector={connector} logins={loginIdentitiesFor(logins, connector.name)} loginsError={loginsError} inventory={inventory} target={target} onChanged={onChanged} />}
-    {storesIdentity && <IdentitiesPanel connector={connector} identities={identities} secretsError={secretsError} revision={revision} inventory={inventory} target={target} onChanged={onChanged} />}
-  </>;
-}
-
 // IdentitiesPage is #/identities, filtered on a connector with ?connector=, and the identity forms
-// #/identities/<name>/new-identity and …/rotate-identity.
+// #/identities/<name>/new-identity, …/new-login and …/rotate-identity.
 export function IdentitiesPage({ connector: filter, target, action, identity, revision, inventory, onChanged, onTitle }: { connector?: string; section?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
   const catalog = useResource<Connector[]>("/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/connectors/status", revision);
@@ -449,26 +495,48 @@ export function IdentitiesPage({ connector: filter, target, action, identity, re
     const timer = window.setInterval(() => setTick(value => value + 1), 3000);
     return () => window.clearInterval(timer);
   }, [running]);
+  // The system defaults are the default realm's: kuke init always creates it.
+  const hasDefaultRealm = (inventory.data?.rows[0] ?? []).some(row => row.scope[0] === defaultScopeName);
+  const realmDefaults = useResource<unknown[]>(hasDefaultRealm ? `/connectors/defaults?realm=${encodeURIComponent(defaultScopeName)}` : null, revision);
   const connectors = listedConnectors(catalog.data ?? []);
   const connector = filter ? connectors.find(item => item.name === filter) : undefined;
   const scope: Scope | undefined = target?.length ? scopeFromParts(target) : undefined;
   // An identity form's heading shows the connector's title, which only the catalog knows (#1568).
   const connectorName = connector?.name, connectorTitle = connector?.title;
   useEffect(() => { if (connectorName) onTitle?.({ name: connectorName, title: connectorTitle || connectorName }); }, [connectorName, connectorTitle, onTitle]);
+  const scopes = inventory.data?.rows.slice(0, 3);
+  const configs = inventory.data?.configs;
+  const rows = useMemo(() => markDefaults(identityRows({ connectors, secrets: secrets.data, logins: logins.data, configs, scopes }), realmDefaults.data), [connectors, secrets.data, logins.data, configs, scopes, realmDefaults.data]);
   const unknown = catalog.data && filter && !connector;
-  if (action && connector && defaultTargets(connector).length > 0) return <IdentityPage key={`${connector.name}:${action}`} connector={connector} connectors={catalog.data ?? []} action={action} identity={identity} target={scope} identities={identitiesFor(secrets.data, connector.name)} secrets={secrets.data} secretsLoading={secrets.loading && !secrets.data} inventory={inventory} onChanged={onChanged} />;
+  if (action === "new-login" && connector && loginMethods(connector).length) return <NewLoginIdentityPage key={connector.name} connector={connector} logins={logins.data} target={scope} inventory={inventory} onChanged={onChanged} />;
+  if (action && action !== "new-login" && connector && defaultTargets(connector).length > 0) return <IdentityPage key={`${connector.name}:${action}`} connector={connector} connectors={catalog.data ?? []} action={action} identity={identity} target={scope} identities={identitiesFor(secrets.data, connector.name)} secrets={secrets.data} secretsLoading={secrets.loading && !secrets.data} inventory={inventory} onChanged={onChanged} />;
   const shown = connector ? [connector] : filter ? [] : connectors;
+  const pinned = hasDefaultRealm ? systemDefaults({ connectors: shown, rows, realmDefaults: realmDefaults.data }) : [];
+  const needing = shown.map(item => ({ connector: item, missing: usageFor(usage.data, item.name).missing })).filter(item => item.missing.length);
+  const errors = [secrets.error && `Identities could not be listed: ${secrets.error.message}`, logins.error && `Login identities could not be listed: ${logins.error.message}`].filter(Boolean).join(" ");
+  const title = connector ? connector.title || connector.name : "";
   return <>
     {catalog.loading && !catalog.data && <p role="status">Loading identities…</p>}
     {catalog.error && <ErrorNotice error={catalog.error} kind="Connector" />}
     {catalog.error && catalog.data && <p className="stale">Stale connector catalog — refresh failed.</p>}
     {usage.error && <p className="stale">Config usage could not be loaded: {usage.error.message}</p>}
-    {!connector && secrets.error && <p className="stale">Identities could not be listed: {secrets.error.message}</p>}
     <p className="description connectors-intro">An identity is a stored credential a cell uses: a Secret tagged with a connector, or a login identity — the Volume a harness keeps its login in. A Config picks one, or inherits a Realm, Space or Stack default. What each connector accepts is listed in the <a href={connectorCatalogLink()}>connector catalog</a>.</p>
     {catalog.data && <div className="list-controls identities-controls">
       <label className="schema-field"><span>Connector</span><select aria-label="Filter identities by connector" value={filter ?? ""} onChange={event => navigate(identitiesLink(event.target.value || undefined))}><option value="">All connectors</option>{connectors.map(item => <option key={item.name} value={item.name}>{item.title || item.name}</option>)}{unknown && <option value={filter}>{filter}</option>}</select></label>
+      <NewIdentity connectors={connectors} connector={connector} target={scope} />
     </div>}
     {unknown && <div className="error" role="alert"><strong>Unknown connector</strong><p>No connector named {filter} is defined. <a href={identitiesLink()}>Show every identity</a></p></div>}
-    {catalog.data && shown.map(item => <ConnectorIdentities key={item.name} connector={item} filtered={!!connector} usage={usage.data} secrets={secrets.data} logins={logins.data} loginsError={logins.error} secretsError={secrets.error} target={scope} revision={revision} inventory={inventory} onChanged={onChanged} />)}
+    {connector && secrets.data && logins.data && !connectorSetUp(connector, secrets.data, logins.data) && <p className="connector-not-set-up" role="note">{notSetUpText(connector)}</p>}
+    {catalog.data && !unknown && <IdentitiesTable label={connector ? `${title} identities` : "Identities"} rows={filterRows(rows, connector?.name)} pinned={pinned} connectors={connectors} target={scope} error={errors} revision={revision} inventory={inventory} onChanged={onChanged} />}
+    {connector ? <>
+      <NeedsDefault connector={connector} missing={usageFor(usage.data, connector.name).missing} />
+      <DefaultsPanel key={`defaults:${scopeParts(scope).join("/")}`} connector={connector} identities={identitiesFor(secrets.data, connector.name)} revision={revision} inventory={inventory} initialScope={scope} onChanged={onChanged} />
+    </> : needing.length > 0 && <section className="panel connector-missing" aria-label="Connectors without a default">
+      <div className="panel-heading"><h2>Needs a default</h2><span className="badge needs-connector">{needing.length} {needing.length === 1 ? "connector" : "connectors"}</span></div>
+      <div className="panel-body">
+        <p className="description">Configs that require these connectors resolve to no identity, so no cell can be created from them. Set a default for their scope, or pick one in the Config.</p>
+        <ul className="state-list">{needing.map(({ connector: item, missing }) => <li key={item.name}><div><a className="resource-name" href={identitiesLink(item.name)}>{item.title || item.name}</a> <span className="badge needs-connector">Needs a default</span><p className="description">{missing.length} {missing.length === 1 ? "Config" : "Configs"} without an identity</p></div><a className="document-action" href={identitiesLink(item.name, targetScope(missing[0].config))} aria-label={`Set a default for ${item.title || item.name}`}>Set a default</a></li>)}</ul>
+      </div>
+    </section>}
   </>;
 }
