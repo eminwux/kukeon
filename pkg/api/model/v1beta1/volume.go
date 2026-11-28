@@ -72,7 +72,7 @@ type VolumeSpec struct {
 	// #1685). It is the counterpart of Secret.spec.connector and, like it, an
 	// open string. Empty for a volume that is not an identity.
 	Connector string `json:"connector,omitempty"     yaml:"connector,omitempty"`
-	// Method is the connector method the login belongs to (`login`). Set only
+	// Method is the connector method the login belongs to (`manual`). Set only
 	// together with Connector.
 	Method string `json:"method,omitempty"        yaml:"method,omitempty"`
 	// LoginMarker is the path, relative to the volume's root, whose presence

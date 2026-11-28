@@ -169,7 +169,7 @@ func rendersInto(c component.Component, h *harness.Harness, catalog *connector.C
 // pickMethod decides which method of a connector a pair uses: the one the
 // team chose, else the one a secret name the role lists selects (a role
 // written before connectors existed names `claude-code-oauth-token` to mean
-// the subscription method), else the connector's default.
+// the subscription-key method), else the connector's default.
 func pickMethod(plan *pairPlan, conn *connector.Connector, names []string) (connector.Method, error) {
 	if choice, ok := plan.choice(conn.Metadata.Name); ok && choice.Method != "" {
 		method, found := conn.Method(choice.Method)

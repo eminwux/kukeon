@@ -408,20 +408,20 @@ func TestFormRoleHarnessConnectors(t *testing.T) {
 		t.Fatalf("no %s item", name)
 		return nil
 	}
-	*harness(&form, "claude") = formHarnessConnector{Name: "claude", Set: true, Method: "login"}
+	*harness(&form, "claude") = formHarnessConnector{Name: "claude", Set: true, Method: "manual"}
 	got, err := form.apply(base, nil, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := config.Majordomo()
 	want.Spec.Connectors = base.Spec.Connectors
-	want.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}, "claude": {Method: "login"}}
+	want.Spec.Roles[0].Connectors = map[string]config.ConnectorChoice{"github": {}, "claude": {Method: "manual"}}
 	if marshalTeam(t, got) != marshalTeam(t, want) {
 		t.Fatalf("own per role:\n%s", marshalTeam(t, got))
 	}
 	// Read back, it is set; unset removes it and keeps the switch.
 	again := formOf(got, catalog)
-	if item := harness(&again, "claude"); !item.Set || item.Method != "login" || item.Identity != "" {
+	if item := harness(&again, "claude"); !item.Set || item.Method != "manual" || item.Identity != "" {
 		t.Fatalf("read back = %+v", item)
 	}
 	harness(&again, "claude").Set = false

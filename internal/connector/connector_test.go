@@ -235,8 +235,8 @@ func TestSecretRefs(t *testing.T) {
 }
 
 func TestParseMethods(t *testing.T) {
-	got, err := connector.ParseMethods([]string{"codex=api-key", " claude = subscription "})
-	want := map[string]string{"codex": "api-key", "claude": "subscription"}
+	got, err := connector.ParseMethods([]string{"codex=api-key", " claude = subscription-key "})
+	want := map[string]string{"codex": "api-key", "claude": "subscription-key"}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("methods = %+v %v", got, err)
 	}
@@ -251,7 +251,7 @@ func TestParseMethods(t *testing.T) {
 		{[]string{"=api-key"}, "want <connector>=<method>"},
 		{[]string{"codex="}, "want <connector>=<method>"},
 		{[]string{"codex=Api Key"}, "want <connector>=<method>"},
-		{[]string{"codex=login", "codex=api-key"}, `names "codex" more than once`},
+		{[]string{"codex=manual", "codex=api-key"}, `names "codex" more than once`},
 	} {
 		_, err = connector.ParseMethods(tc.args)
 		if !errors.Is(err, errdefs.ErrConnectorInvalid) || !strings.Contains(err.Error(), tc.want) {

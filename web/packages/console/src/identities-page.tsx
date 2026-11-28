@@ -14,7 +14,7 @@ import {
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 import { navigate, routeHref } from "./router";
-import { defaultRole, defaultTeam, filterRows, identityRows, kindLogin, kindSecret, markDefaults, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
+import { defaultRole, defaultTeam, filterRows, identityRows, kindLogin, kindSecret, loginMethodOf, markDefaults, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
 import type { IdentityRow, SystemDefault } from "./identities.mjs";
 import { AssignmentsTab } from "./assignments-tab";
 
@@ -159,7 +159,7 @@ function SystemDefaultRow({ item, connector, target, pending, onDelete, onChange
     <td className="bulk-column" />
     <td>{login && connector?.harness ? <span className="resource-name">{`${defaultTeam}-${defaultRole}-${connector.harness}-state`}</span> : <span className="description">Not set up</span>} <span className="badge system-default-badge">System default</span></td>
     <td><a href={identitiesLink(item.connector)}>{item.title}</a></td>
-    <td><code>{item.method || (login ? "login" : "—")}</code></td>
+    <td><code>{item.method || (login && loginMethodOf(connector)) || "—"}</code></td>
     <td>{login ? <span className="badge label-badge">{`${defaultTeam}/${defaultRole}`}</span> : <span className="description">—</span>}</td>
     <td className="scope-cell">{defaultScopeName}</td>
     <td>{login ? <span className="description">The default team is not applied: <code>kuke team init</code> applies it.</span> : <span className="description">No Realm default</span>}</td>

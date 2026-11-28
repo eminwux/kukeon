@@ -195,7 +195,7 @@ type ConnectorStatus struct {
 // Fill says what fills the connector, as kuke get configs -o wide prints it
 // in its CONNECTORS column: the identity and the level it comes from
 // (`gh-token (realm)`), the method for a connector that keeps a login in the
-// state volume (`login`), `MISSING` for a required connector nothing
+// state volume (`manual`), `MISSING` for a required connector nothing
 // resolves — a cell cannot be created until one does — and `none` for one
 // the cell starts without.
 func (s ConnectorStatus) Fill() string {

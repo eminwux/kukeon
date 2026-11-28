@@ -163,7 +163,7 @@ test("connectors: the first choice declares the list; clearing a choice drops it
   assert.deepEqual(withConnectorsInherit(next, true).connectors, { inherit: true, items: {} });
   // A harness state choice the definition carries survives an edit of the method (#1685).
   const stated = { ...form(), connectors: { inherit: false, items: { claude: { method: "api-key", identity: "", state: "ephemeral" } } } };
-  assert.deepEqual(withConnector(stated, "claude", { method: "subscription" }).connectors.items.claude, { method: "subscription", identity: "", state: "ephemeral" });
+  assert.deepEqual(withConnector(stated, "claude", { method: "subscription-key" }).connectors.items.claude, { method: "subscription-key", identity: "", state: "ephemeral" });
   assert.deepEqual(withConnector(stated, "claude", { method: "" }).connectors.items.claude, { method: "", identity: "", state: "ephemeral" });
 });
 
@@ -193,7 +193,7 @@ test("git identities are the Secrets of realm default of the connectors delivere
 
 // catalog is GET /api/connectors, as far as per-role access reads it.
 const catalog = [
-  { name: "claude", title: "Claude", harness: "claude", methods: [{ name: "login" }] },
+  { name: "claude", title: "Claude", harness: "claude", methods: [{ name: "manual" }] },
   { name: "git", title: "Git", delivery: "git", methods: [] },
   { name: "github", title: "GitHub", methods: [{ name: "token", component: "github" }] },
   { name: "registry", title: "Registry", delivery: "registry", methods: [] },

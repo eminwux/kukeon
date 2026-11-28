@@ -307,11 +307,11 @@ func TestHarnessModesPerCell(t *testing.T) {
 	if _, set := pair.Config.Spec.Values["PROMPT"]; set || len(pair.Config.Spec.Secrets) != 0 {
 		t.Fatalf("config values %v secrets %v", pair.Config.Spec.Values, pair.Config.Spec.Secrets)
 	}
-	if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription"}) {
+	if !slices.Equal(pair.Config.Spec.Components, []string{"claude-subscription-key"}) {
 		t.Fatalf("components = %v, want the one method the role's first secret selects", pair.Config.Spec.Components)
 	}
 	if !slices.ContainsFunc(result.Notes, func(note string) bool {
-		return strings.Contains(note, "subscription and api-key") && strings.Contains(note, "alternatives")
+		return strings.Contains(note, "subscription-key and api-key") && strings.Contains(note, "alternatives")
 	}) {
 		t.Fatalf("notes = %v, want the two methods reported as alternatives", result.Notes)
 	}
@@ -438,12 +438,12 @@ func TestBlueprintIsASelfDescribingForm(t *testing.T) {
 	// The harness, the ways it authenticates (one exclusive group), then the
 	// connectors and forges a role may enable.
 	if want := []string{
-		"codex", "codex-login", "codex-api-key", "codex-access-token", "git", "github", "github-issues",
+		"codex", "codex-manual", "codex-api-key", "codex-access-token", "git", "github", "github-issues",
 	}; !slices.Equal(order, want) {
 		t.Fatalf("components = %v, want %v", order, want)
 	}
 	harnessComp, connector, forge := byName["codex"], byName["github"], byName["github-issues"]
-	for _, name := range []string{"codex-login", "codex-api-key", "codex-access-token"} {
+	for _, name := range []string{"codex-manual", "codex-api-key", "codex-access-token"} {
 		auth := byName[name]
 		if auth.Kind != api.ComponentKindConnector || !auth.Optional || auth.Group != "codex-auth" ||
 			auth.Connector == nil || auth.Connector.Name != "codex" || auth.Connector.Title == "" ||
@@ -451,9 +451,9 @@ func TestBlueprintIsASelfDescribingForm(t *testing.T) {
 			t.Fatalf("auth component %s = %+v (connector %+v)", name, auth, auth.Connector)
 		}
 	}
-	if login := byName["codex-login"]; login.Connector.Delivery != api.ConnectorDeliveryStateVolume ||
-		login.Connector.Method != "login" || len(login.Secrets) != 0 {
-		t.Fatalf("codex-login = %+v (connector %+v)", login, login.Connector)
+	if login := byName["codex-manual"]; login.Connector.Delivery != api.ConnectorDeliveryStateVolume ||
+		login.Connector.Method != "manual" || len(login.Secrets) != 0 {
+		t.Fatalf("codex-manual = %+v (connector %+v)", login, login.Connector)
 	}
 	if key := byName["codex-api-key"]; key.Connector.Delivery != api.ConnectorDeliveryEnv ||
 		len(key.Secrets) != 1 || key.Secrets[0].Name != "openai-api-key" ||
@@ -583,8 +583,8 @@ func TestGitHubConnector(t *testing.T) {
 			}
 			for _, pair := range result.Pairs {
 				// Every harness Config also says how the harness
-				// authenticates: its login, with nothing chosen.
-				want := append([]string{pair.Harness + "-login"}, tc.components...)
+				// authenticates: its manual login, with nothing chosen.
+				want := append([]string{pair.Harness + "-manual"}, tc.components...)
 				if !slices.Equal(pair.Config.Spec.Components, want) {
 					t.Fatalf("%s components = %v, want %v", pair.Harness, pair.Config.Spec.Components, want)
 				}

@@ -28,6 +28,13 @@ export function roleOf(doc) {
   const team = text(labels["kukeon.io/team"]).trim() || text(doc?.metadata?.annotations?.["kukeon.io/agent-team"]).trim();
   return team ? `${team}/${role}` : role;
 }
+// loginMethodOf is the name of the method a login identity of connector is tagged with when the
+// Volume carries none: the connector's default login method, else its first one, from the catalog.
+export function loginMethodOf(connector) {
+  const methods = loginMethods(connector);
+  return text((methods.find(method => method?.default) ?? methods[0])?.name);
+}
+
 const configKey = config => [config.realm, config.space ?? "", config.stack ?? "", config.name].join("/");
 const uniqueSorted = values => [...new Set(values.filter(Boolean))].sort();
 
@@ -96,7 +103,7 @@ export function identityRows({ connectors, secrets, logins, configs, scopes }) {
       const usedBy = login.usedBy.map(user => ({ ...user, role: text(user.role) }));
       rows.push({
         key: `${kindLogin}:${refKey(ref)}`, kind: kindLogin, connector: connector.name, title, ref, name: ref.name, scope: refScope(ref),
-        method: login.method || "login", type: kindLogin, fields: {}, status: login.state, since: login.since, exists: login.exists, session: login.session,
+        method: login.method || loginMethodOf(connector), type: kindLogin, fields: {}, status: login.state, since: login.since, exists: login.exists, session: login.session,
         usedBy, roles: uniqueSorted(usedBy.map(user => user.role)), defaults: [],
         unused: !usedBy.length,
       });

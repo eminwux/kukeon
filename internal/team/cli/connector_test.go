@@ -161,7 +161,7 @@ func TestConnectorList(t *testing.T) {
 		}
 		return out
 	}
-	login := api.ConnectorStatus{Connector: "claude", Method: "login", State: api.ConnectorResolved}
+	login := api.ConnectorStatus{Connector: "claude", Method: "manual", State: api.ConnectorResolved}
 	github := api.ConnectorStatus{
 		Connector: "github", Method: "token", State: api.ConnectorResolved, Origin: "realm",
 		Identity: &api.ContainerSecretRef{Name: "gh-token", Realm: "default"},
@@ -187,9 +187,9 @@ func TestConnectorList(t *testing.T) {
 	want := strings.Join([]string{
 		"ROLE       CONFIG                              CONNECTOR  METHOD  IDENTITY          SET BY    ",
 		"---------  ----------------------------------  ---------  ------  ----------------  ----------",
-		"majordomo  kuke-majordomo-claude               claude     login   -                 definition",
+		"majordomo  kuke-majordomo-claude               claude     manual  -                 definition",
 		"majordomo  kuke-majordomo-claude               github     token   gh-token (realm)  team      ",
-		"majordomo  kuke-majordomo-claude-health-sweep  claude     login   -                 definition",
+		"majordomo  kuke-majordomo-claude-health-sweep  claude     manual  -                 definition",
 		"majordomo  kuke-majordomo-claude-health-sweep  github     token   MISSING           team      ",
 		"",
 	}, "\n")

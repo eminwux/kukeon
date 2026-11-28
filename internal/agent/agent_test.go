@@ -67,7 +67,7 @@ func template(harness string) v1beta1.CellConfigDoc {
 				"ROLE_PATH": "team/roles/agent",
 			},
 			Repos:      map[string]v1beta1.CellConfigRepoFill{"role-source": {}},
-			Components: []string{harness + "-login"},
+			Components: []string{harness + "-manual"},
 		},
 	}
 }

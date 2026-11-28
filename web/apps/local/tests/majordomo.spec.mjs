@@ -161,9 +161,9 @@ test("the Majordomo sidebar entry is permanent and offers Initialize when kuke t
 // The majordomo Config as kukeond reports it since #1685: its harness keeps its login in a state volume,
 // and status.connectors says whether that volume holds one.
 const majordomoVolume = { name: "kuke-majordomo-claude", realm: scope[0], space: scope[1], stack: scope[2] };
-const loginStatus = state => ({ connectors: [{ connector: "claude", title: "Claude", component: "claude-login", method: "login", delivery: "stateVolume", state: "resolved", volume: majordomoVolume.name, volumeRef: majordomoVolume, login: { state } }] });
+const loginStatus = state => ({ connectors: [{ connector: "claude", title: "Claude", component: "claude-manual", method: "manual", delivery: "stateVolume", state: "resolved", volume: majordomoVolume.name, volumeRef: majordomoVolume, login: { state } }] });
 const withLogin = state => [config("kuke-majordomo-claude", majordomoLabels, { status: loginStatus(state) }), config("assistant-b", majordomoLabels)];
-const majordomoLogin = (state = "empty") => ({ connector: "claude", method: "login", volume: { ...majordomoVolume }, exists: true, tagged: true, login: { state }, usedBy: [{ name: "kuke-majordomo-claude", realm: scope[0], space: scope[1], stack: scope[2] }] });
+const majordomoLogin = (state = "empty") => ({ connector: "claude", method: "manual", volume: { ...majordomoVolume }, exists: true, tagged: true, login: { state }, usedBy: [{ name: "kuke-majordomo-claude", realm: scope[0], space: scope[1], stack: scope[2] }] });
 const loginLine = page => panel(page).getByRole("status", { name: "Claude login" });
 
 test("the majordomo panel says whether its harness is logged in and logs in through the identity cell", async ({ page }) => {
@@ -176,7 +176,7 @@ test("the majordomo panel says whether its harness is logged in and logs in thro
   await logIn.click();
   // Log in starts the identity cell of the majordomo state volume and opens its terminal beside the panel.
   await expect(page).toHaveURL(/#\/workspace\/default\/default\/default\/login-kuke-majordomo-claude$/);
-  expect(state.loginPosts).toEqual([{ connector: "claude", name: "kuke-majordomo-claude", scope: { realm: "default", space: "default", stack: "default" }, method: "login" }]);
+  expect(state.loginPosts).toEqual([{ connector: "claude", name: "kuke-majordomo-claude", scope: { realm: "default", space: "default", stack: "default" }, method: "manual" }]);
   await expect(panel(page)).toBeVisible();
   await expect(panel(page).getByRole("button", { name: "Log in to Claude for majordomo" })).toHaveText("Open login session");
   await expect(loginLine(page)).toHaveText("Claude: not logged in");

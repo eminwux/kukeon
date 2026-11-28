@@ -187,7 +187,7 @@ func TestTeamAssignmentsExport(t *testing.T) {
 	form.Connectors = formConnectors{Items: map[string]formConnector{"claude": {Identity: "work-max@default"}}}
 	for i := range form.Roles.Items[0].HarnessConnectors {
 		if item := &form.Roles.Items[0].HarnessConnectors[i]; item.Name == "claude" {
-			*item = formHarnessConnector{Name: "claude", Set: true, Method: "login"}
+			*item = formHarnessConnector{Name: "claude", Set: true, Method: "manual"}
 		}
 	}
 	w := connectorRequest(
@@ -210,7 +210,7 @@ func TestTeamAssignmentsExport(t *testing.T) {
 		t.Fatalf("export does not decode: %v\n%s", err, exported["document"])
 	}
 	if team.Spec.Connectors["claude"].Identity != "work-max@default" ||
-		team.Spec.Roles[0].Connectors["claude"] != (config.ConnectorChoice{Method: "login"}) {
+		team.Spec.Roles[0].Connectors["claude"] != (config.ConnectorChoice{Method: "manual"}) {
 		t.Fatalf("export = %s", exported["document"])
 	}
 }

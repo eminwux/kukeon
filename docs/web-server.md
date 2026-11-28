@@ -1038,7 +1038,7 @@ catalog for the Configs using a Secret. Each row has:
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name          | links to the Secret or the Volume (a state volume no cell created yet says **Not created yet**; a running login says **Login running**)         |
 | Connector     | links to Identities filtered on it                                                                                                              |
-| Method / type | `login` (the method) for a login identity, else the Secret type and its readable identity fields                                                |
+| Method / type | the method (`manual`) for a login identity, else the Secret type and its readable identity fields                                               |
 | Role          | the team roles of the Configs using it, `<team>/<role>` — both roles when two share a login identity                                            |
 | Scope         | realm / space / stack                                                                                                                           |
 | Status        | **Logged in**, **Empty** or **Unknown** for a login identity                                                                                    |

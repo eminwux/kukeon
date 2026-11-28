@@ -145,8 +145,8 @@ func TestUpgradeRepinsTheKukeonSource(t *testing.T) {
 func TestUpgradeKeepsConnectorPicks(t *testing.T) {
 	a := kukeonAt(commitA, "")
 	opts, f := setupUpgrade(t, true, &a)
-	shared := config.ConnectorChoice{Method: "login", Identity: "work-max@default"}
-	own := config.ConnectorChoice{Method: "login"}
+	shared := config.ConnectorChoice{Method: "manual", Identity: "work-max@default"}
+	own := config.ConnectorChoice{Method: "manual"}
 	for _, name := range []string{"kuke", "default"} {
 		editTeam(t, f, name, func(team *config.Team) {
 			team.Spec.Connectors = map[string]config.ConnectorChoice{"claude": shared}

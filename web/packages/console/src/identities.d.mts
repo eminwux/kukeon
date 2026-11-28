@@ -14,6 +14,7 @@ export type IdentityRow = {
 export type SystemDefault = { key: string; connector: string; title: string; method: string; kind: "secret" | "login"; row?: IdentityRow; ref?: SecretRef };
 type ScopeRows = Array<Array<{ doc: unknown; scope: string[] }>>;
 
+export function loginMethodOf(connector: Connector | undefined): string;
 export function roleOf(doc: unknown): string;
 export function scopeDefaults(scopes: ScopeRows | undefined): DefaultUse[];
 export function identityRows(input: { connectors: Connector[] | undefined; secrets: unknown[] | undefined; logins: unknown[] | undefined; configs: unknown[] | undefined; scopes: ScopeRows | undefined }): IdentityRow[];

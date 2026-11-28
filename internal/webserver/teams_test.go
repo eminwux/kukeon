@@ -670,14 +670,14 @@ func TestTeamDefaultsConnectors(t *testing.T) {
 	before := c.storedDefaults(t).Spec.Defaults
 	system := "default-agent-claude-state@default/default/default"
 	w := connectorRequest(t, h, http.MethodPost, "/api/team-defaults", jsonBody(t, map[string]any{
-		"connectors": map[string]any{"claude": map[string]string{"method": "login", "identity": system}},
+		"connectors": map[string]any{"claude": map[string]string{"method": "manual", "identity": system}},
 	}))
 	change := decodeBody[defaultsChangeView](t, w)
 	if w.Code != http.StatusOK || change.Action != "updated" || strings.Join(change.Inheriting, ",") != "proj" {
 		t.Fatalf("set: %d %s", w.Code, w.Body)
 	}
 	after := c.storedDefaults(t).Spec.Defaults
-	want := config.ConnectorChoice{Method: "login", Identity: system}
+	want := config.ConnectorChoice{Method: "manual", Identity: system}
 	if len(after.Connectors) != 1 || after.Connectors["claude"] != want {
 		t.Fatalf("connectors = %+v, want claude %+v only", after.Connectors, want)
 	}
@@ -686,12 +686,12 @@ func TestTeamDefaultsConnectors(t *testing.T) {
 	}
 	// A second connector is added beside it; null removes the first.
 	w = connectorRequest(t, h, http.MethodPost, "/api/team-defaults", jsonBody(t, map[string]any{
-		"connectors": map[string]any{"codex": map[string]string{"method": "login"}, "claude": nil},
+		"connectors": map[string]any{"codex": map[string]string{"method": "manual"}, "claude": nil},
 	}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("second set: %d %s", w.Code, w.Body)
 	}
-	if got := c.storedDefaults(t).Spec.Defaults.Connectors; len(got) != 1 || got["codex"].Method != "login" {
+	if got := c.storedDefaults(t).Spec.Defaults.Connectors; len(got) != 1 || got["codex"].Method != "manual" {
 		t.Fatalf("connectors = %+v, want codex only", got)
 	}
 	writes := c.writes

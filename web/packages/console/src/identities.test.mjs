@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterRows, identityRows, markDefaults, roleOf, scopeDefaults, systemDefaults, usedByCount } from "./identities.mjs";
+import { filterRows, identityRows, loginMethodOf, markDefaults, roleOf, scopeDefaults, systemDefaults, usedByCount } from "./identities.mjs";
 
 // A test-only catalog: a harness connector with a login and a token method, a git-delivered one and a
 // registry-delivered one — nothing here is a connector the UI knows by name.
@@ -88,4 +88,14 @@ test("systemDefaults pins one row per connector × method: the default team's ag
 test("filterRows narrows to one connector", () => {
   assert.deepEqual(filterRows(rows, "repo").map(item => item.name), ["git-ssh"]);
   assert.equal(filterRows(rows, "").length, rows.length);
+});
+
+test("a login identity with no method tag takes the connector's login method from the catalog", () => {
+  const renamed = [{ ...connectors[0], methods: [{ name: "key", delivery: "env" }, { name: "manual", delivery: "stateVolume" }, { name: "browser", delivery: "stateVolume", default: true }] }];
+  assert.equal(loginMethodOf(renamed[0]), "browser");
+  assert.equal(loginMethodOf({ ...renamed[0], methods: renamed[0].methods.slice(0, 2) }), "manual");
+  assert.equal(loginMethodOf(connectors[1]), "");
+  const untagged = [{ connector: "agent", volume: { name: "dev-state", realm: "default" }, exists: true, tagged: false, login: { state: "empty" }, usedBy: [] }];
+  const [got] = identityRows({ connectors: renamed, secrets: [], logins: untagged, configs: [], scopes: [[], [], []] });
+  assert.equal(got.method, "browser");
 });

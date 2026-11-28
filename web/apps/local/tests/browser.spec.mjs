@@ -7175,14 +7175,14 @@ test("at 390×844 the switch shows named icons, the grid is one column and nothi
 const harnessCatalog = [
   { name: "git", title: "Git", delivery: "git", scopes: ["realm"], secretTypes: ["ssh-key"], fields: [], methods: [] },
   { name: "claude", title: "Claude", harness: "claude", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [
-    { name: "login", component: "claude-login", delivery: "stateVolume", default: true },
+    { name: "manual", component: "claude-manual", delivery: "stateVolume", default: true },
     { name: "api-key", component: "claude-key", delivery: "env", slot: "anthropic-api-key" },
   ] },
 ];
 const systemLogin = "default-agent-claude-state@default/default/default";
 const harnessLogins = [
-  { connector: "claude", method: "login", volume: { name: "default-agent-claude-state", realm: "default", space: "default", stack: "default" }, exists: false, tagged: false, login: { state: "empty" }, usedBy: [{ name: "default-agent-claude", realm: "default", space: "default", stack: "default", role: "default/agent" }] },
-  { connector: "claude", method: "login", volume: { name: "work-max", realm: "default" }, exists: true, tagged: true, login: { state: "logged in" }, usedBy: [{ name: "kuke-majordomo-claude", realm: "default", role: "kuke/majordomo" }] },
+  { connector: "claude", method: "manual", volume: { name: "default-agent-claude-state", realm: "default", space: "default", stack: "default" }, exists: false, tagged: false, login: { state: "empty" }, usedBy: [{ name: "default-agent-claude", realm: "default", space: "default", stack: "default", role: "default/agent" }] },
+  { connector: "claude", method: "manual", volume: { name: "work-max", realm: "default" }, exists: true, tagged: true, login: { state: "logged in" }, usedBy: [{ name: "kuke-majordomo-claude", realm: "default", role: "kuke/majordomo" }] },
 ];
 async function mockAssignments(page) {
   const world = await mockTeams(page);
@@ -7221,14 +7221,14 @@ test("Assignments sets the defaults to the System default after a preview of eve
   await expect(change.getByRole("region", { name: "Preview: web" })).toBeVisible();
   const previews = world.requests.slice(reads).filter(item => item.path === "/api/teams/preview").map(item => item.body);
   expect(previews.map(body => body.name)).toEqual(["kuke", "web"]);
-  for (const body of previews) expect(body.form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: systemLogin } } });
+  for (const body of previews) expect(body.form.connectors).toEqual({ inherit: false, items: { claude: { method: "manual", identity: systemLogin } } });
   // Previewing wrote nothing.
   expect(world.requests.slice(reads).filter(item => item.body && item.path !== "/api/teams/preview")).toEqual([]);
   await change.getByRole("button", { name: "Apply" }).click();
   await expect(toasts(page).filter({ hasText: "Claude for All teams set to System default; recomposed kuke, web." })).toBeVisible();
   const writes = world.requests.slice(reads).filter(item => item.body && item.path !== "/api/teams/preview");
   expect(writes).toEqual([
-    { path: "/api/team-defaults", body: { connectors: { claude: { method: "login", identity: systemLogin } } } },
+    { path: "/api/team-defaults", body: { connectors: { claude: { method: "manual", identity: systemLogin } } } },
     { path: "/api/teams/kuke/reapply", body: {} },
     { path: "/api/teams/web/reapply", body: {} },
   ]);
@@ -7247,12 +7247,12 @@ test("Assignments stores a team's identity and Own per role for one of its roles
   await expect(change.getByRole("note")).toContainText("Login identity work-max would be shared by roles kuke/majordomo, web/dev.");
   await change.getByRole("button", { name: "Preview" }).click();
   await expect(change.getByRole("region", { name: "Preview: web" })).toBeVisible();
-  expect(lastPost(world, "/api/teams/preview").form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: "work-max@default" } } });
+  expect(lastPost(world, "/api/teams/preview").form.connectors).toEqual({ inherit: false, items: { claude: { method: "manual", identity: "work-max@default" } } });
   await change.getByRole("button", { name: "Apply" }).click();
   await expect(toasts(page).filter({ hasText: "Claude for web set to work-max" })).toBeVisible();
   const saved = lastPost(world, "/api/teams");
   expect(saved.name).toBe("web");
-  expect(saved.form.connectors).toEqual({ inherit: false, items: { claude: { method: "login", identity: "work-max@default" } } });
+  expect(saved.form.connectors).toEqual({ inherit: false, items: { claude: { method: "manual", identity: "work-max@default" } } });
   // The roles were not touched: the role entry still chooses nothing.
   expect(saved.form.roles.items[0].harnessConnectors).toEqual([{ name: "claude", set: false }]);
   // The stored team now has the choice; its role inherits it.
@@ -7268,7 +7268,7 @@ test("Assignments stores a team's identity and Own per role for one of its roles
   await expect(toasts(page).filter({ hasText: "Claude for web/dev set to own per role" })).toBeVisible();
   const role = lastPost(world, "/api/teams");
   expect(role.form.connectors).toEqual(saved.form.connectors);
-  expect(role.form.roles.items[0].harnessConnectors).toEqual([{ name: "claude", set: true, method: "login" }]);
+  expect(role.form.roles.items[0].harnessConnectors).toEqual([{ name: "claude", set: true, method: "manual" }]);
 });
 
 test("the Credentials step lists login identities for a connector's login method", async ({ page }) => {
@@ -7283,17 +7283,17 @@ test("the Credentials step lists login identities for a connector's login method
   // A token method lists the Secrets instead.
   await steps.getByLabel("Method of claude").selectOption("api-key");
   await expect(steps.getByLabel("Identity of claude", { exact: true }).getByRole("option").first()).toHaveText("From the scope defaults");
-  await steps.getByLabel("Method of claude").selectOption("login");
+  await steps.getByLabel("Method of claude").selectOption("manual");
   await steps.getByLabel("Identity of claude", { exact: true }).selectOption({ label: "work-max — logged in" });
   await steps.getByRole("button", { name: "Next" }).click();
   await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
-  expect(lastPost(world, "/api/teams/preview").form.connectors.items.claude).toEqual({ method: "login", identity: "work-max@default" });
+  expect(lastPost(world, "/api/teams/preview").form.connectors.items.claude).toEqual({ method: "manual", identity: "work-max@default" });
 });
 
 const roleAccessConnectors = [
   { name: "git", title: "Git", delivery: "git", scopes: ["realm"], secretTypes: ["ssh-key"], fields: [], methods: [] },
   { name: "github", title: "GitHub", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "token", component: "github", delivery: "env", default: true }] },
-  { name: "claude", title: "Claude", harness: "claude", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "subscription", component: "claude-sub", delivery: "stateVolume" }] },
+  { name: "claude", title: "Claude", harness: "claude", scopes: ["realm"], secretTypes: ["opaque"], fields: [], methods: [{ name: "subscription-key", component: "claude-subscription-key", delivery: "stateVolume" }] },
 ];
 const roleAccessRows = [
   { role: "dev", config: "web-dev-claude", connector: "git", state: "resolved", identity: "git-ssh", origin: "realm", fill: "git-ssh (realm)", setByTeam: false },
@@ -7436,7 +7436,7 @@ test("Edit team switches off the defaults and starts from the default roles and 
     tasks: { all: false, items: [{ name: "pick-issue", schedule: "@daily", suspend: false }] },
     connectors: [{ name: "git", enabled: false, identity: "" }, { name: "github", enabled: true, identity: "bot-token" }],
   };
-  world.sources.defaultForm = { roles: [lead], connectors: { claude: { method: "subscription", identity: "claude-key", state: "ephemeral" } } };
+  world.sources.defaultForm = { roles: [lead], connectors: { claude: { method: "subscription-key", identity: "claude-key", state: "ephemeral" } } };
   await page.route(url => url.pathname === "/api/connectors", route => route.fulfill({ json: roleAccessConnectors }));
   await page.goto(`${server.url}#/teams/web/edit`);
   const steps = wizard(page);
@@ -7454,7 +7454,7 @@ test("Edit team switches off the defaults and starts from the default roles and 
   await expect(access.getByRole("checkbox", { name: "GitHub for dev" })).toBeChecked();
   await expect(access.getByLabel("Identity of github for dev")).toHaveValue("bot-token");
   await steps.getByRole("checkbox", { name: "Use the defaults' connector choices" }).uncheck();
-  await expect(steps.getByLabel("Method of claude")).toHaveValue("subscription");
+  await expect(steps.getByLabel("Method of claude")).toHaveValue("subscription-key");
   await expect(steps.getByLabel("Identity of claude", { exact: true })).toHaveValue("claude-key");
   await steps.getByRole("button", { name: "Next" }).click();
   await expect(steps.getByRole("region", { name: "Preview" })).toBeVisible();
