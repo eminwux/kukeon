@@ -708,7 +708,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   }
   // After creation (#1603) the UI lands on cellTerminal only when the cell is started with a terminal attached
   // and has a workload to attach to; otherwise on cellRead, which never opens a terminal session.
-  async function handleCellCreated(cell: Doc, options: { start: boolean; attach: boolean }) {
+  async function handleCellCreated(cell: Doc, options: { start: boolean; attach: boolean; warnings?: string[] }) {
     const start = options.start;
     const spec = cell.spec as { realmId?: unknown; spaceId?: unknown; stackId?: unknown; containers?: { id?: unknown; attachable?: unknown; root?: unknown }[]; tty?: { default?: unknown } } | undefined;
     if (typeof spec?.realmId !== "string" || typeof spec.spaceId !== "string" || typeof spec.stackId !== "string") {
@@ -728,6 +728,9 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     const key = `create:${JSON.stringify(scope)}`;
     const link = { href: resourceLink(scope), label: "View cell details" };
     notify({ key, tone: start ? "pending" : "success", message: start ? `Cell ${scope.join(" / ")} created. Starting it…` : `Cell ${scope.join(" / ")} created and left stopped.`, link });
+    // A cell created with a risk the daemon accepted (#1791), such as a login identity another role uses, says so
+    // in a notice of its own that stays until dismissed.
+    if (options.warnings?.length) notify({ key: `${key}:warning`, tone: "warning", title: `Cell ${scope.join(" / ")} was created with a warning`, message: options.warnings.join(" "), link });
     if (!start) return;
     try {
       const response = await apiFetch(`${apiPath(scope)}/start`, { method: "POST", headers: { Accept: "application/json" } });

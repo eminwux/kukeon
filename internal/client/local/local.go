@@ -394,8 +394,9 @@ func (c *Client) CreateConfig(
 		return kukeonv1.CreateConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 	return kukeonv1.CreateConfigResult{
-		Config:  ext,
-		Created: res.Created,
+		Config:   ext,
+		Created:  res.Created,
+		Warnings: res.Warnings,
 	}, nil
 }
 

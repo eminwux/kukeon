@@ -52,6 +52,9 @@ type connectorClient struct {
 	// the apply of a document of that kind.
 	createErr map[string]error
 	applyErr  map[string]error
+	// applyWarnings are the warnings the apply of a document of that kind
+	// reports, like the daemon's for a shared login identity (#1789).
+	applyWarnings map[string][]string
 }
 
 func (c *connectorClient) Close() error { return nil }
@@ -150,7 +153,7 @@ func (c *connectorClient) ApplyDocuments(_ context.Context, raw []byte) (kukeonv
 		}
 	}
 	return kukeonv1.ApplyDocumentsResult{Resources: []kukeonv1.ApplyResourceResult{
-		{Kind: head.Kind, Name: head.Metadata.Name, Action: "updated"},
+		{Kind: head.Kind, Name: head.Metadata.Name, Action: "updated", Warnings: c.applyWarnings[head.Kind]},
 	}}, nil
 }
 

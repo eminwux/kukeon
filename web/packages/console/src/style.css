@@ -741,6 +741,7 @@ a.subtle-button { display: inline-flex; align-items: center; min-height: var(--t
 .identity-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-sm); }
 .identity-form .error, .connector-fix .error, .connector-default .error { margin: 0; }
 .connector-identities-preview .setup-error { margin: 4px 0 0; }
+.connector-warning { margin: 4px 0 0; padding: 6px 10px; border: 1px solid var(--status-warning-line); border-radius: 6px; background: var(--status-warning-bg); color: var(--status-warning); font-size: var(--font-sm); overflow-wrap: anywhere; }
 .connector-login { margin: 0; }
 /* New identity: the three ways to add a git identity, the scope radio and the described secret type (#1693). */
 .identity-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }

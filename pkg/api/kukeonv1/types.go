@@ -271,6 +271,10 @@ type CreateConfigReply struct {
 type CreateConfigResult struct {
 	Config  v1beta1.CellConfigDoc
 	Created bool
+	// Warnings are risks the operator accepted by storing the Config, such as
+	// a login identity another role uses; a warned Config was still stored
+	// (issue #1789).
+	Warnings []string
 }
 
 // ---- List ----

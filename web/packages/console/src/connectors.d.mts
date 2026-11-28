@@ -40,6 +40,9 @@ export type ConnectorStatus = {
   connector: string; title?: string; component: string; method?: string; delivery: string; slot?: string; state: string;
   required?: boolean; identity?: SecretRef; origin?: string; volume?: string; volumeRef?: VolumeRef; message?: string;
   login?: { state: string; since?: string }; harnessState?: string;
+  // warning names a risk the cell is created with, such as a login identity
+  // another role uses (#1789); the connector still resolves.
+  warning?: string;
 };
 export type LoginSession = { realm: string; space: string; stack: string; cell: string; container: string };
 export type ConfigRef = { name: string; realm: string; space?: string; stack?: string };
@@ -126,6 +129,9 @@ export const identityTokenFrom: string;
 export function tokenForGit(connector: { tokenForGit?: unknown } | undefined): TokenForGit | undefined;
 export function tokenConnectors(connectors: Connector[] | undefined): Connector[];
 export function linkedGitIdentity(secrets: unknown[] | undefined, connector: Connector | undefined, identity: Partial<SecretRef> | undefined): Identity | undefined;
+export const sharedLoginNote: string;
+export function responseWarnings(result: unknown): string[];
+export function connectorWarnings(statuses: ConnectorStatus[] | undefined): string[];
 export function staleGitNotice(result: { staleGit?: Partial<SecretRef> } | undefined): string | undefined;
 export function emptyGitForm(on: boolean): GitForm;
 export function tokenGitPayload(form: Partial<GitForm> | undefined): Record<string, string>;

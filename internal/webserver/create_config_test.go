@@ -40,6 +40,7 @@ type configFormClient struct {
 	previews     []kukeonv1.CellFromConfigRequest
 	created      []v1beta1.CellConfigDoc
 	createExists bool
+	warnings     []string
 }
 
 func (c *configFormClient) Close() error { return nil }
@@ -94,7 +95,7 @@ func (c *configFormClient) CreateConfig(
 	_ context.Context, doc v1beta1.CellConfigDoc,
 ) (kukeonv1.CreateConfigResult, error) {
 	c.created = append(c.created, doc)
-	return kukeonv1.CreateConfigResult{Config: doc, Created: !c.createExists}, nil
+	return kukeonv1.CreateConfigResult{Config: doc, Created: !c.createExists, Warnings: c.warnings}, nil
 }
 
 func configFormHandler(t *testing.T, c *configFormClient) http.Handler {
@@ -229,6 +230,33 @@ func TestConfigFromBlueprintPreviewThenCreate(t *testing.T) {
 		doc.Spec.Secrets["github-token"].SecretRef.Name != "gh-token" || doc.Spec.Modes.Default != "interactive" ||
 		doc.Spec.Requires[0] != "go" || doc.Spec.Values["ROLE_PATH"] != "dev" {
 		t.Fatalf("saved config = %+v", doc)
+	}
+}
+
+// TestConfigFromBlueprintCreateReturnsWarnings pins issue #1791: a Config the
+// daemon stored with a warning (a login identity another role uses) is saved,
+// and the warning comes back beside the document for the web UI to show.
+func TestConfigFromBlueprintCreateReturnsWarnings(t *testing.T) {
+	const warning = `config "kukeon-dev": volume "kuke-majordomo-claude" is also the login identity of role ` +
+		`kuke/majordomo; role dev shares it at the operator's risk`
+	c := &configFormClient{warnings: []string{warning}}
+	handler := configFormHandler(t, c)
+	input := formRequest()
+	input.Preview = previewForm(t, handler, input).Preview
+	w := postCreate(t, handler, "/api/configs/from-blueprint/create", input)
+	if w.Code != http.StatusOK || len(c.created) != 1 {
+		t.Fatalf("create: %d saves=%d %s", w.Code, len(c.created), w.Body)
+	}
+	var saved struct {
+		v1beta1.CellConfigDoc
+
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Metadata.Name != "kukeon-dev" || len(saved.Warnings) != 1 || saved.Warnings[0] != warning {
+		t.Fatalf("saved = %+v, want the document and [%q]", saved, warning)
 	}
 }
 

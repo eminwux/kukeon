@@ -44,6 +44,10 @@ type GetConfigResult struct {
 type CreateConfigResult struct {
 	Config  intmodel.CellConfig
 	Created bool
+	// Warnings are risks the operator accepted by storing the Config, such as
+	// a login identity another role uses; a warned Config was still stored
+	// (issue #1789).
+	Warnings []string
 }
 
 // CreateConfig persists a new CellConfig document under atomic create-only
@@ -66,6 +70,7 @@ func (b *Exec) CreateConfig(config intmodel.CellConfig) (CreateConfigResult, err
 	}
 	res.Created = reconcile.Action == actionCreated
 	res.Config = config
+	res.Warnings = reconcile.Warnings
 	return res, nil
 }
 

@@ -538,13 +538,21 @@ func editRealmDefaults(ctx context.Context, c Client, scope Scope, edit func(*v1
 
 // ApplyDocument applies one document and returns its apply action.
 func ApplyDocument(ctx context.Context, c Client, doc any, kind v1beta1.Kind) (string, error) {
+	action, _, err := ApplyDocumentWarnings(ctx, c, doc, kind)
+	return action, err
+}
+
+// ApplyDocumentWarnings applies one document and returns its apply action and
+// the warnings the daemon raised for it: risks the operator accepted, such as
+// a Config naming a login identity another role uses (issue #1789).
+func ApplyDocumentWarnings(ctx context.Context, c Client, doc any, kind v1beta1.Kind) (string, []string, error) {
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
-		return "", fmt.Errorf("marshal %s document: %w", kind, err)
+		return "", nil, fmt.Errorf("marshal %s document: %w", kind, err)
 	}
 	result, err := c.ApplyDocuments(ctx, raw)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for _, resource := range result.Resources {
 		if resource.Kind != string(kind) {
@@ -552,11 +560,17 @@ func ApplyDocument(ctx context.Context, c Client, doc any, kind v1beta1.Kind) (s
 		}
 		if resource.Action == "failed" {
 			if resource.Error != "" {
-				return "", fmt.Errorf("%w: apply %s %q: %s", errdefs.ErrConfig, kind, resource.Name, resource.Error)
+				return "", nil, fmt.Errorf(
+					"%w: apply %s %q: %s",
+					errdefs.ErrConfig,
+					kind,
+					resource.Name,
+					resource.Error,
+				)
 			}
-			return "", fmt.Errorf("apply %s failed", kind)
+			return "", nil, fmt.Errorf("apply %s failed", kind)
 		}
-		return resource.Action, nil
+		return resource.Action, resource.Warnings, nil
 	}
-	return "applied", nil
+	return "applied", nil, nil
 }

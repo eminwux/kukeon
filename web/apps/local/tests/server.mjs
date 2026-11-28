@@ -177,6 +177,22 @@ function defaultAt(world, scope, key) {
 // connectorStatuses resolves a Config's connectors the way the daemon does:
 // cell override, then the Config's own fill, then the Stack, Space and Realm
 // default; a named Secret must exist and carry the connector's tag.
+// roleOf is a Config's role the way the daemon names it (#1789): `<team>/<role>`, or the role alone; empty
+// without a role label.
+function roleOf(config) {
+  const labels = config?.metadata?.labels ?? {};
+  const role = labels["kukeon.io/role"] ?? "";
+  if (!role) return "";
+  return labels["kukeon.io/team"] ? `${labels["kukeon.io/team"]}/${role}` : role;
+}
+// sharedLoginWarning is the daemon's warning for a login identity another role uses (#1789): a Volume of
+// the world carries the `role` that uses it. Configs without a role share without a warning.
+export function sharedLoginWarning(world, config, ref) {
+  const own = roleOf(config);
+  const volume = ref ? (world.volumes ?? []).find(item => refPath(item) === refPath(ref)) : undefined;
+  if (!own || !volume?.role || volume.role === own) return "";
+  return `volume ${refPath(ref)} is also the login identity of role ${volume.role}; role ${own} shares it at the operator's risk: each role's start rewrites its role content in the harness state directory, and a single-use refresh token (Codex) refreshed by one role signs the other out`;
+}
 export function connectorStatuses(world, config, overrides = {}) {
   const scope = { realm: config.metadata.realm, space: config.metadata.space || "default", stack: config.metadata.stack || "default" };
   return (config.spec.components ?? []).flatMap(component => {
@@ -194,7 +210,9 @@ export function connectorStatuses(world, config, overrides = {}) {
       const volumeRef = picked ?? ownVolume;
       const volume = volumeRef ? (world.volumes ?? []).find(item => refPath(item) === refPath(volumeRef)) : undefined;
       const problem = picked && !volume ? `volume ${refPath(picked)} does not exist` : volume?.connector && volume.connector !== connector.name ? `volume ${refPath(volumeRef)} is a login identity of connector "${volume.connector}", not "${connector.name}"` : "";
-      return [{ ...base, state: problem ? "unresolved" : "resolved", volume: volumeRef?.name ?? values.STATE_VOLUME ?? "", ...(volumeRef ? { volumeRef } : {}), harnessState: "persistent", ...(picked ? { origin: "cell" } : {}), login: { state: volume?.state ?? "empty" }, ...(problem ? { message: problem } : {}) }];
+      // A cell's pick another role uses is warned about, not refused (#1789).
+      const warning = picked && !problem ? sharedLoginWarning(world, config, picked) : "";
+      return [{ ...base, state: problem ? "unresolved" : "resolved", volume: volumeRef?.name ?? values.STATE_VOLUME ?? "", ...(volumeRef ? { volumeRef } : {}), harnessState: "persistent", ...(picked ? { origin: "cell" } : {}), login: { state: volume?.state ?? "empty" }, ...(problem ? { message: problem } : {}), ...(warning ? { warning } : {}) }];
     }
     // A token method of a connector that authenticates a harness keeps harness state too.
     const harness = connector.harness ? (config.spec.state === "ephemeral" || overrides.state === "ephemeral" ? { harnessState: "ephemeral" } : { harnessState: "persistent", volume: values.STATE_VOLUME ?? "", ...(ownVolume ? { volumeRef: ownVolume } : {}) }) : {};
@@ -437,6 +455,9 @@ export async function mockConnectorAPI(page, world) {
       const volume = world.volumes.find(item => refPath(item) === refPath(ref));
       if (!volume) return route.fulfill(fail(400, "invalid_request", `volume "${ref.name}" does not exist`));
       config.spec.values = { ...config.spec.values, STATE_VOLUME: ref.name, STATE_VOLUME_REALM: ref.realm, STATE_VOLUME_SPACE: ref.space ?? "", STATE_VOLUME_STACK: ref.stack ?? "" };
+      // Stored with the daemon's warning when another role uses it (#1789), returned beside the Config.
+      const warning = sharedLoginWarning(world, config, ref);
+      if (warning) return route.fulfill({ json: { ...withStatus(world, config), warnings: [`config "${config.metadata.name}": ${warning}`] } });
     }
     else {
       const secrets = { ...config.spec.secrets };
@@ -456,7 +477,9 @@ export async function mockConnectorAPI(page, world) {
     const failure = renderFailure(statuses, config.metadata.name);
     if (failure) return route.fulfill(failure);
     const document = { apiVersion: "v1beta1", kind: "Cell", metadata: { name: body.name || body.resolvedName || `${config.metadata.name}-abc123` }, spec: { realmId: config.metadata.realm, spaceId: config.metadata.space || "default", stackId: config.metadata.stack || "default", containers: [] } };
-    if (route.request().url().endsWith("create")) return route.fulfill({ json: document });
+    // The created cell comes back with its connectors' warnings beside it (#1791).
+    const warnings = statuses.map(status => status.warning).filter(Boolean);
+    if (route.request().url().endsWith("create")) return route.fulfill({ json: { ...document, ...(warnings.length ? { warnings } : {}) } });
     await route.fulfill({ json: { document, preview: "reviewed", digest: "sha256:render", values: [], connectors: statuses } });
   });
 

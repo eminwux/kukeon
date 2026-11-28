@@ -7,8 +7,8 @@ import { SourceGroups, SourceIdentities, type RenderedValue } from "./merged-val
 import { groupGitValues } from "./config-form.mjs";
 import { Disclosure } from "@kukeon/ui";
 import { catalogAPI, referenceScope } from "./catalog-url.mjs";
-import { ConnectorFixes, ConnectorStateBadge, IdentitySelect, LoginIdentitySelect, StatusIdentity } from "./connector-ui";
-import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, keepsLogin, loginIdentitiesFor, methodChoices, methodStatuses, stateResolved, statusIdentity, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
+import { ConnectorFixes, ConnectorStateBadge, ConnectorWarning, IdentitySelect, LoginIdentitySelect, StatusIdentity } from "./connector-ui";
+import { blocksCells, changedMethods, changedPicks, connectorStatuses, connectorTitle, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, keepsLogin, loginIdentitiesFor, methodChoices, methodStatuses, responseWarnings, sharedLoginNote, stateResolved, statusIdentity, takesIdentity, teamOf, unresolvedConnectors } from "./connectors.mjs";
 import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
 import { repositoryFromSource, sourcesAPI } from "./teams.mjs";
 import type { StoredSource } from "./teams.mjs";
@@ -71,7 +71,9 @@ function useReviewScroll(preview: Preview | undefined) {
 }
 
 // What happens after Create (#1603): the cell is started and a terminal attached unless the operator opts out.
-export type CreatedOptions = { start: boolean; attach: boolean };
+// warnings are risks the daemon accepted when it created the cell (#1791), such as a login identity another
+// role uses; the created-cell notice shows them.
+export type CreatedOptions = { start: boolean; attach: boolean; warnings?: string[] };
 
 // PreviewPanel holds only preview output, set apart from the form (#1603): its own heading, a "Not created
 // yet" badge and an accent border, and a control to hide it. Hiding it makes Create render afresh.
@@ -231,6 +233,12 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const stackMissing = !!config && !!inventory.data && !inventory.data.rows[2].some(row => row.scope[0] === ownRealm && row.scope[1] === targetSpace && row.scope[2] === targetStack);
   const review = useReviewScroll(preview);
   function changed() { setPreview(undefined); }
+  // The previewed resolution of a connector of the Config, for its warning (#1791). A method picked for the cell
+  // changes the component, so the connector alone is the fallback.
+  function previewStatus(status: ConnectorStatus): ConnectorStatus | undefined {
+    const rendered = preview?.connectors ?? [];
+    return rendered.find(item => item.connector === status.connector && item.component === status.component) ?? rendered.find(item => item.connector === status.connector);
+  }
   async function submit(create: boolean) {
     if (!config || pending) return;
     setPending(true); setStage(create ? "create" : "preview"); setError("");
@@ -246,7 +254,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
         if (result.error?.code === "connector_unresolved" || result.error?.code === "connector_invalid") setSaved(value => value + 1);
         throw new Error(create && (result.error?.code === "unavailable" || response.status >= 500) ? `The creation outcome could not be confirmed. Refresh the Cell inventory before retrying. ${message}` : message);
       }
-      if (create) onCreated(result as CellDoc, { start, attach: start && attach });
+      if (create) onCreated(result as CellDoc, { start, attach: start && attach, warnings: responseWarnings(result) });
       else setPreview(result as Preview);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "The request could not reach the web server.";
@@ -276,7 +284,8 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
       return <li key={`${status.connector}:${status.component}`} aria-label={`${title} connector`}><div className="connector-status">
         <div><strong>{title}</strong> <span className="badge">{status.connector}</span>{status.method && <> <span className="badge">{status.method}</span></>} {picked || methodPicked ? <span className="badge">Picked for this cell</span> : <ConnectorStateBadge status={status} />}</div>
         {choices.length > 0 && <label className="schema-field">Method<select aria-label={`${title} method`} value={methodPicked ?? configStatus.method} disabled={pending} onChange={event => { const next = event.target.value; setMethodPicks(old => ({ ...old, [status.connector]: next === configStatus.method ? undefined : next })); setPicks(old => ({ ...old, [status.connector]: undefined })); changed(); }}>{choices.map(method => <option key={method.name} value={method.name}>{method.name}{method.name === configStatus.method ? " (the Config's)" : ""}</option>)}</select><small>{methodPicked ? `${choices.find(method => method.name === methodPicked)?.description ?? ""} Used for this cell only; the Config uses ${configStatus.method}.` : choices.find(method => method.name === configStatus.method)?.description}</small></label>}
-        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : keepsLogin(status) ? <LoginIdentitySelect label={`${title} login identity`} identities={loginIdentitiesFor(logins.data, status.connector)} value={picks[status.connector] ?? statusIdentity(status)} extra={[statusIdentity(status)]} emptyLabel="Use the Config's login identity" disabled={pending} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={<>The Config resolves to: <StatusIdentity status={status} team={team} />. A login identity picked here becomes this cell's state volume; one login identity serves one role.</>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
+        {takesIdentity(status.delivery) ? <IdentitySelect label={`${title} identity`} identities={identitiesFor(secrets.data, status.connector)} value={picks[status.connector] ?? status.identity} extra={[status.identity]} emptyLabel={methodPicked ? "Use the default identity for this method" : status.identity ? "Use the Config's identity" : status.required ? "No identity — required" : "No identity"} disabled={pending} required={status.required} realm={config.doc.metadata.realm} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={methodPicked ? <>The {methodPicked} method resolves its identity from the Realm, Space or Stack defaults unless one is picked here; the preview shows which.</> : <>The Config resolves to: <StatusIdentity status={status} team={team} /></>} /> : keepsLogin(status) ? <LoginIdentitySelect label={`${title} login identity`} identities={loginIdentitiesFor(logins.data, status.connector)} value={picks[status.connector] ?? statusIdentity(status)} extra={[statusIdentity(status)]} emptyLabel="Use the Config's login identity" disabled={pending} onChange={ref => { setPicks(old => ({ ...old, [status.connector]: ref })); changed(); }} help={<>The Config resolves to: <StatusIdentity status={status} team={team} />. A login identity picked here becomes this cell's state volume. {sharedLoginNote}</>} /> : <p className="description"><StatusIdentity status={status} team={team} /></p>}
+        <ConnectorWarning warning={previewStatus(status)?.warning} />
         {flagged && <p className="field-error" role="alert">{title} has no usable identity{status.message ? `: ${status.message}` : ""}. Pick one for this cell above, set a default, or pick one for the Config.</p>}
         {!methodPicked && status.state !== stateResolved && <ConnectorFixes status={status} connector={connectors.data?.find(item => item.name === status.connector)} config={detail.data!.metadata} identities={identitiesFor(secrets.data, status.connector)} logins={loginIdentitiesFor(logins.data, status.connector)} secrets={secrets.data} onChanged={() => { setSaved(value => value + 1); changed(); }} />}
       </div></li>;

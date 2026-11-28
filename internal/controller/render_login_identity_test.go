@@ -247,6 +247,38 @@ func storeLoginConfig(t *testing.T, fx *connectorFixture, cfg ext.CellConfigDoc)
 	return result.Warnings[0]
 }
 
+// TestCreateConfig_ReturnsLoginIdentityWarning: the create-only path (`kuke
+// create config`, and the web UI's New config page) stores a Config that binds
+// another role's login identity and returns the warning, instead of dropping
+// it as it did before issue #1791.
+func TestCreateConfig_ReturnsLoginIdentityWarning(t *testing.T) {
+	pm := loginConfig("agent-login")
+	pm.Metadata.Name = "kukeon-pm"
+	pm.Metadata.Labels = map[string]string{ext.LabelTeam: "kukeon", ext.LabelRole: "pm"}
+	own := loginConfig("agent-login")
+	own.Metadata.Labels = map[string]string{ext.LabelTeam: "kukeon", ext.LabelRole: "dev"}
+	mock := newConnectorRunner(t, &connectorFixture{configs: []ext.CellConfigDoc{pm}}, own)
+	mock.GetBlueprintFn = func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+		return blueprintCarrier(t, loginBlueprint()), nil
+	}
+	wrote := false
+	mock.WriteConfigIfAbsentFn = func(intmodel.CellConfig) error {
+		wrote = true
+		return nil
+	}
+	result, err := setupTestController(t, mock).CreateConfig(configCarrier(t, own))
+	if err != nil {
+		t.Fatalf("CreateConfig: %v", err)
+	}
+	if !wrote || !result.Created {
+		t.Fatalf("config not stored: created %v, wrote %v", result.Created, wrote)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("warnings = %q, want one", result.Warnings)
+	}
+	assertSharedWarning(t, result.Warnings[0], "kukeon/pm", "kukeon/dev", "kukeon-dev-state")
+}
+
 // TestLoginIdentitySharedAcrossRoles: a login identity a Config or cell of
 // another role already uses may be shared at the operator's risk (issue
 // #1789). Storing a Config that binds it stores the Config with a warning

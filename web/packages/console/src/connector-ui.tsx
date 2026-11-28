@@ -7,7 +7,7 @@ import {
   allowedLevels, blockingConnectors, blocksCells, clearMaterial, connectorStatuses, connectorTitle, defaultTargets, emptyGitForm, emptyIdentityForm, fieldList, fieldPerson, fieldSecret,
   formatSecretReference, harnessEphemeral, identitiesFor, identityDefaultOn, identityErrors, identityFields, identityPayload, keepsLogin, linkedGitIdentity, loginBody, loginIdentitiesFor, loginLoggedIn, loginStateText, loginTone, originLabel, refKey, refLabel, refScope, sameRef, scopeAt, scopeAtLevel, scopeChoices, scopeLevel, scopeLevels, scopeParts, scopeQuery,
   secretBasicAuth, secretOpaque, secretRef, secretSSHKey, secretTypeChoices, secretTypesOf, sessionScope, staleGitNotice, stateResolved, stateText, statusIdentity, storesNoValue, takesIdentity, targetScope, teamOf, tokenForGit, tokenGitErrors, tokenGitPayload,
-  joinPerson, splitPerson,
+  joinPerson, responseWarnings, sharedLoginNote, splitPerson,
 } from "./connectors.mjs";
 import type { ConfigMetadata, Connector, ConnectorStatus, FormField, Identity, IdentityForm as IdentityFormState, LoginIdentity, LoginResult, Scope, SecretRef, VolumeRef } from "./connectors.mjs";
 import { apiFetch } from "@kukeon/api-client";
@@ -484,14 +484,16 @@ function PickForConfig({ status, config, identities, logins = [], onChanged, onC
     if (pending) return;
     setPending(true); setError(undefined);
     try {
-      await sendJSON("/configs/connector", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, connector: status.connector, identity });
-      notify({ key: `connector-pick:${status.connector}:${config.name}`, tone: "success", message: identity ? `Config ${config.name} now uses ${identity.name} for ${title}.` : `Config ${config.name} uses the ${title} default again.` });
+      const saved = await sendJSON<unknown>("/configs/connector", { config: { name: config.name, realm: config.realm, ...(config.space ? { space: config.space } : {}), ...(config.stack ? { stack: config.stack } : {}) }, connector: status.connector, identity });
+      // A login identity another role uses is saved with the daemon's warning (#1791); it is shown, not refused.
+      const warnings = responseWarnings(saved);
+      notify({ key: `connector-pick:${status.connector}:${config.name}`, tone: warnings.length ? "warning" : "success", message: [identity ? `Config ${config.name} now uses ${identity.name} for ${title}.` : `Config ${config.name} uses the ${title} default again.`, ...warnings].join(" ") });
       onChanged(); onClose();
     } catch (caught) { setError(toFailure(caught)); }
     finally { setPending(false); }
   }
   return <div className="connector-fix" role="group" aria-label={`Pick ${title} identity for this Config`}>
-    <p className="description">{login ? <>Saved in the Config as its state volume: every cell of this Config keeps its {title} login — and the rest of its harness state — there. One login identity serves one role.</> : <>Saved in the Config itself: it wins over the Realm, Space and Stack defaults for this Config only.</>}</p>
+    <p className="description">{login ? <>Saved in the Config as its state volume: every cell of this Config keeps its {title} login — and the rest of its harness state — there. {sharedLoginNote}</> : <>Saved in the Config itself: it wins over the Realm, Space and Stack defaults for this Config only.</>}</p>
     <div className="schema-fields">{login
       ? <LoginIdentitySelect label={`${title} login identity for this Config`} identities={logins} value={choice} extra={[statusIdentity(status)]} emptyLabel="Select a login identity…" disabled={pending} onChange={setChoice} />
       : <IdentitySelect label={`${title} identity for this Config`} identities={identities} value={choice} extra={[status.identity]} emptyLabel="Select an identity…" disabled={pending} realm={config.realm} onChange={setChoice} />}</div>
@@ -554,6 +556,14 @@ export function NeedsConnectorBadge({ config }: { config: unknown }) {
 
 type ConfigDoc = { metadata: ConfigMetadata; status?: unknown };
 
+// ConnectorWarning is a risk the daemon accepted with a connector (#1791), such
+// as a login identity another role uses. Nothing is refused: the cell or
+// Config is still created, and the operator decides.
+export function ConnectorWarning({ warning }: { warning?: string }) {
+  if (!warning?.trim()) return null;
+  return <p className="connector-warning" role="note"><strong>Warning:</strong> {warning}</p>;
+}
+
 // ConnectorIdentities is the connector part of a render preview: the identity
 // each connector uses in the cell and the level that decided it.
 export function ConnectorIdentities({ statuses, team = "" }: { statuses: ConnectorStatus[]; team?: string }) {
@@ -561,7 +571,7 @@ export function ConnectorIdentities({ statuses, team = "" }: { statuses: Connect
   return <div className="merged-values connector-identities-preview"><h4>Connector identities</h4>
     <p className="description">The identity each connector uses in this cell, and the level that decided it. Only stored secrets are named — no material is shown.</p>
     <table aria-label="Connector identities"><thead><tr><th scope="col">Connector</th><th scope="col">Method</th><th scope="col">Identity</th><th scope="col">State</th></tr></thead><tbody>
-      {statuses.map(status => <tr key={`${status.connector}:${status.component}`}><td>{connectorTitle(status)}</td><td>{status.method || "—"}</td><td><StatusIdentity status={status} team={team} />{status.state !== stateResolved && status.message && <p className="setup-error">{status.message}</p>}</td><td><ConnectorStateBadge status={status} /></td></tr>)}
+      {statuses.map(status => <tr key={`${status.connector}:${status.component}`}><td>{connectorTitle(status)}</td><td>{status.method || "—"}</td><td><StatusIdentity status={status} team={team} />{status.state !== stateResolved && status.message && <p className="setup-error">{status.message}</p>}<ConnectorWarning warning={status.warning} /></td><td><ConnectorStateBadge status={status} /></td></tr>)}
     </tbody></table>
   </div>;
 }

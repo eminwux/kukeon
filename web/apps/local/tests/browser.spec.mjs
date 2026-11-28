@@ -4676,6 +4676,29 @@ test("a Config no team owns picks a login identity, and a Volume page shows its 
   await expect(page.getByRole("region", { name: "Login identity", exact: true })).toHaveCount(0);
 });
 
+// #1791: saving a Config whose state volume another role uses stores it and shows the daemon's warning.
+test("Picking another role's login identity for a Config saves it and shows the warning naming both roles", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.volumes.push({ name: "majordomo-login", realm: "dev", connector: "demo", method: "login", state: "empty", role: "kuke/majordomo" });
+  world.volumes.push({ name: "solo-state", realm: "dev", space: "shared", stack: "services" });
+  world.configs.push({ apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "solo", realm: "dev", space: "shared", stack: "services", labels: { "kukeon.io/role": "reviewer" } }, spec: { blueprint: { name: "demo", realm: "dev" }, components: ["demo-login"], values: { STATE_VOLUME: "solo-state", STATE_VOLUME_REALM: "dev", STATE_VOLUME_SPACE: "shared", STATE_VOLUME_STACK: "services" } } });
+  await page.goto(`${server.url}#/configs/dev/shared/services/solo`);
+  const demo = connectorsPanel(page).getByRole("listitem", { name: "Demo connector" });
+  await demo.getByRole("button", { name: "Pick Demo login identity for this Config" }).click();
+  const fix = demo.getByRole("group", { name: "Pick Demo identity for this Config" });
+  await expect(fix).toContainText("A login identity normally serves one role; another role may share it at your risk");
+  await expect(fix).not.toContainText("One login identity serves one role");
+  await demo.getByRole("combobox", { name: "Demo login identity for this Config" }).selectOption({ label: "majordomo-login — dev — Empty" });
+  await demo.getByRole("button", { name: "Save for this Config" }).click();
+  await expect.poll(() => world.posts("/api/configs/connector").length).toBe(1);
+  // The Config was saved with the pick, and the warning stays until dismissed.
+  expect(world.configs.find(config => config.metadata.name === "solo").spec.values.STATE_VOLUME).toBe("majordomo-login");
+  const notice = toasts(page).filter({ hasText: "Config solo now uses majordomo-login for Demo." });
+  await expect(notice).toContainText(`config "solo": volume dev/majordomo-login is also the login identity of role kuke/majordomo; role reviewer shares it at the operator's risk`);
+  await expect(notice).toHaveClass(/warning/);
+  await expect(demo).toContainText("Login identity majordomo-login");
+});
+
 test("New Cell picks a login identity for one cell, and a token method chooses persistent or ephemeral harness state", async ({ page }) => {
   const world = await mockConnectors(page);
   const previews = () => world.posts("/api/cells/from-config/preview");
@@ -4714,6 +4737,45 @@ test("New Cell picks a login identity for one cell, and a token method chooses p
   await expect.poll(() => previews().length).toBe(3);
   expect(previews()[2].body).toMatchObject({ methods: { demo: "key" }, connectors: { demo: { name: "demo-key-1", realm: "dev" } }, state: "ephemeral" });
   await expect(review.getByRole("row", { name: /^Demo/ })).toContainText("State: ephemeral");
+});
+
+// #1791: a login identity another role uses may be picked for a cell at the operator's risk (#1789). The
+// preview shows the daemon's warning naming both roles next to the connector, Create stays enabled, and the
+// created cell's notice repeats the warning.
+test("New Cell warns when a picked login identity is another role's, and still creates the cell", async ({ page }) => {
+  const world = await mockConnectors(page);
+  world.volumes.push({ name: "majordomo-login", realm: "dev", connector: "demo", method: "login", state: "empty", role: "kuke/majordomo" });
+  world.configs.push({ apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "dev-agent", realm: "dev", space: "shared", stack: "services", labels: { "kukeon.io/team": "kukeon", "kukeon.io/role": "dev" } }, spec: { blueprint: { name: "demo", realm: "dev" }, components: ["demo-login"], values: { STATE_VOLUME: "kukeon-dev-demo-state", STATE_VOLUME_REALM: "dev", STATE_VOLUME_SPACE: "shared", STATE_VOLUME_STACK: "services" } } });
+  const panel = newCellSection(page, "Connectors");
+  const demo = panel.getByRole("listitem", { name: "Demo connector" });
+  const review = previewPanel(page).getByRole("table", { name: "Connectors", exact: true });
+  await page.goto(`${server.url}${newCellFor("dev-agent")}`);
+  await openNewCellSection(page, "Connectors");
+  // The help says sharing is allowed at the operator's risk; the old absolute rule is gone.
+  await expect(demo).toContainText("A login identity normally serves one role; another role may share it at your risk");
+  await expect(demo).not.toContainText("one login identity serves one role");
+  await expect(demo.getByRole("note")).toHaveCount(0);
+
+  await page.getByLabel("Cell name (optional)").fill("shared-cell");
+  await demo.getByRole("combobox", { name: "Demo login identity" }).selectOption({ label: "majordomo-login — dev — Empty" });
+  await page.getByRole("button", { name: "Preview Cell", exact: true }).click();
+  await expect.poll(() => world.posts("/api/cells/from-config/preview").length).toBe(1);
+  const warning = demo.getByRole("note");
+  await expect(warning).toContainText("volume dev/majordomo-login is also the login identity of role kuke/majordomo; role kukeon/dev shares it at the operator's risk");
+  await expect(review.getByRole("row", { name: /^Demo/ }).getByRole("note")).toContainText("role kuke/majordomo");
+
+  // The warning does not block: the cell is created, and its notice names both roles.
+  await page.getByLabel("Start the cell").uncheck();
+  const createButton = page.getByRole("button", { name: "Create Cell", exact: true });
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+  await expect(page).toHaveURL(/#\/resource\/dev\/shared\/services\/shared-cell$/);
+  expect(world.posts("/api/cells/from-config/create")).toHaveLength(1);
+  expect(world.posts("/api/cells/from-config/create")[0].body).toMatchObject({ connectors: { demo: { name: "majordomo-login", realm: "dev" } } });
+  const notice = toasts(page).filter({ hasText: "was created with a warning" });
+  await expect(notice).toContainText("Cell dev / shared / services / shared-cell was created with a warning");
+  await expect(notice).toContainText("role kuke/majordomo; role kukeon/dev shares it at the operator's risk");
+  await expect(toasts(page).filter({ hasText: "created and left stopped" })).toBeVisible();
 });
 
 test("New Cell pre-selects each connector's effective identity, sends only changed picks and keeps Create disabled while one is unresolved", async ({ page }) => {
