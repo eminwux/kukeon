@@ -39,12 +39,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
-	"regexp"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -88,11 +84,6 @@ const exitCodeUsage = 64
 // every clean workload exit to this internal-error code.
 const exitCodeInternal = 70
 
-// codeRe extracts the workload child's numeric exit code from sbsh's PID-1
-// (init-mode) EvCmdExited cause, which embeds it as "code=N"
-// (sbsh internal/terminal/terminalrunner/lifecycle.go).
-var codeRe = regexp.MustCompile(`code=(-?\d+)`)
-
 // workloadExitError carries the workload child's non-zero exit code up to
 // main() so it can propagate it as kuketty's own exit code. It is distinct
 // from a kuketty-internal failure (exitCodeInternal): a non-zero workload
@@ -104,55 +95,43 @@ func (e *workloadExitError) Error() string {
 	return fmt.Sprintf("workload exited with status %d", e.code)
 }
 
-// workloadExitCode reports whether err is sbsh's "workload child exited"
-// terminating cause and, if so, the child's exit code. sbsh v0.13.1 (the
-// pinned release) has no machine-readable exit-code field on EvCmdExited — it
-// embeds the code in the terminating error: an *exec.ExitError on the non-init
-// cmd.Wait path, a "(code 0)" literal on a non-init clean exit, or a "code=N"
-// string on the PID-1 reaper path (internal/terminal/terminalrunner/
-// lifecycle.go). This recognizes all three carriers. ok=false means err is a
-// genuine kuketty-internal failure that should map to exitCodeInternal.
+// signalExitBase is the shell convention for a death by signal: the exit
+// status is 128 plus the signal number (SIGKILL → 137).
+const signalExitBase = 128
+
+// workloadExitCode reports whether err is sbsh's typed workload exit
+// (*sbshserver.ExitError, sbsh v0.15.0) and, if so, the code kuketty exits
+// with: the workload's own code for a normal exit, 128 plus the signal number
+// for a death by signal. ok=false means err is not a workload exit and maps
+// to exitCodeInternal (issues #1273, #1721).
 //
-// Before sbsh v0.13.1 a clean PID-1 exit could surface here as the benign
-// PTY-master read EIO ("read /dev/ptmx: input/output error") instead of the
-// "code=N" carrier: the EIO is the immediate kernel side-effect of the child
-// closing its tty and it reliably preempted the reaper's EvCmdExited inside
-// sbsh's runLoop, so Serve returned the EIO as its cause and kuketty flipped a
-// clean exit to exitCodeInternal (issue #1282). sbsh v0.13.1's server.Serve now
-// waits briefly for the authoritative EvCmdExited before returning a PTY-read
-// EvError (eminwux/sbsh#439), so the benign race no longer reaches here — a
-// raw PTY-read EIO that *does* surface now means a genuine error with the child
-// still alive, and ok=false / exitCodeInternal is the correct mapping for it.
+// sbsh returns the ExitError on both of its exit paths, the PID-1 reaper and
+// cmd.Wait, so no error text is inspected. A PTY-read EIO racing a clean exit
+// is resolved inside sbsh in favor of the exit (eminwux/sbsh#439, issue
+// #1282); one that still surfaces means a genuine error with the child alive.
 func workloadExitCode(err error) (code int, ok bool) {
 	if err == nil {
 		return 0, true
 	}
-	// Non-init cmd.Wait path: the *exec.ExitError carries the real code (and
-	// signal info on signaled deaths), wrapped by sbsh with %w.
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), true
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "shell process exited") {
+	var exitErr *sbshserver.ExitError
+	if !errors.As(err, &exitErr) {
 		return 0, false
 	}
-	// Non-init clean exit: errors.New("shell process exited (code 0)").
-	if strings.Contains(msg, "(code 0)") {
-		return 0, true
+	switch {
+	case exitErr.Code != nil:
+		return *exitErr.Code, true
+	case exitErr.Signal != "":
+		return signalExitCode(exitErr.Signal), true
+	default:
+		return 0, false
 	}
-	// PID-1 init mode: fmt.Errorf("shell process exited: code=%d", code).
-	if m := codeRe.FindStringSubmatch(msg); m != nil {
-		if c, perr := strconv.Atoi(m[1]); perr == nil {
-			return c, true
-		}
-	}
-	// "shell process exited" with no recoverable code — an abnormal reaper or
-	// shutdown-race path (sbsh #398: reaper channel closed, or the tracked-exit
-	// wait was cancelled by Close). These arise during teardown, not a workload
-	// crash, so treat them as a clean termination rather than flipping a
-	// stopped cell to Error.
-	return 0, true
+}
+
+// signalExitCode is the exit status of a workload killed by the named signal
+// ("SIGKILL"): 128 plus its number. An unknown name yields 128, still a
+// non-zero workload exit.
+func signalExitCode(name string) int {
+	return signalExitBase + int(unix.SignalNum(name))
 }
 
 func main() {
@@ -321,47 +300,58 @@ func serveTerminal(
 	ctx context.Context, spec *sbshapi.TerminalSpec, listener net.Listener, logger *slog.Logger,
 	reporter *supervisorReporter,
 ) error {
-	srv, err := sbshserver.New(spec, logger)
+	// sbsh calls the reporter after every committed terminal status change
+	// (state, attach, detach, exit), so the supervisor document follows the
+	// terminal without polling (issue #1721).
+	srv, err := sbshserver.New(spec, logger, sbshserver.WithStatusObserver(reporter.observeTerminal))
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}
 	reporter.startTerminals()
-	// sbsh does not report terminal status changes yet (#1721), so poll its
-	// metadata while the terminal runs.
-	pollCtx, stopPoll := context.WithCancel(ctx)
-	pollDone := make(chan struct{})
-	go func() {
-		defer close(pollDone)
-		reporter.pollTerminal(pollCtx, attachedTerminalID, srv.Metadata, terminalPollInterval)
-	}()
 	// The workload's exit is surfaced through kuketty's own exit code so the
 	// daemon's task-exit-code → container/cell-state derivation (#1267/#1269)
 	// reflects the workload's fate, not the wrapper's (issue #1273). sbsh
 	// reports terminal exit as the Serve terminating cause:
 	//   - a clean operator-initiated shutdown (ctx cancel / Stop) → exit 0;
-	//   - a workload that exited carries the child's code: 0 → Exited (return
-	//     nil), non-zero → Error (return *workloadExitError so main() exits
-	//     with that code);
+	//   - a workload exit is an *sbshserver.ExitError: code 0 → Exited
+	//     (return nil), non-zero or a signal → Error (return
+	//     *workloadExitError so main() exits with that code);
 	//   - anything else is a genuine kuketty-internal failure → exitCodeInternal.
 	serveErr := srv.Serve(ctx, listener)
-	stopPoll()
-	<-pollDone
-	return serveResult(serveErr, reporter)
+	return serveResult(ctx, serveErr, srv.Metadata, reporter)
 }
+
+// terminalMetadataFunc reads a terminal's sbsh document; *sbshserver.Server's
+// Metadata method satisfies it.
+type terminalMetadataFunc func() (*sbshapi.TerminalDoc, error)
 
 // serveResult maps Serve's terminating cause to run()'s result and records the
 // end of the attached terminal in the supervisor document.
-func serveResult(serveErr error, reporter *supervisorReporter) error {
+//
+// sbsh's last observer call may arrive after Serve returns, so the terminal's
+// final document, with its exit, is read synchronously through metadata and
+// later observer calls are ignored.
+//
+// ctx is the context Serve ran under. Once it is cancelled, sbsh's teardown
+// can end the wait on the workload without an exit status; that is the
+// shutdown kuketty asked for, not a failure.
+func serveResult(
+	ctx context.Context, serveErr error, metadata terminalMetadataFunc, reporter *supervisorReporter,
+) error {
 	defer reporter.terminalsExited()
+	final, _ := metadata()
+	reporter.finalTerminal(final)
 	if isCleanShutdown(serveErr) {
 		return nil
 	}
 	if code, ok := workloadExitCode(serveErr); ok {
-		reporter.setTerminalExit(code)
 		if code == 0 {
 			return nil
 		}
 		return &workloadExitError{code: code}
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	return fmt.Errorf("server.Serve: %w", serveErr)
 }

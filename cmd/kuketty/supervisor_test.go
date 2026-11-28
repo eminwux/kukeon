@@ -21,15 +21,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 )
 
 // newTestReporter returns a reporter writing into a temp dir, with a fixed
@@ -166,7 +167,10 @@ func TestSupervisorReporter_RepoAndStageCurrent(t *testing.T) {
 	}
 }
 
-func TestSupervisorReporter_TerminalLifecycle(t *testing.T) {
+// TestSupervisorReporter_ObserverUpdatesTerminal checks that each sbsh
+// observer call updates terminals[0] on its own, with no poll (issue #1721),
+// and that an unchanged document is not rewritten.
+func TestSupervisorReporter_ObserverUpdatesTerminal(t *testing.T) {
 	r, path := newTestReporter(t)
 	r.startTerminals()
 	doc := readDoc(t, path)
@@ -177,67 +181,185 @@ func TestSupervisorReporter_TerminalLifecycle(t *testing.T) {
 		t.Fatalf("terminals = %+v", doc.Status.Terminals)
 	}
 
-	var calls atomic.Int32
-	md := func() (*sbshapi.TerminalDoc, error) {
-		if calls.Add(1) == 1 {
-			return nil, errors.New("server: not started")
+	attachedAt := time.Date(2026, 11, 26, 19, 51, 0, 0, time.UTC)
+	steps := []struct {
+		name   string
+		status sbshapi.TerminalStatus
+	}{
+		{"ready", sbshapi.TerminalStatus{State: sbshapi.Ready, Pid: 42}},
+		{"attach", sbshapi.TerminalStatus{
+			State: sbshapi.Ready, Pid: 42, Attachers: []string{"client-1"}, LastAttachedAt: attachedAt,
+		}},
+		{"detach", sbshapi.TerminalStatus{State: sbshapi.Ready, Pid: 42, LastAttachedAt: attachedAt}},
+	}
+	for i, step := range steps {
+		r.now = func() time.Time { return attachedAt.Add(time.Duration(i+1) * time.Minute) }
+		r.observeTerminal(sbshapi.TerminalDoc{Status: step.status})
+		term := readDoc(t, path).Status.Terminals[0]
+		want := terminalStatusFromSbsh("main", step.status)
+		if term.State != want.State || term.PID != 42 || len(term.Attachers) != len(want.Attachers) ||
+			!term.LastAttachedAt.Equal(want.LastAttachedAt) {
+			t.Errorf("%s: terminal = %+v, want %+v", step.name, term, want)
 		}
-		return &sbshapi.TerminalDoc{Status: sbshapi.TerminalStatus{
-			State: sbshapi.Ready, Pid: 42, Attachers: []string{"client-1"},
-		}}, nil
 	}
-	r.observeTerminal("main", md) // not started: ignored
-	if got := readDoc(t, path).Status.Terminals[0]; got.State != "" {
-		t.Errorf("state recorded from a failed read: %+v", got)
-	}
-	before := readDoc(t, path).Status.UpdatedAt
-	r.now = func() time.Time { return before.Add(time.Minute) }
-	r.observeTerminal("main", md)
-	term := readDoc(t, path).Status.Terminals[0]
-	if term.State != sbshapi.Ready.String() || term.PID != 42 || len(term.Attachers) != 1 {
-		t.Errorf("terminal = %+v", term)
-	}
+
 	updated := readDoc(t, path).Status.UpdatedAt
-	r.now = func() time.Time { return before.Add(2 * time.Minute) }
-	r.observeTerminal("main", md) // unchanged: no rewrite
+	r.now = func() time.Time { return updated.Add(time.Hour) }
+	r.observeTerminal(sbshapi.TerminalDoc{Status: steps[len(steps)-1].status})
 	if got := readDoc(t, path).Status.UpdatedAt; !got.Equal(updated) {
 		t.Errorf("an unchanged terminal rewrote the document (%v → %v)", updated, got)
 	}
+}
 
-	// sbsh's PID-1 carrier for a workload that exited 3.
-	var wlErr *workloadExitError
-	if err := serveResult(errors.New("shell process exited: code=3"), r); !errors.As(err, &wlErr) || wlErr.code != 3 {
-		t.Fatalf("serveResult = %v, want a workload exit with code 3", err)
+// TestSupervisorReporter_FinalTerminalWinsOverLateObserver checks that the
+// final document read after Serve is kept, with its exit, when sbsh delivers
+// an older document afterwards.
+func TestSupervisorReporter_FinalTerminalWinsOverLateObserver(t *testing.T) {
+	r, path := newTestReporter(t)
+	r.startTerminals()
+	exitedAt := time.Date(2026, 11, 26, 19, 55, 0, 0, time.UTC)
+	three := 3
+	r.finalTerminal(&sbshapi.TerminalDoc{Status: sbshapi.TerminalStatus{
+		State: sbshapi.Exited, Pid: 42, ExitCode: &three, ExitedAt: exitedAt,
+	}})
+	r.observeTerminal(sbshapi.TerminalDoc{Status: sbshapi.TerminalStatus{State: sbshapi.Ready, Pid: 42}})
+
+	term := readDoc(t, path).Status.Terminals[0]
+	if term.State != sbshapi.Exited.String() {
+		t.Errorf("state = %q, want Exited", term.State)
 	}
-	doc = readDoc(t, path)
-	if doc.Status.Phase != v1beta1.SupervisorPhaseExited {
-		t.Errorf("phase after Serve = %q, want Exited", doc.Status.Phase)
-	}
-	if e := doc.Status.Terminals[0].Exit; e == nil || e.Code != 3 {
-		t.Errorf("terminal exit = %+v, want code 3", e)
+	if term.Exit == nil || term.Exit.Code != 3 || term.Exit.Signal != "" || !term.Exit.At.Equal(exitedAt) {
+		t.Errorf("exit = %+v, want code 3 at %v", term.Exit, exitedAt)
 	}
 }
 
-func TestSupervisorReporter_PollTerminalStopsOnCancel(t *testing.T) {
+// TestSupervisorReporter_FinalTerminalNilStopsObserver covers a terminal sbsh
+// never started: there is no final document, and later observer calls are
+// still ignored.
+func TestSupervisorReporter_FinalTerminalNilStopsObserver(t *testing.T) {
 	r, path := newTestReporter(t)
 	r.startTerminals()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	md := func() (*sbshapi.TerminalDoc, error) {
-		return &sbshapi.TerminalDoc{Status: sbshapi.TerminalStatus{State: sbshapi.Ready, Pid: 7}}, nil
+	r.finalTerminal(nil)
+	r.observeTerminal(sbshapi.TerminalDoc{Status: sbshapi.TerminalStatus{State: sbshapi.Ready, Pid: 42}})
+	if term := readDoc(t, path).Status.Terminals[0]; term.State != "" || term.Exit != nil {
+		t.Errorf("terminal = %+v, want the empty entry startTerminals wrote", term)
 	}
-	go func() {
-		defer close(done)
-		r.pollTerminal(ctx, "main", md, time.Millisecond)
-	}()
+}
+
+func TestTerminalStatusFromSbsh_Exit(t *testing.T) {
+	exitedAt := time.Date(2026, 11, 26, 19, 55, 0, 0, time.UTC)
+	zero, three := 0, 3
+	cases := []struct {
+		name string
+		st   sbshapi.TerminalStatus
+		want *v1beta1.TerminalExit
+	}{
+		{"running", sbshapi.TerminalStatus{State: sbshapi.Ready}, nil},
+		{
+			"clean exit",
+			sbshapi.TerminalStatus{State: sbshapi.Exited, ExitCode: &zero, ExitedAt: exitedAt},
+			&v1beta1.TerminalExit{Code: 0, At: exitedAt},
+		},
+		{
+			"exit 3",
+			sbshapi.TerminalStatus{State: sbshapi.Exited, ExitCode: &three, ExitedAt: exitedAt},
+			&v1beta1.TerminalExit{Code: 3, At: exitedAt},
+		},
+		{
+			"killed by SIGKILL",
+			sbshapi.TerminalStatus{State: sbshapi.Exited, ExitSignal: "SIGKILL", ExitedAt: exitedAt},
+			&v1beta1.TerminalExit{Code: 137, Signal: "SIGKILL", At: exitedAt},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := terminalStatusFromSbsh("main", tc.st).Exit
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("exit = %+v, want %+v", got, tc.want)
+			}
+			if got != nil && (got.Code != tc.want.Code || got.Signal != tc.want.Signal || !got.At.Equal(tc.want.At)) {
+				t.Errorf("exit = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestServeResult maps Serve's terminating cause and records the final
+// terminal document.
+func TestServeResult(t *testing.T) {
+	three := 3
+	exited := func(st sbshapi.TerminalStatus) terminalMetadataFunc {
+		return func() (*sbshapi.TerminalDoc, error) { return &sbshapi.TerminalDoc{Status: st}, nil }
+	}
+	notStarted := func() (*sbshapi.TerminalDoc, error) { return nil, errors.New("server: not started") }
+	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pollTerminal did not return after cancel")
+	cases := []struct {
+		name     string
+		ctx      context.Context
+		serveErr error
+		metadata terminalMetadataFunc
+		wantCode int // kuketty's exit code for run()'s result
+		wantExit *v1beta1.TerminalExit
+	}{
+		{
+			name:     "workload exit 3",
+			ctx:      context.Background(),
+			serveErr: &sbshserver.ExitError{Code: &three},
+			metadata: exited(sbshapi.TerminalStatus{State: sbshapi.Exited, ExitCode: &three}),
+			wantCode: 3,
+			wantExit: &v1beta1.TerminalExit{Code: 3},
+		},
+		{
+			name:     "workload killed",
+			ctx:      context.Background(),
+			serveErr: &sbshserver.ExitError{Signal: "SIGKILL"},
+			metadata: exited(sbshapi.TerminalStatus{State: sbshapi.Exited, ExitSignal: "SIGKILL"}),
+			wantCode: 137,
+			wantExit: &v1beta1.TerminalExit{Code: 137, Signal: "SIGKILL"},
+		},
+		{
+			name:     "operator shutdown",
+			ctx:      cancelled,
+			serveErr: context.Canceled,
+			metadata: exited(sbshapi.TerminalStatus{State: sbshapi.Exited}),
+			wantCode: 0,
+		},
+		{
+			// sbsh's teardown ends the wait on the workload without a status
+			// once kuketty's context is cancelled.
+			name:     "teardown without exit status after cancel",
+			ctx:      cancelled,
+			serveErr: errors.New("shell process exited (close cancelled tracked-exit wait)"),
+			metadata: exited(sbshapi.TerminalStatus{State: sbshapi.Exited}),
+			wantCode: 0,
+		},
+		{
+			name:     "internal failure",
+			ctx:      context.Background(),
+			serveErr: errors.New("server: StartTerminal: fork failed"),
+			metadata: notStarted,
+			wantCode: exitCodeInternal,
+		},
 	}
-	if got := readDoc(t, path).Status.Terminals[0].PID; got != 7 {
-		t.Errorf("pid = %d, want 7", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, path := newTestReporter(t)
+			r.startTerminals()
+			err := serveResult(tc.ctx, tc.serveErr, tc.metadata, r)
+			if code := exitCode(err, io.Discard); code != tc.wantCode {
+				t.Errorf("exit code = %d (err %v), want %d", code, err, tc.wantCode)
+			}
+			doc := readDoc(t, path)
+			if doc.Status.Phase != v1beta1.SupervisorPhaseExited {
+				t.Errorf("phase after Serve = %q, want Exited", doc.Status.Phase)
+			}
+			got := doc.Status.Terminals[0].Exit
+			if (got == nil) != (tc.wantExit == nil) ||
+				(got != nil && (got.Code != tc.wantExit.Code || got.Signal != tc.wantExit.Signal)) {
+				t.Errorf("terminal exit = %+v, want %+v", got, tc.wantExit)
+			}
+		})
 	}
 }
 

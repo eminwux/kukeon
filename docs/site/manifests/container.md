@@ -493,9 +493,11 @@ An attachable container's kuketty wrapper is the container's terminal supervisor
 | `current`          | The repo name or stage index in progress, or the one that failed                                                                                        |
 | `error`            | A failure outside any repo or stage: the config, the control socket, the log, the git plan or the terminal start                                        |
 | `attachedTerminal` | The terminal whose workload exit becomes the wrapper's exit code; always `main` today                                                                   |
-| `terminals[]`      | `id`, `state` (as sbsh reports it: `Initializing`, `Starting`, `Ready`, `Exited`, …), `pid`, `attachers`, `lastAttachedAt`, `exit` (`code`)             |
+| `terminals[]`      | `id`, `state` (as sbsh reports it: `Initializing`, `Starting`, `Ready`, `Exited`, …), `pid`, `attachers`, `lastAttachedAt`, `exit` (`code`, `signal`)   |
 | `exit`             | `code` and `at`: the code the wrapper exited with. Absent while it runs, and when it was killed. Dropped when it differs from containerd's exit code.   |
 | `updatedAt`        | When the wrapper last wrote the document                                                                                                                |
+
+sbsh reports each change of a terminal (its state, an attach or detach, its exit) to the wrapper as it happens, so `terminals[]` is current without polling. `terminals[].exit` is how the workload exited: its `code`, or, when a signal killed it, the `signal` (`SIGKILL`) with a `code` of 128 plus its number, as a shell reports it; `at` is when sbsh saw the exit.
 
 kukeond deletes a leftover `tty/supervisor.json` before every start, so a record from the previous run is never credited to the next one. The workload can write to `tty/`, so the document is display data: kukeond reads at most 256 KiB, refuses symlinks and other non-regular files, requires `apiVersion: v1beta1` and `kind: TerminalSupervisor`, and logs why it ignored a document. Without a valid document the last reported values stay only once the task is gone (after a wind-down or a reboot). A running or freshly exited task with no valid document shows no `supervisor` or `repos`. If it failed, its reason is `SupervisorStatusUnavailable`, never the previous run's. A container started by a kuketty older than its kukeond writes no document until it is recreated.
 
