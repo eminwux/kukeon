@@ -1033,8 +1033,9 @@ func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
 
 // TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep builds a RunPath
 // resembling the real `/opt/kukeon` layout — a per-container kuketty tty
-// directory holding a live attach socket at 0o660, a rendered
-// kuketty-metadata.json, and a swept cell metadata file — then drives the
+// directory holding a live attach socket at 0o660, a rendered container.json,
+// an unrelated container.json outside any container directory, and a swept
+// cell metadata file — then drives the
 // init ownership sweep through skipLiveCellState (the predicate
 // applyKukeonOwnership wires into sysuser.ChownTreeAndChmodSkip). It asserts
 // the live socket and the rendered metadata file keep their modes while the
@@ -1043,7 +1044,7 @@ func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
 // in CI (the production sweep targets root:kukeon).
 func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
 	runPath := t.TempDir()
-	// data/<realm>/<space>/<stack>/<cell>/<container>/{tty/,kuketty-metadata.json}
+	// data/<realm>/<space>/<stack>/<cell>/<container>/{tty/terminals/main/,container.json}
 	containerDir := filepath.Join(
 		runPath, consts.KukeonMetadataSubdir,
 		"default.kukeon.io", "kukeon", "kukeon", "kukeond", "kukeond",
@@ -1052,7 +1053,11 @@ func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
 	if err := os.MkdirAll(ttyDir, 0o2750); err != nil {
 		t.Fatalf("mkdir tty dir: %v", err)
 	}
-	socket := filepath.Join(ttyDir, consts.KukeonContainerSocketFile)
+	terminalDir := filepath.Join(ttyDir, consts.KukeonContainerTerminalsDir, consts.KukeonContainerMainTerminal)
+	if err := os.MkdirAll(terminalDir, 0o2750); err != nil {
+		t.Fatalf("mkdir terminal dir: %v", err)
+	}
+	socket := filepath.Join(terminalDir, consts.KukeonContainerSocketFile)
 	if err := os.WriteFile(socket, []byte("x"), 0o660); err != nil {
 		t.Fatalf("write socket: %v", err)
 	}
@@ -1066,8 +1071,14 @@ func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
 	if err := os.WriteFile(renderedMeta, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write rendered metadata: %v", err)
 	}
-	// A daemon metadata file the sweep SHOULD touch (cell metadata.json).
+	// A file named container.json with no tty/ sibling is not kuketty's input
+	// and must be swept (issue #1721).
 	cellDir := filepath.Dir(containerDir)
+	unrelated := filepath.Join(filepath.Dir(cellDir), ctr.AttachableMetadataFile)
+	if err := os.WriteFile(unrelated, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write unrelated container.json: %v", err)
+	}
+	// A daemon metadata file the sweep SHOULD touch (cell metadata.json).
 	cellMeta := filepath.Join(cellDir, consts.KukeonMetadataFile)
 	if err := os.WriteFile(cellMeta, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write cell metadata: %v", err)
@@ -1101,6 +1112,12 @@ func TestSkipLiveCellState_PreservesLiveSocketUnderInitSweep(t *testing.T) {
 		t.Fatalf("stat tty dir: %v", err)
 	} else if got := info.Mode().Perm(); got != 0o750 {
 		t.Errorf("tty dir mode: got %#o want 0o750 (untouched by sweep)", got)
+	}
+	// Unrelated container.json: swept to the file mode.
+	if info, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("stat unrelated container.json: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("unrelated container.json mode: got %#o want 0o640 (swept)", got)
 	}
 	// Daemon cell metadata: swept to the file mode.
 	if info, err := os.Stat(cellMeta); err != nil {

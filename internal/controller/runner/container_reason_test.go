@@ -79,12 +79,12 @@ func TestDeriveContainerReason(t *testing.T) {
 			status: intmodel.ContainerStatus{
 				State: intmodel.ContainerStateError, ExitCode: 70,
 				Supervisor: &v1beta1.SupervisorStatus{
-					Phase: v1beta1.SupervisorPhaseConfig, Error: "listen on /run/kukeon/tty/socket: denied", Exit: exited(70),
+					Phase: v1beta1.SupervisorPhaseConfig, Error: "listen on /run/kukeon/tty/terminals/main/control.sock: denied", Exit: exited(70),
 				},
 			},
 			attachable: true, doc: valid,
 			wantReason:  v1beta1.ContainerReasonSupervisorFailed,
-			wantMessage: []string{"phase Config", "listen on /run/kukeon/tty/socket"},
+			wantMessage: []string{"phase Config", "listen on /run/kukeon/tty/terminals/main/control.sock"},
 		},
 		{
 			name: "supervisor terminated",

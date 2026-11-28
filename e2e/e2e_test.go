@@ -140,7 +140,7 @@ func runBinary(t *testing.T, env []string, command string, args ...string) (int,
 // getRandomRunPath returns a unique, absolute run path for the test. When
 // the t.TempDir-rooted path would push the *deep* per-container kuketty
 // socket path (`<runPath>/data/<realm>/<space>/<stack>/<cell>/<container>/
-// tty/socket`) over Linux's UNIX_PATH_MAX, the helper falls back to a
+// tty/terminals/main/control.sock`) over Linux's UNIX_PATH_MAX, the helper falls back to a
 // short /tmp prefix and registers a cleanup so the suite stays SUN_PATH-
 // safe regardless of how Go names the t.TempDir parent (issue #521).
 //
@@ -175,15 +175,16 @@ func getRandomRunPath(t *testing.T) string {
 
 // deepSocketPathFits reports whether the longest plausible per-container
 // kuketty socket path under runPath fits SUN_PATH. The longest e2e suffix
-// is `/data/<realm>/<space>/<stack>/<cell>/<container>/tty/socket` with
+// is `/data/<realm>/<space>/<stack>/<cell>/<container>/tty/terminals/main/
+// control.sock` with
 // realm/space/stack/cell names produced by generateUnique*Name (`e-r-XX`,
 // `e-sp-XX`, `e-st-XX`, `e-ce-XX`) and the container name fixed to
-// "work" by the attach fixture — 52 bytes of suffix all in. The check is
+// "work" by the attach fixture — 73 bytes of suffix all in. The check is
 // against the deep path, not the SUN_PATH-safe symlink the runner stages,
 // because deep-path regressions are the failure mode this fallback
 // defends against (the symlink budget is comfortably wider).
 func deepSocketPathFits(runPath string) bool {
-	const deepSocketSuffixLen = len("/data/e-r-XX/e-sp-XX/e-st-XX/e-ce-XX/work/tty/socket")
+	const deepSocketSuffixLen = len("/data/e-r-XX/e-sp-XX/e-st-XX/e-ce-XX/work/tty/terminals/main/control.sock")
 	return len(runPath)+deepSocketSuffixLen <= consts.KukeonMaxSocketPath
 }
 

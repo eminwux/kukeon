@@ -58,10 +58,16 @@ import (
 )
 
 // defaultConfigPath is the fixed in-container path of the kukeond-rendered
-// ContainerDoc. The daemon bind-mounts the per-container metadata file over
+// ContainerDoc. The daemon bind-mounts the per-container container.json over
 // this path at OCI spec build time (see internal/ctr/attachable.go). Kept in
 // sync with ctr.AttachableMetadataPath.
-const defaultConfigPath = "/.kukeon/kuketty/metadata.json"
+const defaultConfigPath = "/.kukeon/kuketty/container.json"
+
+// legacyConfigPath is where a container created before issue #1721 has its
+// ContainerDoc mounted. kuketty never reads it: finding it in place of
+// defaultConfigPath means the container must be recreated. Kept in sync with
+// ctr.AttachableLegacyMetadataPath.
+const legacyConfigPath = "/.kukeon/kuketty/metadata.json"
 
 // defaultLogLevel is the level kuketty logs at when the ContainerDoc carries
 // none. The daemon normally stamps a level; this covers a malformed doc.
@@ -231,8 +237,17 @@ func run(args []string, reporter *supervisorReporter) error {
 		return err
 	}
 
+	if err = refuseLegacyLayout(configPath, legacyConfigPath); err != nil {
+		return err
+	}
 	doc, err := loadContainerDoc(configPath)
 	if err != nil {
+		return err
+	}
+	// The daemon creates the terminal's directory before the task starts and
+	// sbsh does not create an embedder-owned one; this only covers a daemon
+	// that did not (issue #1721).
+	if err = ensureTerminalDir(attachableMainTerminalDir); err != nil {
 		return err
 	}
 	name := doc.Metadata.Name
@@ -406,6 +421,41 @@ func parseArgs(args []string) (string, error) {
 	return *configPath, nil
 }
 
+// errLegacyLayout is returned when kuketty finds its ContainerDoc mounted at
+// the path used before issue #1721: the container was created with the old
+// tty layout and its mounts cannot change, so it must be recreated.
+var errLegacyLayout = errors.New("container was created with the pre-#1721 tty layout; " +
+	"recreate it (kuke delete cell <name>, then kuke apply -f or kuke run again)")
+
+// refuseLegacyLayout reports errLegacyLayout when configPath is missing and
+// the pre-#1721 mount point legacyPath exists instead. kukeond refuses to
+// start such a container (spec_hash.go); this covers one that started anyway.
+func refuseLegacyLayout(configPath, legacyPath string) error {
+	if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if !fileExists(legacyPath) {
+		return nil
+	}
+	return fmt.Errorf("%w: found %s, not %s", errLegacyLayout, legacyPath, configPath)
+}
+
+// fileExists reports whether path can be stat'ed.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// ensureTerminalDir creates the terminal's directory when it is missing. The
+// mode matches what the daemon leaves after its chown (owner rwx, group r-x);
+// the setgid tty directory hands down the kukeon group.
+func ensureTerminalDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create terminal directory %s: %w", dir, err)
+	}
+	return nil
+}
+
 // loadContainerDoc reads the bind-mounted config file, decodes it as a kukeon
 // ContainerDoc, and validates the APIVersion + Kind discriminator so a kuketty
 // binary that loaded a malformed (or wrong-schema) file refuses cleanly rather
@@ -440,8 +490,8 @@ func loadContainerDoc(path string) (*v1beta1.ContainerDoc, error) {
 // at the matching mode (per v0.11.1's pkg/logging package contract). An
 // empty path falls through to a discard logger for test fixtures that
 // bypass pkg/builder.BuildTerminalSpec; in the OCI-injection path the
-// daemon always stamps Spec.LogFile = ctr.AttachableKukettyLogPath
-// (issue #599).
+// log file is Tty.LogFile or ctr.AttachableSupervisorLogPath
+// (issues #599, #1721).
 //
 // loglevel is the operator-supplied Tty.LogLevel from the cell schema,
 // already normalized to "info" by the renderer when the cell left it

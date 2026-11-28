@@ -50,28 +50,32 @@ const (
 	// kuketty's unlink-and-recreate of the socket inode stays host-visible.
 	AttachableTTYDir = "/run/kukeon/tty"
 
+	// AttachableMainTerminalDir is the in-container directory of the one
+	// terminal kuketty serves today. It holds the terminal's control socket,
+	// capture and sbsh's terminal.json; the daemon creates its host peer
+	// (fs.ContainerMainTerminalDir) before the task starts. Issue #1721.
+	AttachableMainTerminalDir = AttachableTTYDir + "/" + consts.KukeonContainerTerminalsDir +
+		"/" + consts.KukeonContainerMainTerminal
+
 	// AttachableSocketPath is the in-container path of the kuketty attach
-	// control socket. kuketty listens here; the host peer is the bind-
-	// mount source directory's `socket` entry, which `kuke attach`
-	// connects to.
-	AttachableSocketPath = AttachableTTYDir + "/socket"
+	// control socket. kuketty listens here; the host peer is
+	// fs.ContainerSocketPath, which `kuke attach` reaches through its short
+	// symlink.
+	AttachableSocketPath = AttachableMainTerminalDir + "/" + consts.KukeonContainerSocketFile
 
-	// AttachableCapturePath is the declared in-container path for the
-	// kuketty capture transcript. Honored starting in phase 2 (#288);
-	// kuketty does not yet write the transcript in phase 1b.
-	AttachableCapturePath = AttachableTTYDir + "/capture"
+	// AttachableCapturePath is the in-container path of the main terminal's
+	// capture transcript (sbsh's default raw format). The host peer is
+	// fs.ContainerCapturePath, which `kuke log` reads.
+	AttachableCapturePath = AttachableMainTerminalDir + "/" + consts.KukeonContainerCaptureFile
 
-	// AttachableKukettyLogPath is the in-container path of the kuketty
-	// wrapper's own slog output. Peer to AttachableSocketPath and
-	// AttachableCapturePath inside the per-container TTY directory bind
-	// mount, so the host-side ContainerKukettyLogPath resolves to the same
-	// inode. The path is daemon-controlled — operators do not configure it
-	// per cell — so this file always exists after first attach regardless
-	// of cell YAML. Distinct from AttachableCapturePath (the workload's
-	// tty byte stream); this carries the wrapper's own debug log
-	// (issue #599, reversing #289 phase 3's opt-in design for the kuketty-
-	// process log specifically).
-	AttachableKukettyLogPath = AttachableTTYDir + "/" + consts.KukeonContainerKukettyLogFile
+	// AttachableSupervisorLogPath is the default in-container path of the
+	// terminal supervisor's (kuketty's) own slog output, next to
+	// supervisor.json inside the tty bind mount, so the host-side
+	// fs.ContainerSupervisorLogPath resolves to the same inode.
+	// spec.containers[].tty.logFile overrides it. Distinct from
+	// AttachableCapturePath (the workload's tty byte stream). Issues #599,
+	// #1721.
+	AttachableSupervisorLogPath = AttachableTTYDir + "/" + consts.KukeonContainerSupervisorLogFile
 
 	// AttachableMetadataDir is the in-container directory where the
 	// kukeond-rendered terminal metadata file lives. Kept under
@@ -81,15 +85,22 @@ const (
 	AttachableMetadataDir = "/.kukeon/kuketty"
 
 	// AttachableMetadataPath is the fixed in-container path kuketty reads
-	// its runtime configuration from. The daemon bind-mounts the
-	// per-container metadata file over this path at OCI spec build time.
-	// Kept in sync with cmd/kuketty/main.go's defaultConfigPath constant.
-	AttachableMetadataPath = AttachableMetadataDir + "/metadata.json"
+	// its runtime configuration (the rendered ContainerDoc) from. The daemon
+	// bind-mounts the per-container container.json over this path at OCI
+	// spec build time. Kept in sync with cmd/kuketty/main.go's
+	// defaultConfigPath constant.
+	AttachableMetadataPath = AttachableMetadataDir + "/" + AttachableMetadataFile
 
 	// AttachableMetadataFile is the basename of the host-side per-container
-	// metadata file rendered into the directory above HostTTYDir before
-	// the workload container starts.
-	AttachableMetadataFile = "kuketty-metadata.json"
+	// ContainerDoc kuketty reads, rendered into the container directory (the
+	// parent of HostTTYDir) before the workload container starts, and of its
+	// in-container mount point. Issue #1721.
+	AttachableMetadataFile = "container.json"
+
+	// AttachableLegacyMetadataPath is where kuketty read its ContainerDoc
+	// before issue #1721. A container created before that change still has
+	// its bind mount here; kuketty reports it as needing to be recreated.
+	AttachableLegacyMetadataPath = AttachableMetadataDir + "/metadata.json"
 
 	// AttachableSocketMode is the octal mode applied to the per-container
 	// attach control socket when SocketGID is configured. 0660 = rw for
@@ -122,8 +133,8 @@ type AttachableInjection struct {
 
 	// HostTTYDir is the host path of the per-container tty directory that
 	// will be bind-mounted at AttachableTTYDir inside the container. The
-	// host-visible socket that `kuke attach` connects to is the `socket`
-	// entry inside this directory.
+	// host-visible socket that `kuke attach` connects to is
+	// terminals/main/control.sock inside this directory.
 	HostTTYDir string
 
 	// HostMetadataPath is the host path of the per-container kuketty

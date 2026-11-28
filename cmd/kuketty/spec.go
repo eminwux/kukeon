@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	sbshapi "github.com/eminwux/sbsh/pkg/api"
 	sbshbuilder "github.com/eminwux/sbsh/pkg/builder"
@@ -40,19 +41,25 @@ const (
 	// ctr.AttachableTTYDir.
 	attachableTTYDir = "/run/kukeon/tty"
 
+	// attachableMainTerminalDir is the directory of the one terminal kuketty
+	// serves: its control socket, capture and sbsh's terminal.json live here.
+	// The daemon creates it; kuketty re-creates it as a guard (ensureTerminalDir).
+	// Mirrors ctr.AttachableMainTerminalDir. Issue #1721.
+	attachableMainTerminalDir = attachableTTYDir + "/" + consts.KukeonContainerTerminalsDir +
+		"/" + consts.KukeonContainerMainTerminal
+
 	// attachableSocketPath is where kuketty listens for the attach control
 	// connection. Mirrors ctr.AttachableSocketPath.
-	attachableSocketPath = attachableTTYDir + "/socket"
+	attachableSocketPath = attachableMainTerminalDir + "/" + consts.KukeonContainerSocketFile
 
 	// attachableCapturePath is where sbsh writes the workload capture
 	// transcript. Mirrors ctr.AttachableCapturePath.
-	attachableCapturePath = attachableTTYDir + "/capture"
+	attachableCapturePath = attachableMainTerminalDir + "/" + consts.KukeonContainerCaptureFile
 
-	// attachableKukettyLogPath is the default in-container path of kuketty's
-	// own slog output, peer to the socket/capture inodes inside the tty bind
-	// mount. Mirrors ctr.AttachableKukettyLogPath
-	// (= AttachableTTYDir + "/" + consts.KukeonContainerKukettyLogFile).
-	attachableKukettyLogPath = attachableTTYDir + "/kuketty.log"
+	// attachableSupervisorLogPath is the default in-container path of
+	// kuketty's own slog output, next to supervisor.json inside the tty bind
+	// mount. Mirrors ctr.AttachableSupervisorLogPath.
+	attachableSupervisorLogPath = attachableTTYDir + "/" + consts.KukeonContainerSupervisorLogFile
 
 	// attachableSocketMode / attachableCaptureMode / attachableLogFileMode are
 	// the octal modes applied to the respective inodes when a kukeon group GID
@@ -160,24 +167,24 @@ func buildTerminalSpec(
 		return nil, fmt.Errorf("build kuketty terminal spec: %w", err)
 	}
 
-	// Anchor sbsh's metadata.json inside the per-container tty bind mount
-	// (issue #672). sbsh writes metadata.json via an atomic
-	// create-temp-then-rename that needs write+exec on the holding directory at
-	// every point in the terminal lifecycle — create AND close. The legacy
-	// layout (RunPath/terminals/<id>/, mode 0700, owned by the creating uid)
-	// denied the close-time write whenever the closing uid differed from the
-	// creating uid. We pin MetadataDir to attachableTTYDir — the directory the
-	// daemon bind-mounts and attachablePostCreateChown re-owns to the resolved
-	// container uid — so the holding dir is always the kukeon-owned, host-
-	// visible tty dir. Setting it explicitly (rather than leaning on sbsh's
-	// implicit "MetadataDir = dirname(LogFile) when all three artifact paths are
-	// caller-supplied" derivation) keeps metadata.json in the bind mount even
-	// when an operator pins Tty.LogFile outside it, and survives a future
-	// refactor that drops one of the WithSocketFile/WithCaptureFile/WithLogFile
-	// options (which would otherwise empty MetadataDir and resurrect the
-	// terminals/<id>/ layout). No basename collision: kuketty's own rendered doc
-	// is kuketty-metadata.json; sbsh writes metadata.json.
-	terminalSpec.MetadataDir = attachableTTYDir
+	// Anchor sbsh's metadata document in the main terminal's directory inside
+	// the per-container tty bind mount (issues #672, #1721). sbsh writes it via
+	// an atomic create-temp-then-rename that needs write+exec on the holding
+	// directory at every point in the terminal lifecycle — create AND close.
+	// sbsh's legacy layout (RunPath/terminals/<id>/, mode 0700, owned by the
+	// creating uid) denied the close-time write whenever the closing uid
+	// differed from the creating uid. The daemon pre-creates
+	// attachableMainTerminalDir and attachablePostCreateChown re-owns it to
+	// the resolved container uid, so the holding dir is always kukeon-owned
+	// and host-visible. sbsh does not create an embedder-owned MetadataDir;
+	// ensureTerminalDir covers a daemon that did not. Setting it explicitly
+	// (rather than leaning on sbsh's implicit "MetadataDir = dirname(LogFile)"
+	// derivation) keeps the document in the terminal's directory even when an
+	// operator pins Tty.LogFile elsewhere. The file is named terminal.json, so
+	// every file is named after the level it belongs to (container.json for
+	// kuketty's input, supervisor.json for kuketty's status).
+	terminalSpec.MetadataDir = attachableMainTerminalDir
+	terminalSpec.MetadataFile = consts.KukeonContainerTerminalFile
 
 	return terminalSpec, nil
 }
@@ -194,15 +201,15 @@ func workloadArgv(spec v1beta1.ContainerSpec) []string {
 }
 
 // resolveTtyLogFile returns the in-container path kuketty's slog output lands
-// at: the operator-pinned Tty.LogFile when set, else the daemon-controlled
-// default peer to the capture inode inside the tty bind mount. The always-on
+// at: the operator-pinned Tty.LogFile when set, else tty/supervisor.log
+// inside the tty bind mount. The always-on
 // invariant holds either way — the return is never empty, so kuketty's
 // openTerminalLogger never falls through to the discard logger (#599).
 func resolveTtyLogFile(t *v1beta1.ContainerTty) string {
 	if t != nil && t.LogFile != "" {
 		return t.LogFile
 	}
-	return attachableKukettyLogPath
+	return attachableSupervisorLogPath
 }
 
 // resolveTtyLogLevel reads the log level the daemon resolved and stamped onto

@@ -28,8 +28,16 @@ Kukeon keeps its own authoritative state on disk, rooted at a single **run path*
 │   │               ├── etc-hosts               (the cell's /etc/hosts)
 │   │               ├── etc-hostname            (the cell's /etc/hostname)
 │   │               └── <container>/
-│   │                   ├── log                 (stdout/stderr of a non-attachable container)
-│   │                   └── tty/                (socket, capture and kuketty.log of an attachable container)
+│   │                   ├── container.log       (stdout/stderr of a non-attachable container)
+│   │                   ├── container.json      (attachable: the ContainerDoc kuketty reads)
+│   │                   └── tty/                (attachable: mounted at /run/kukeon/tty)
+│   │                       ├── supervisor.json (kuketty's status)
+│   │                       ├── supervisor.log  (kuketty's log; `kuke log --supervisor`)
+│   │                       └── terminals/
+│   │                           └── main/
+│   │                               ├── control.sock  (`kuke attach` dials it)
+│   │                               ├── capture.raw   (the terminal's output; `kuke log`)
+│   │                               └── terminal.json (sbsh's terminal metadata)
 │   └── kuke-system/                            (system realm; structure identical to above)
 │       ├── healthreports/                      (system realm only)
 │       └── kukeon/
@@ -37,7 +45,7 @@ Kukeon keeps its own authoritative state on disk, rooted at a single **run path*
 │               └── kukeond/
 │                   ├── metadata.json
 │                   └── kukeond/
-│                       └── log
+│                       └── container.log
 ├── locks/                                      (space network lock files)
 └── s/                                          (short symlinks to container tty sockets)
 ```

@@ -26,7 +26,10 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kfs "github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func TestReadContainerLogFile(t *testing.T) {
@@ -60,5 +63,81 @@ func TestReadContainerLogFile(t *testing.T) {
 		if !errors.Is(err, fs.ErrPermission) || kukeonv1.KindFromError(err) != "PermissionDenied" {
 			t.Fatalf("permission: %v", err)
 		}
+	}
+}
+
+// TestSupervisorLogPath pins how `kuke log --supervisor` finds the supervisor
+// log on the host (issue #1721).
+func TestSupervisorLogPath(t *testing.T) {
+	const runPath = "/opt/kukeon"
+	base := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r", SpaceName: "s", StackName: "st", CellName: "c", Attachable: true,
+	}
+	ttyDir := kfs.ContainerTTYDir(runPath, "r", "s", "st", "c", "work")
+	withLogFile := func(path string) intmodel.ContainerSpec {
+		spec := base
+		spec.Tty = &intmodel.ContainerTty{LogFile: path}
+		return spec
+	}
+	nonAttachable := base
+	nonAttachable.Attachable = false
+
+	cases := []struct {
+		name    string
+		spec    intmodel.ContainerSpec
+		want    string
+		wantErr error
+		errHas  string
+	}{
+		{name: "default", spec: base, want: ttyDir + "/supervisor.log"},
+		{name: "empty tty", spec: withLogFile(""), want: ttyDir + "/supervisor.log"},
+		{name: "override inside tty", spec: withLogFile("/run/kukeon/tty/logs/k.log"), want: ttyDir + "/logs/k.log"},
+		{name: "override uncleaned", spec: withLogFile("/run/kukeon/tty/./x/../k.log"), want: ttyDir + "/k.log"},
+		{
+			name: "override outside tty", spec: withLogFile("/var/log/kuketty.log"),
+			wantErr: errdefs.ErrSupervisorLogUnreadable, errHas: "/var/log/kuketty.log",
+		},
+		{
+			name: "override escaping tty", spec: withLogFile("/run/kukeon/tty/../secret"),
+			wantErr: errdefs.ErrSupervisorLogUnreadable, errHas: "/run/kukeon/tty/../secret",
+		},
+		{
+			name: "override sibling prefix", spec: withLogFile("/run/kukeon/tty2/k.log"),
+			wantErr: errdefs.ErrSupervisorLogUnreadable,
+		},
+		{
+			name: "override tty dir itself", spec: withLogFile("/run/kukeon/tty"),
+			wantErr: errdefs.ErrSupervisorLogUnreadable,
+		},
+		{
+			name: "relative override", spec: withLogFile("tty/k.log"),
+			wantErr: errdefs.ErrSupervisorLogUnreadable,
+		},
+		{name: "not attachable", spec: nonAttachable, wantErr: errdefs.ErrNoSupervisor},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := supervisorLogPath(runPath, tc.spec)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) || !strings.Contains(err.Error(), tc.errHas) {
+					t.Fatalf("supervisorLogPath = %q, %v; want %v naming %q", got, err, tc.wantErr, tc.errHas)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("supervisorLogPath = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestReadContainerLog_StreamEcho pins that every result echoes the stream,
+// errors included, so a client can tell a current kukeond from one that
+// predates ContainerLogRequest.Stream.
+func TestReadContainerLog_StreamEcho(t *testing.T) {
+	c := &Client{}
+	res, err := c.ReadContainerLog(t.Context(), v1beta1.ContainerDoc{}, kukeonv1.ContainerLogRequest{Stream: "bogus"})
+	if !errors.Is(err, errdefs.ErrContainerLogStreamInvalid) || res.Stream != "bogus" {
+		t.Fatalf("bogus stream: %+v, %v", res, err)
 	}
 }

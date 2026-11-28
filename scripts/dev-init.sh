@@ -111,8 +111,13 @@ migrate_space_subnet_key() {
 # directory (`/run/kukeon-dev/`) so its lifecycle never touches the
 # parent's bind. The host-run path (probe absent) is unchanged.
 NESTED_PROBE="/.kukeon/bin/kuketty"
-PARENT_ATTACH_SOCKET="/run/kukeon/tty/socket"
-PARENT_ATTACH_METADATA="/.kukeon/kuketty/metadata.json"
+# The parent host's attach plumbing follows the parent's kukeon version, not
+# this checkout's: issue #1721 moved it from tty/socket and
+# kuketty/metadata.json. The pre-#1721 pair is picked below when only it exists.
+PARENT_ATTACH_SOCKET="/run/kukeon/tty/terminals/main/control.sock"
+PARENT_ATTACH_METADATA="/.kukeon/kuketty/container.json"
+PARENT_ATTACH_SOCKET_PRE_1721="/run/kukeon/tty/socket"
+PARENT_ATTACH_METADATA_PRE_1721="/.kukeon/kuketty/metadata.json"
 NESTED_SOCKET_DIR="/run/kukeon-dev"
 NESTED_SOCKET_PATH="${NESTED_SOCKET_DIR}/kukeond.sock"
 NESTED_HOST_URI="unix://${NESTED_SOCKET_PATH}"
@@ -130,6 +135,12 @@ if [ -e "${NESTED_PROBE}" ]; then
     # the resolved configuration is what gets checked.
     if [ "${KUKEON_PROFILE}" != "dev" ]; then
         echo "KUKEON_PROFILE is not 'dev'; the default 10.88.0.0/16 space subnet range usually overlaps the parent cell."
+    fi
+
+    if [ ! -e "${PARENT_ATTACH_METADATA}" ] && [ -e "${PARENT_ATTACH_METADATA_PRE_1721}" ]; then
+        echo "Parent host runs a kukeon from before #1721; checking its attach plumbing at the old paths."
+        PARENT_ATTACH_SOCKET="${PARENT_ATTACH_SOCKET_PRE_1721}"
+        PARENT_ATTACH_METADATA="${PARENT_ATTACH_METADATA_PRE_1721}"
     fi
 
     # Snapshot the parent's per-container attach plumbing so the EXIT trap
@@ -684,8 +695,8 @@ ATTACH_SMOKE_CONTAINER="work"
 # that broke on arm64 hosts (#1158).
 ATTACH_SMOKE_IMAGE_REF="kukeon.internal/attach-smoke:${KUKEOND_VERSION}"
 ATTACH_SMOKE_BASE="${METADATA_ROOT}/${ATTACH_SMOKE_REALM}/${ATTACH_SMOKE_SPACE}/${ATTACH_SMOKE_STACK}/${ATTACH_SMOKE_CELL}/${ATTACH_SMOKE_CONTAINER}"
-ATTACH_SMOKE_SOCKET="${ATTACH_SMOKE_BASE}/tty/socket"
-ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/kuketty-metadata.json"
+ATTACH_SMOKE_SOCKET="${ATTACH_SMOKE_BASE}/tty/terminals/main/control.sock"
+ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/container.json"
 # Pin to the same suffix the daemon resolves for the dev-init-attach realm
 # (defaults: kukeon.io; KUKEON_PROFILE=dev: dev.kukeon.io). KUKEOND_NS
 # encodes the active suffix as `kuke-system.<suffix>`; strip the

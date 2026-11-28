@@ -86,8 +86,8 @@ func TestBuildTerminalSpec_KukeonGroupSet(t *testing.T) {
 	if out.CaptureGID == nil || *out.CaptureGID != kukeonGID {
 		t.Errorf("CaptureGID = %v, want pointer to %d", out.CaptureGID, kukeonGID)
 	}
-	if out.LogFile != attachableKukettyLogPath {
-		t.Errorf("LogFile = %q, want %q", out.LogFile, attachableKukettyLogPath)
+	if out.LogFile != attachableSupervisorLogPath {
+		t.Errorf("LogFile = %q, want %q", out.LogFile, attachableSupervisorLogPath)
 	}
 	if out.LogFileMode.Perm() != 0o640 {
 		t.Errorf("LogFileMode perm = %#o, want 0640", out.LogFileMode.Perm())
@@ -126,8 +126,8 @@ func TestBuildTerminalSpec_NoKukeonGroup(t *testing.T) {
 	if out.CaptureGID != nil {
 		t.Errorf("CaptureGID = %v, want nil (no kukeon group)", out.CaptureGID)
 	}
-	if out.LogFile != attachableKukettyLogPath {
-		t.Errorf("LogFile = %q, want %q (always-on)", out.LogFile, attachableKukettyLogPath)
+	if out.LogFile != attachableSupervisorLogPath {
+		t.Errorf("LogFile = %q, want %q (always-on)", out.LogFile, attachableSupervisorLogPath)
 	}
 	if out.LogFileMode.Perm() != 0 {
 		t.Errorf("LogFileMode perm = %#o, want 0 (no kukeon group)", out.LogFileMode.Perm())
@@ -166,8 +166,8 @@ func TestBuildTerminalSpec_KukettyLogAlwaysOn(t *testing.T) {
 				t,
 				v1beta1.ContainerSpec{ID: "c1", Command: "/bin/sh", KukeonGroupGID: tc.kukeonGID, Tty: tc.tty},
 			)
-			if out.LogFile != attachableKukettyLogPath {
-				t.Errorf("LogFile = %q, want %q (always-on)", out.LogFile, attachableKukettyLogPath)
+			if out.LogFile != attachableSupervisorLogPath {
+				t.Errorf("LogFile = %q, want %q (always-on)", out.LogFile, attachableSupervisorLogPath)
 			}
 			if uint32(out.LogFileMode.Perm()) != tc.wantMode {
 				t.Errorf("LogFileMode perm = %#o, want %#o", out.LogFileMode.Perm(), tc.wantMode)
@@ -219,8 +219,8 @@ func TestBuildTerminalSpec_LogFileOverride(t *testing.T) {
 		tty     *v1beta1.ContainerTty
 		wantLog string
 	}{
-		{"no Tty: daemon default", nil, attachableKukettyLogPath},
-		{"empty LogFile: daemon default", &v1beta1.ContainerTty{Prompt: "x> "}, attachableKukettyLogPath},
+		{"no Tty: daemon default", nil, attachableSupervisorLogPath},
+		{"empty LogFile: daemon default", &v1beta1.ContainerTty{Prompt: "x> "}, attachableSupervisorLogPath},
 		{
 			"override inside bind mount",
 			&v1beta1.ContainerTty{LogFile: attachableTTYDir + "/custom.log"},
@@ -245,8 +245,9 @@ func TestBuildTerminalSpec_LogFileOverride(t *testing.T) {
 	}
 }
 
-// TestBuildTerminalSpec_MetadataDirAnchored locks #672: metadata.json is always
-// written into the per-container tty bind mount (attachableTTYDir), the dir the
+// TestBuildTerminalSpec_MetadataDirAnchored locks #672 and #1721: sbsh's
+// terminal.json is always written into the main terminal's directory inside the
+// per-container tty bind mount (tty/terminals/main/), the dir the
 // daemon owns and attachablePostCreateChown re-owns to the resolved container
 // uid — never the legacy single-owner RunPath/terminals/<id>/ subtree whose
 // 0700/creating-uid ownership denied the close-time write. The anchor must hold
@@ -266,8 +267,22 @@ func TestBuildTerminalSpec_MetadataDirAnchored(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out := buildSpec(t, v1beta1.ContainerSpec{ID: "c1", Command: "/bin/sh", KukeonGroupGID: 986, Tty: tc.tty})
-			if out.MetadataDir != attachableTTYDir {
-				t.Errorf("MetadataDir = %q, want %q (anchored in tty bind mount)", out.MetadataDir, attachableTTYDir)
+			const wantDir = "/run/kukeon/tty/terminals/main"
+			if out.MetadataDir != wantDir {
+				t.Errorf(
+					"MetadataDir = %q, want %q (the main terminal's dir in the tty bind mount)",
+					out.MetadataDir,
+					wantDir,
+				)
+			}
+			if out.MetadataFile != "terminal.json" {
+				t.Errorf("MetadataFile = %q, want %q (issue #1721)", out.MetadataFile, "terminal.json")
+			}
+			if got, want := out.SocketFile, wantDir+"/control.sock"; got != want {
+				t.Errorf("SocketFile = %q, want %q", got, want)
+			}
+			if got, want := out.CaptureFile, wantDir+"/capture.raw"; got != want {
+				t.Errorf("CaptureFile = %q, want %q", got, want)
 			}
 		})
 	}

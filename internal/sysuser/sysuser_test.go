@@ -294,7 +294,7 @@ func TestChownTreeAndChmodSkip_PrunesSubtreeAndFile(t *testing.T) {
 		t.Fatalf("chmod pruned file: %v", err)
 	}
 	// A single file (not a directory) that is skipped by basename.
-	skippedFile := filepath.Join(root, "kuketty-metadata.json")
+	skippedFile := filepath.Join(root, "container.json")
 	if err := os.WriteFile(skippedFile, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write skipped file: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestChownTreeAndChmodSkip_PrunesSubtreeAndFile(t *testing.T) {
 		if info.IsDir() {
 			return info.Name() == "tty"
 		}
-		return info.Name() == "kuketty-metadata.json"
+		return info.Name() == "container.json"
 	}
 
 	uid, gid := os.Getuid(), os.Getgid()

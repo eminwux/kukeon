@@ -111,7 +111,7 @@ unknown kind.
       "sample": "time=2026-11-17T09:48:51.120Z level=ERROR msg=\"start cell failed\" error=\"task 4f1b2b0b822c: exit status 1\""
     }
   ],
-  "logSource": "/opt/kukeon/data/kuke-system/kukeon/kukeon/kukeond/kukeond/log",
+  "logSource": "/opt/kukeon/data/kuke-system/kukeon/kukeon/kukeond/kukeond/container.log",
   "cells": [
     {
       "realm": "default",

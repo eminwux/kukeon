@@ -38,7 +38,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const testHostCapture = "/opt/kukeon/r1/s1/st1/c1/work/tty/capture"
+const testHostCapture = "/opt/kukeon/r1/s1/st1/c1/work/tty/terminals/main/capture.raw"
 
 // fakeClient stubs the methods `kuke log` calls. With readContainerLogFn
 // unset, ReadContainerLog answers like a kukeond that predates the RPC, so
@@ -329,7 +329,7 @@ func TestLog_NoCandidate_Errors(t *testing.T) {
 func TestLog_NonAttachable_TailsHostLogPath(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	const wantPath = "/opt/kukeon/r1/s1/st1/c1/side/log"
+	const wantPath = "/opt/kukeon/r1/s1/st1/c1/side/container.log"
 	fc := &fakeClient{
 		logContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
 			return kukeonv1.LogContainerResult{HostLogPath: wantPath}, nil
@@ -393,7 +393,7 @@ func TestLog_AmbiguousAcceptsNonAttachable(t *testing.T) {
 func TestLog_AutoPicksLoneNonAttachable(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
+	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/container.log"
 	fc := &fakeClient{
 		listContainersFn: func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
 			return []v1beta1.ContainerSpec{

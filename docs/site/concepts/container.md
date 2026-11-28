@@ -8,7 +8,7 @@ Creating a container materializes:
 
 1. **An OCI container** in containerd, in the realm's namespace (`<realm>.kukeon.io`).
 2. **A cgroup leaf** — `/sys/fs/cgroup/kukeon/<realm>/<space>/<stack>/<cell>/<space>_<stack>_<cell>_<role>` — where `<role>` is `root` for the root container or the container id otherwise.
-3. **Metadata** in the cell's file, `/opt/kukeon/data/<realm>/<space>/<stack>/<cell>/metadata.json`. A container has no metadata file of its own.
+3. **Metadata** in the cell's file, `/opt/kukeon/data/<realm>/<space>/<stack>/<cell>/metadata.json`. A container has no metadata file of its own; an attachable container's `container.json` is the input kukeond renders for kuketty on each start, not a record.
 
 The rootfs, image layers, and image content all live in containerd — Kukeon does not re-implement any of it. You can inspect the containerd-level state at any time:
 

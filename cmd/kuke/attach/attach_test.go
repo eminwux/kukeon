@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	testHostSocket = "/opt/kukeon/r1/s1/st1/c1/work/tty/socket"
+	testHostSocket = "/opt/kukeon/r1/s1/st1/c1/work/tty/terminals/main/control.sock"
 )
 
 type fakeClient struct {

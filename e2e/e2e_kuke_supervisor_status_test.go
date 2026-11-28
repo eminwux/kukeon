@@ -18,10 +18,13 @@ package e2e_test
 
 import (
 	"encoding/json"
+	iofs "io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -55,8 +58,8 @@ func getCellDoc(t *testing.T, host, realm, space, stack, cell string) v1beta1.Ce
 // (issue #1711): an attachable container whose required repo cannot be
 // cloned. kuketty exits 70 before its terminal starts; the failure must be
 // visible through kukeond alone — in the container's status, the cell's
-// reason, `kuke health` and `kuke log` — without reading tty/kuketty.log on
-// the host.
+// reason, `kuke health`, `kuke log` and `kuke log --supervisor` — without
+// reading tty/supervisor.log on the host.
 func TestKuke_RequiredRepoUnresolvable_ReportsRepoFailed(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +172,22 @@ func TestKuke_RequiredRepoUnresolvable_ReportsRepoFailed(t *testing.T) {
 	if strings.Contains(combined, "try again") {
 		t.Errorf("kuke log on a stopped container still says try again:\n%s", combined)
 	}
+
+	// kuke log --supervisor prints kuketty's own log through kukeond, so the
+	// repo failure and git's error are readable without host access (issue
+	// #1721). The fixture's repo URL is on the .invalid TLD, so git's error
+	// names that host.
+	code, supOut, supErr := runBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"log", cellName, "--supervisor", "--container", "work",
+		"--realm", realmName, "--space", spaceName, "--stack", stackName)...)
+	if code != 0 {
+		t.Fatalf("kuke log --supervisor exit %d\nstdout:\n%s\nstderr:\n%s", code, supOut, supErr)
+	}
+	for _, want := range []string{"repo resolution failed", "unresolvable", "kukeon-test.invalid"} {
+		if !strings.Contains(string(supOut), want) {
+			t.Errorf("kuke log --supervisor output lacks %q:\n%s", want, supOut)
+		}
+	}
 }
 
 // TestKuke_AttachableSupervisorRunning checks the healthy case: a running
@@ -222,5 +241,62 @@ func TestKuke_AttachableSupervisorRunning(t *testing.T) {
 	}
 	if st.Supervisor.Exit != nil || st.Reason != "" {
 		t.Errorf("running container has exit %+v / reason %q", st.Supervisor.Exit, st.Reason)
+	}
+
+	// The container directory holds exactly the issue #1721 layout: no
+	// kuketty-metadata.json, log, tty/socket, tty/capture or tty/metadata.json.
+	assertContainerFileLayout(t, fs.ContainerMetadataDir(runPath, realmName, spaceName, stackName, cellName, "work"))
+
+	// kuke log --supervisor also reads a running container's log.
+	code, supOut, supErr := runBinary(t, nil, kuke, append(buildKukeDaemonArgs(host),
+		"log", cellName, "--supervisor", "--container", "work",
+		"--realm", realmName, "--space", spaceName, "--stack", stackName)...)
+	if code != 0 || len(supOut) == 0 {
+		t.Errorf("kuke log --supervisor on a running container: exit %d, %d bytes\nstderr:\n%s",
+			code, len(supOut), supErr)
+	}
+}
+
+// assertContainerFileLayout walks an attachable container's host directory
+// and checks it holds exactly the files of issue #1721's layout. A rotated
+// capture segment (capture.raw.NNNNNN[.gz]) is allowed next to capture.raw.
+func assertContainerFileLayout(t *testing.T, containerDir string) {
+	t.Helper()
+	want := map[string]bool{
+		"container.json":                   false,
+		"tty":                              false,
+		"tty/supervisor.json":              false,
+		"tty/supervisor.log":               false,
+		"tty/terminals":                    false,
+		"tty/terminals/main":               false,
+		"tty/terminals/main/control.sock":  false,
+		"tty/terminals/main/capture.raw":   false,
+		"tty/terminals/main/terminal.json": false,
+	}
+	walkErr := filepath.WalkDir(containerDir, func(path string, _ iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(containerDir, path)
+		if relErr != nil || rel == "." {
+			return relErr
+		}
+		if _, ok := want[rel]; ok {
+			want[rel] = true
+			return nil
+		}
+		if strings.HasPrefix(rel, "tty/terminals/main/capture.raw.") {
+			return nil
+		}
+		t.Errorf("unexpected file in container directory: %s", rel)
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk %s: %v", containerDir, walkErr)
+	}
+	for rel, seen := range want {
+		if !seen {
+			t.Errorf("container directory lacks %s", rel)
+		}
 	}
 }

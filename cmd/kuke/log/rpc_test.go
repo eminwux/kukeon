@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -471,5 +472,139 @@ func TestLog_RPC_RealWireKeepsBytesExact(t *testing.T) {
 	}
 	if !bytes.Equal(out.Bytes(), want.Bytes()) {
 		t.Fatalf("bytes changed on the wire (%d vs %d bytes)", out.Len(), want.Len())
+	}
+}
+
+// supervisorClient answers ReadContainerLog for a supervisor request the way
+// a current kukeond does: it echoes Stream on success and on error.
+func supervisorClient(t *testing.T, data string, err error) *fakeClient {
+	t.Helper()
+	return &fakeClient{
+		readContainerLogFn: func(
+			_ v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
+		) (kukeonv1.ContainerLogResult, error) {
+			if req.Stream != kukeonv1.ContainerLogStreamSupervisor {
+				t.Errorf("Stream = %q, want %q", req.Stream, kukeonv1.ContainerLogStreamSupervisor)
+			}
+			if err != nil {
+				return kukeonv1.ContainerLogResult{
+					Source: "/opt/kukeon/data/r1/s1/st1/c1/work/tty/supervisor.log",
+					Stream: req.Stream,
+				}, err
+			}
+			return kukeonv1.ContainerLogResult{
+				Data: []byte(data), Next: int64(len(data)), Size: int64(len(data)), Stream: req.Stream,
+			}, nil
+		},
+	}
+}
+
+// TestLog_Supervisor_ReadsSupervisorStream pins that --supervisor asks kukeond
+// for the supervisor stream and prints it (issue #1721).
+func TestLog_Supervisor_ReadsSupervisorStream(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	cmd, out := newCmdWithCtx(t, supervisorClient(t, "level=ERROR msg=\"repo resolution failed\"\n", nil), nil)
+	cmd.SetArgs(append([]string{"--supervisor"}, logArgs()...))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "repo resolution failed") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
+// TestLog_Supervisor_DefaultStreamIsTerminal pins that a plain `kuke log`
+// still asks for the terminal stream.
+func TestLog_Supervisor_DefaultStreamIsTerminal(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	fc := &fakeClient{
+		readContainerLogFn: func(
+			_ v1beta1.ContainerDoc, req kukeonv1.ContainerLogRequest,
+		) (kukeonv1.ContainerLogResult, error) {
+			if req.Stream != kukeonv1.ContainerLogStreamTerminal {
+				t.Errorf("Stream = %q, want %q", req.Stream, kukeonv1.ContainerLogStreamTerminal)
+			}
+			return kukeonv1.ContainerLogResult{Data: []byte("x"), Next: 1, Size: 1}, nil
+		},
+	}
+	cmd, _ := newCmdWithCtx(t, fc, nil)
+	cmd.SetArgs(logArgs())
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+}
+
+// TestLog_Supervisor_OldDaemonOverWire runs --supervisor against a kukeond
+// that predates ContainerLogRequest.Stream (wireDaemon ignores it and never
+// echoes it): the client must report the upgrade, not print the terminal
+// capture, and must not fall back to the host path.
+func TestLog_Supervisor_OldDaemonOverWire(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	path := filepath.Join(t.TempDir(), "capture.raw")
+	if err := os.WriteFile(path, []byte("terminal bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := kukeonv1.NewUnixClient(serveRPC(t, &wireDaemon{path: path}))
+	t.Cleanup(func() { _ = client.Close() })
+
+	cmd := logcmd.NewLogCmd()
+	cmd.SetContext(context.WithValue(context.Background(), logcmd.MockControllerKey{}, kukeonv1.Client(client)))
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(append([]string{"--supervisor"}, logArgs()...))
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrDaemonMethodUnsupported) || !strings.Contains(err.Error(), "upgrade kukeond") {
+		t.Fatalf("error = %v, want an upgrade-kukeond ErrDaemonMethodUnsupported", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want nothing", out.String())
+	}
+}
+
+// TestLog_Supervisor_Errors pins the messages for a supervisor log kukeond
+// cannot serve.
+func TestLog_Supervisor_Errors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "missing file",
+			err:  errdefs.ErrContainerLogUnavailable,
+			want: "no supervisor log at /opt/kukeon/data/r1/s1/st1/c1/work/tty/supervisor.log",
+		},
+		{
+			name: "outside tty",
+			err: fmt.Errorf("%w: container \"work\" writes it to /var/log/k.log (tty.logFile), outside /run/kukeon/tty",
+				errdefs.ErrSupervisorLogUnreadable),
+			want: "/var/log/k.log",
+		},
+		{
+			name: "not attachable",
+			err:  fmt.Errorf("%w: container \"work\" is not attachable", errdefs.ErrNoSupervisor),
+			want: "is not attachable",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			tail := &tailCapture{}
+			cmd, _ := newCmdWithCtx(t, supervisorClient(t, "", tc.err), tail)
+			cmd.SetArgs(append([]string{"--supervisor"}, logArgs()...))
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), `cell "c1" container "work"`) {
+				t.Errorf("error = %v, want the cell and container named", err)
+			}
+			if tail.calls != 0 {
+				t.Errorf("host-path tail called %d times, want 0", tail.calls)
+			}
+		})
 	}
 }

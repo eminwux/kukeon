@@ -137,6 +137,10 @@ func NewLogCmd() *cobra.Command {
 	cmd.Flags().
 		BoolP("follow", "f", false, "Tail the file until SIGINT instead of printing current contents and exiting")
 	_ = viper.BindPFlag(config.KUKE_LOG_FOLLOW.ViperKey, cmd.Flags().Lookup("follow"))
+	cmd.Flags().Bool("supervisor", false,
+		"Print the terminal supervisor's (kuketty's) own log instead of the container's output; "+
+			"attachable containers only")
+	_ = viper.BindPFlag(config.KUKE_LOG_SUPERVISOR.ViperKey, cmd.Flags().Lookup("supervisor"))
 
 	cmd.ValidArgsFunction = config.CompleteCellNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -154,6 +158,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_LOG_STACK.ViperKey))
 	container := strings.TrimSpace(viper.GetString(config.KUKE_LOG_CONTAINER.ViperKey))
 	follow := viper.GetBool(config.KUKE_LOG_FOLLOW.ViperKey)
+	stream := kukeonv1.ContainerLogStreamTerminal
+	if viper.GetBool(config.KUKE_LOG_SUPERVISOR.ViperKey) {
+		stream = kukeonv1.ContainerLogStreamSupervisor
+	}
 
 	if cell == "" {
 		return fmt.Errorf("%w (positional cell)", errdefs.ErrCellNameRequired)
@@ -170,8 +178,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 			func(spec v1beta1.ContainerSpec) bool {
 				// `kuke log` accepts non-Attachable too — sbsh-capture
 				// for Attachable containers, cio.LogFile for the rest
-				// (e.g. kukeond). Only the root container is excluded.
-				return !spec.Root
+				// (e.g. kukeond). Only the root container is excluded,
+				// and with --supervisor only attachable containers have
+				// a supervisor log.
+				return !spec.Root && (stream != kukeonv1.ContainerLogStreamSupervisor || spec.Attachable)
 			})
 		if err != nil {
 			return err
@@ -191,9 +201,14 @@ func runLog(cmd *cobra.Command, args []string) error {
 		defer stop()
 	}
 
-	answered, err := streamContainerLog(ctx, client, doc, out, follow)
+	answered, err := streamContainerLog(ctx, client, doc, stream, out, follow)
 	if err == nil {
 		return nil
+	}
+	if stream == kukeonv1.ContainerLogStreamSupervisor {
+		// The pre-#1537 host-path fallback has no supervisor stream, so an
+		// old kukeond's ErrDaemonMethodUnsupported is reported as is.
+		return describeSupervisorLogError(err, cell, container)
 	}
 	if !answered && errors.Is(err, errdefs.ErrDaemonMethodUnsupported) {
 		// kukeond predates ReadContainerLog: resolve the host path and read
@@ -215,7 +230,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 // connection, keeps the cursor and polls until the daemon answers again or
 // followOutageLimit passes, printing nothing in between.
 func streamContainerLog(
-	ctx context.Context, client kukeonv1.Client, doc v1beta1.ContainerDoc, out io.Writer, follow bool,
+	ctx context.Context, client kukeonv1.Client, doc v1beta1.ContainerDoc, stream string,
+	out io.Writer, follow bool,
 ) (bool, error) {
 	var (
 		offset      int64
@@ -226,6 +242,7 @@ func streamContainerLog(
 		res, err := client.ReadContainerLog(ctx, doc, kukeonv1.ContainerLogRequest{
 			Offset:   offset,
 			MaxBytes: kukeonv1.ContainerLogMaxBytes,
+			Stream:   stream,
 		})
 		switch {
 		case err != nil && ctx.Err() != nil:
@@ -286,6 +303,25 @@ func describeLogError(err error, cell, container string, status lazyStatus) erro
 		return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
 	case errors.As(err, &missing):
 		return noLogFileError(cell, container, missing.path, status())
+	}
+	return err
+}
+
+// describeSupervisorLogError adds the cell/container context to the errors a
+// `kuke log --supervisor` read can end with (issue #1721).
+func describeSupervisorLogError(err error, cell, container string) error {
+	var missing *missingLogFileError
+	switch {
+	case errors.Is(err, errdefs.ErrContainerNotFound):
+		return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
+	case errors.As(err, &missing):
+		return fmt.Errorf(
+			"cell %q container %q has no supervisor log at %s (kuketty has not started yet)",
+			cell, container, missing.path,
+		)
+	case errors.Is(err, errdefs.ErrNoSupervisor),
+		errors.Is(err, errdefs.ErrSupervisorLogUnreadable):
+		return fmt.Errorf("cell %q container %q: %w", cell, container, err)
 	}
 	return err
 }

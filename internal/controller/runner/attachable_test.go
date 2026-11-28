@@ -114,7 +114,7 @@ func TestAttachableTTYDirRootMode_SetsSGIDBit(t *testing.T) {
 func TestWriteKukettyDoc_EmitsContainerDoc(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 	spec := intmodel.ContainerSpec{
 		ID:        "c1",
 		RealmName: "rA",
@@ -208,7 +208,7 @@ func TestWriteKukettyDoc_EmitsContainerDoc(t *testing.T) {
 func TestWriteKukettyDoc_EmptyWorkloadClearsCommand(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 	spec := intmodel.ContainerSpec{ID: "c1", Command: "/bin/leftover", Args: []string{"x"}}
 
 	if err := r.writeKukettyDoc(path, spec, 0, nil, nil); err != nil {
@@ -245,7 +245,7 @@ func TestWriteKukettyDoc_LogLevelResolution(t *testing.T) {
 			r := newTestRunner(t)
 			r.opts.KukettyLogLevel = tc.serverConfig
 			dir := t.TempDir()
-			path := filepath.Join(dir, "kuketty-metadata.json")
+			path := filepath.Join(dir, "container.json")
 			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
 			if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, nil); err != nil {
 				t.Fatalf("writeKukettyDoc: %v", err)
@@ -269,7 +269,7 @@ func TestWriteKukettyDoc_LogLevelResolution(t *testing.T) {
 func TestWriteKukettyDoc_LogFileOverridePreserved(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 	const override = "/var/log/sbsh-debug.log"
 	spec := intmodel.ContainerSpec{ID: "c1", Tty: &intmodel.ContainerTty{LogFile: override}}
 
@@ -521,14 +521,14 @@ func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
 // the post-create chown sweep visits every kuketty/sbsh-written leaf under
 // the tty bind-mount source so a non-root image USER (e.g. claude:latest →
 // 1000) can re-open them on a restart. Without the sweep, kuketty's
-// openTerminalLogger hit EACCES on the prior run's root-owned kuketty.log
+// openTerminalLogger hit EACCES on the prior run's root-owned supervisor.log
 // and exited before claiming the socket listener.
 //
-// The test seeds the tty dir with the inode set the issue enumerates —
-// kuketty.log, capture, capture.001.gz (sbsh's rotated transcript),
-// metadata.json (sbsh's atomic doc after #672), .meta-*.tmp (the
-// create-temp half of that atomic write), plus a stale pre-#672
-// terminals/<id>/ subtree to lock the recursion contract. When the test
+// The test seeds the tty dir with the #1721 layout — supervisor.log and
+// supervisor.json at the top, and under terminals/main/ the capture.raw,
+// a rotated capture segment, sbsh's terminal.json and the create-temp half
+// of its atomic write, and the control socket — to lock the recursion
+// contract. When the test
 // runs as root the sweep retargets every inode to a non-root uid and the
 // assertion is end-to-end (syscall.Stat_t.Uid); when the test runs unpriv
 // the sweep is a self-chown no-op and we assert the walk completes without
@@ -538,30 +538,34 @@ func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
 func TestChownAttachableStaleChildren_CoversRestartLayout(t *testing.T) {
 	ttyDir := t.TempDir()
 
-	seedFiles := []string{
-		consts.KukeonContainerKukettyLogFile, // kuketty.log
-		consts.KukeonContainerCaptureFile,    // capture
-		"capture.001.gz",                     // sbsh rotated transcript
-		"metadata.json",                      // sbsh's atomic doc (#672)
-		".meta-12345.tmp",                    // sbsh's atomic write tmp
+	terminalDir := filepath.Join(ttyDir, consts.KukeonContainerTerminalsDir, consts.KukeonContainerMainTerminal)
+	if err := os.MkdirAll(terminalDir, 0o750); err != nil {
+		t.Fatalf("mkdir terminal dir: %v", err)
 	}
-	for _, name := range seedFiles {
-		path := filepath.Join(ttyDir, name)
-		if err := os.WriteFile(path, []byte("stale\n"), 0o640); err != nil {
-			t.Fatalf("seed %s: %v", name, err)
+	seedFiles := []string{
+		consts.KukeonContainerSupervisorLogFile,                                    // supervisor.log
+		consts.KukeonContainerSupervisorFile,                                       // supervisor.json
+		filepath.Join(terminalDir, consts.KukeonContainerCaptureFile),              // capture.raw
+		filepath.Join(terminalDir, consts.KukeonContainerCaptureFile+".000001.gz"), // sbsh rotated transcript
+		filepath.Join(terminalDir, consts.KukeonContainerTerminalFile),             // sbsh's atomic doc (#1721)
+		filepath.Join(terminalDir, ".terminal.json-12345.tmp"),                     // sbsh's atomic write tmp
+	}
+	for i, name := range seedFiles {
+		if !filepath.IsAbs(name) {
+			seedFiles[i] = filepath.Join(ttyDir, name)
 		}
 	}
-	// Pre-#672 terminals/<id>/ subtree — the sweep must recurse into it
-	// even though #672 moved sbsh's MetadataDir up to attachableTTYDir, so
-	// a daemon upgraded across that boundary doesn't leak a root-owned
-	// subdir into the restart path.
-	legacyDir := filepath.Join(ttyDir, "terminals", "abc123")
-	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
-		t.Fatalf("mkdir legacy: %v", err)
+	for _, path := range seedFiles {
+		if err := os.WriteFile(path, []byte("stale\n"), 0o640); err != nil {
+			t.Fatalf("seed %s: %v", path, err)
+		}
 	}
-	legacyFile := filepath.Join(legacyDir, "metadata.json")
-	if err := os.WriteFile(legacyFile, []byte("stale legacy\n"), 0o640); err != nil {
-		t.Fatalf("seed legacy: %v", err)
+	// The terminals/ and terminals/main/ directories themselves must be
+	// re-owned too: sbsh writes terminal.json there as the container uid.
+	legacyDir := terminalDir
+	legacyFile := filepath.Join(terminalDir, consts.KukeonContainerSocketFile)
+	if err := os.WriteFile(legacyFile, []byte("stale socket\n"), 0o640); err != nil {
+		t.Fatalf("seed socket: %v", err)
 	}
 
 	targetUID, targetGID := os.Geteuid(), os.Getegid()
@@ -582,10 +586,10 @@ func TestChownAttachableStaleChildren_CoversRestartLayout(t *testing.T) {
 	// pre-chown owner already equals targetUID, so it would tautologically
 	// pass.
 	wantAssertUID := os.Geteuid() == 0
-	walkPaths := append([]string{}, seedFiles...)
-	for _, name := range walkPaths {
-		assertOwnedBy(t, filepath.Join(ttyDir, name), targetUID, wantAssertUID)
+	for _, path := range seedFiles {
+		assertOwnedBy(t, path, targetUID, wantAssertUID)
 	}
+	assertOwnedBy(t, filepath.Dir(legacyDir), targetUID, wantAssertUID)
 	assertOwnedBy(t, legacyDir, targetUID, wantAssertUID)
 	assertOwnedBy(t, legacyFile, targetUID, wantAssertUID)
 
@@ -667,7 +671,7 @@ func assertOwnedBy(t *testing.T, path string, wantUID int, assertUID bool) {
 func TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 
 	doneStage := intmodel.TtyStage{Script: "npm ci", RunOn: extmodel.RunOnCreate}
 	startStage := intmodel.TtyStage{Script: "echo welcome", RunOn: extmodel.RunOnStart}
@@ -745,7 +749,7 @@ func TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart(t *testing.T)
 func TestWriteKukettyDoc_RenderGate_EditedStageReRuns(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 
 	priorStage := intmodel.TtyStage{Script: "npm ci", RunOn: extmodel.RunOnCreate}
 	editedStage := intmodel.TtyStage{Script: "npm ci --omit=dev", RunOn: extmodel.RunOnCreate}
@@ -795,7 +799,7 @@ func TestWriteKukettyDoc_RenderGate_EditedStageReRuns(t *testing.T) {
 func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 
 	stageA := intmodel.TtyStage{Script: "setup-env", RunOn: extmodel.RunOnCreate}
 	stageB := intmodel.TtyStage{Script: "pre-step", RunOn: extmodel.RunOnCreate}
@@ -882,7 +886,7 @@ func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
 func TestWriteKukettyDoc_RenderGate_IgnoresFailedAndMissingHash(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "kuketty-metadata.json")
+	path := filepath.Join(dir, "container.json")
 
 	stage := intmodel.TtyStage{Script: "boot-it", RunOn: extmodel.RunOnCreate}
 	hash := stageContentHash(toV1beta1Stage(stage))
@@ -1291,4 +1295,132 @@ func readDoc(t *testing.T, path string) extmodel.ContainerDoc {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
 	return doc
+}
+
+// TestAttachableBuildOpts_CreatesMainTerminalDir locks issue #1721: sbsh does
+// not create an embedder-owned metadata directory, so tty/terminals/main/
+// must exist with the tty dir's mode before the task starts, on the first
+// start and on every later one.
+func TestAttachableBuildOpts_CreatesMainTerminalDir(t *testing.T) {
+	runPath := t.TempDir()
+	stub := filepath.Join(runPath, kukettyBinaryStagedSubdir, "kuketty")
+	if err := os.MkdirAll(filepath.Dir(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stub, []byte("\x7fELF stub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+	r.opts.RunPath = runPath
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "default", SpaceName: "s", StackName: "k", CellName: "c", Attachable: true,
+	}
+	terminalDir := fs.ContainerMainTerminalDir(runPath, "default", "s", "k", "c", "work")
+	for _, start := range []string{"first start", "restart"} {
+		if _, err := r.attachableBuildOpts("default.kukeon.io", spec, nil, nil); err != nil {
+			t.Fatalf("%s: attachableBuildOpts: %v", start, err)
+		}
+		for _, dir := range []string{filepath.Dir(terminalDir), terminalDir} {
+			info, err := os.Stat(dir)
+			if err != nil {
+				t.Fatalf("%s: stat %s: %v", start, dir, err)
+			}
+			if !info.IsDir() || info.Mode().Perm() != attachableTTYDirNoGroupMode.Perm() {
+				t.Errorf("%s: %s mode = %v, want dir %v", start, dir, info.Mode(), attachableTTYDirNoGroupMode)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(terminalDir, consts.KukeonContainerTerminalFile), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestAttachableBuildOpts_TerminalDirRefusesPlantedEntries locks the
+// symlink-follow fix on the main terminal's directory setup. tty/ and its
+// children are owned by the container uid after a start, so the workload can
+// plant terminals -> <host dir> (or terminals/main -> <host dir>, or a file)
+// before the next start. The next start must replace the entry with a real
+// directory and leave the link's target untouched: no new child, mode
+// unchanged.
+func TestAttachableBuildOpts_TerminalDirRefusesPlantedEntries(t *testing.T) {
+	cases := []struct {
+		name  string
+		plant func(t *testing.T, terminalsDir, target string)
+	}{
+		{"terminals symlink", func(t *testing.T, terminalsDir, target string) {
+			if err := os.Symlink(target, terminalsDir); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"terminals/main symlink", func(t *testing.T, terminalsDir, target string) {
+			if err := os.Mkdir(terminalsDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(terminalsDir, consts.KukeonContainerMainTerminal)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"terminals regular file", func(t *testing.T, terminalsDir, _ string) {
+			if err := os.WriteFile(terminalsDir, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runPath := t.TempDir()
+			stub := filepath.Join(runPath, kukettyBinaryStagedSubdir, "kuketty")
+			if err := os.MkdirAll(filepath.Dir(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(stub, []byte("\x7fELF stub"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			r := newDeleteCellTestExec(t, &deleteCellFakeClient{})
+			r.opts.RunPath = runPath
+			spec := intmodel.ContainerSpec{
+				ID: "work", RealmName: "default", SpaceName: "s", StackName: "k", CellName: "c", Attachable: true,
+			}
+			if _, err := r.attachableBuildOpts("default.kukeon.io", spec, nil, nil); err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+			terminalDir := fs.ContainerMainTerminalDir(runPath, "default", "s", "k", "c", "work")
+			terminalsDir := filepath.Dir(terminalDir)
+			if err := os.RemoveAll(terminalsDir); err != nil {
+				t.Fatal(err)
+			}
+			target := t.TempDir()
+			if err := os.Chmod(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			tc.plant(t, terminalsDir, target)
+
+			if _, err := r.attachableBuildOpts("default.kukeon.io", spec, nil, nil); err != nil {
+				t.Fatalf("restart: %v", err)
+			}
+			for _, dir := range []string{terminalsDir, terminalDir} {
+				info, err := os.Lstat(dir)
+				if err != nil {
+					t.Fatalf("lstat %s: %v", dir, err)
+				}
+				if !info.IsDir() || info.Mode().Perm() != attachableTTYDirNoGroupMode.Perm() {
+					t.Errorf("%s mode = %v, want real dir %v", dir, info.Mode(), attachableTTYDirNoGroupMode)
+				}
+			}
+			info, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o755 {
+				t.Errorf("symlink target mode = %v, want 0755 (followed)", info.Mode().Perm())
+			}
+			entries, err := os.ReadDir(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("symlink target gained entries %v (followed)", entries)
+			}
+		})
+	}
 }

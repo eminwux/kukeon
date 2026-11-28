@@ -21,9 +21,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -32,7 +34,7 @@ import (
 
 // TestParseArgs_Default locks in the no-flags contract: with zero argv
 // the resolver returns the bind-mount path the OCI injection delivers
-// (`/.kukeon/kuketty/metadata.json`). This is the only invocation shape
+// (`/.kukeon/kuketty/container.json`). This is the only invocation shape
 // kukeond uses, so a regression in the default would silently break every
 // attachable container start.
 func TestParseArgs_Default(t *testing.T) {
@@ -79,7 +81,7 @@ func TestParseArgs_RejectsPositional(t *testing.T) {
 // `--socket` from the sbsh wrapper) is rejected with a usageError. The
 // builder API is the *only* runtime surface — any flag is a regression.
 func TestParseArgs_UnknownFlag(t *testing.T) {
-	_, err := parseArgs([]string{"--socket", "/run/kukeon/tty/socket"})
+	_, err := parseArgs([]string{"--socket", "/run/kukeon/tty/terminals/main/control.sock"})
 	if err == nil {
 		t.Fatalf("parseArgs returned nil, want usage error for unknown flag")
 	}
@@ -408,5 +410,56 @@ func writeDoc(t *testing.T, path string, doc v1beta1.ContainerDoc) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// TestDefaultConfigPath pins kuketty's input mount point (issue #1721) to the
+// path the daemon bind-mounts (ctr.AttachableMetadataPath).
+func TestDefaultConfigPath(t *testing.T) {
+	if defaultConfigPath != "/.kukeon/kuketty/container.json" {
+		t.Errorf("defaultConfigPath = %q", defaultConfigPath)
+	}
+}
+
+// TestRefuseLegacyLayout covers a container created before issue #1721: its
+// ContainerDoc is mounted at the old path, so kuketty reports that it must be
+// recreated instead of failing to read container.json.
+func TestRefuseLegacyLayout(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "container.json")
+	legacy := filepath.Join(dir, "metadata.json")
+
+	if err := refuseLegacyLayout(current, legacy); err != nil {
+		t.Fatalf("neither file: %v, want nil (loadContainerDoc reports the missing file)", err)
+	}
+	if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := refuseLegacyLayout(current, legacy)
+	if !errors.Is(err, errLegacyLayout) || !strings.Contains(err.Error(), "recreate") {
+		t.Fatalf("legacy only: %v, want errLegacyLayout", err)
+	}
+	if exitCode(err, io.Discard) != exitCodeInternal {
+		t.Errorf("legacy layout exit code = %d, want %d", exitCode(err, io.Discard), exitCodeInternal)
+	}
+	if err = os.WriteFile(current, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = refuseLegacyLayout(current, legacy); err != nil {
+		t.Fatalf("both files: %v, want nil", err)
+	}
+}
+
+// TestEnsureTerminalDir pins the guard that creates tty/terminals/main/ when
+// the daemon did not (issue #1721), and that it is a no-op when it did.
+func TestEnsureTerminalDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "terminals", "main")
+	for range 2 {
+		if err := ensureTerminalDir(dir); err != nil {
+			t.Fatalf("ensureTerminalDir: %v", err)
+		}
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("stat %s: %v", dir, err)
+		}
 	}
 }

@@ -49,6 +49,20 @@ const SpecHashLabelKey = "kukeon.io/spec-hash"
 // daemon's SpecHashDomainVersion. Issue #1171.
 const SpecHashVersionLabelKey = "kukeon.io/spec-hash-version"
 
+// TTYLayoutLabelKey is the containerd label every Attachable container carries
+// from create: the version of the per-container tty file layout its bind
+// mounts were built for. The mounts cannot change after create, so a
+// container whose label is missing or different is refused on reuse rather
+// than started with paths the current kuketty no longer reads. Bumping
+// SpecHashDomainVersion would not do this: an older domain version is
+// re-stamped, not refused. Issue #1721.
+const TTYLayoutLabelKey = "kukeon.io/tty-layout"
+
+// TTYLayoutVersion is the current tty layout: "2" is issue #1721's
+// container.json, container.log, tty/supervisor.log and tty/terminals/main/.
+// Containers created before it carry no label.
+const TTYLayoutVersion = "2"
+
 // SpecHashDomainVersion is the current hash-domain version. Bump it whenever
 // containerSpecHashPayload's field set changes — the
 // TestSpecHashDomainVersionPinsToPayload regression guard forces the bump in
@@ -273,11 +287,37 @@ func projectSecretRef(r *intmodel.ContainerSecretRef) *secretRefHashPayload {
 // pair every create and re-stamp path writes. Both labels move together so a
 // record can never carry a hash from one domain and a version from another.
 // Issue #1171.
+//
+// An Attachable spec also gets TTYLayoutLabelKey, so every create path stamps
+// the tty layout its mounts were built for (issue #1721).
 func specHashLabels(spec intmodel.ContainerSpec) map[string]string {
-	return map[string]string{
+	labels := map[string]string{
 		SpecHashLabelKey:        ComputeContainerSpecHash(spec),
 		SpecHashVersionLabelKey: SpecHashDomainVersion,
 	}
+	if spec.Attachable {
+		labels[TTYLayoutLabelKey] = TTYLayoutVersion
+	}
+	return labels
+}
+
+// refuseLegacyTTYLayout returns an error wrapping
+// errdefs.ErrContainerLegacyTTYLayout when an Attachable container's existing
+// record does not carry the current TTYLayoutLabelKey. labels are the
+// record's labels as read; a caller that could not read them passes ok=false
+// and the check is skipped, matching the spec-hash guard's read-failure
+// handling. Issue #1721.
+func refuseLegacyTTYLayout(
+	spec intmodel.ContainerSpec, labels map[string]string, ok bool, cellName, ctrContainerID string,
+) error {
+	if !spec.Attachable || !ok || labels[TTYLayoutLabelKey] == TTYLayoutVersion {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: cell %q: container %q must be recreated — "+
+			"run `kuke delete cell %s`, then `kuke apply -f` or `kuke run` again",
+		errdefs.ErrContainerLegacyTTYLayout, cellName, ctrContainerID, cellName,
+	)
 }
 
 // stampSpecHashOnLabels writes the SpecHashLabelKey + SpecHashVersionLabelKey
@@ -376,6 +416,8 @@ func (r *Exec) restampSpecHashLabels(
 //     fresh-create path);
 //   - returns an error wrapping ErrCellSpecHashDrift when the record carries
 //     a kukeon.io/spec-hash label that disagrees with the desired spec hash;
+//   - returns an error wrapping ErrContainerLegacyTTYLayout when the spec is
+//     Attachable and the record predates the current tty layout (#1721);
 //   - returns (true, nil) on match or legacy-no-label, after dropping a
 //     stale Created/Stopped task so the caller's StartContainer can create
 //     a fresh task.
@@ -401,6 +443,11 @@ func (r *Exec) reuseOrRefuseExistingChildContainer(
 		r.logger.WarnContext(r.ctx,
 			"failed to read existing container labels, treating as match for reuse",
 			"id", ctrContainerID, "cell", cellName, "err", labelErr.Error())
+	}
+	if layoutErr := refuseLegacyTTYLayout(
+		spec, existingLabels, labelErr == nil, cellName, ctrContainerID,
+	); layoutErr != nil {
+		return false, layoutErr
 	}
 	switch classifySpecHashReuse(existingLabels, desiredHash) {
 	case specHashRefuse:

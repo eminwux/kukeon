@@ -133,16 +133,41 @@ func ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, con
 	)
 }
 
+// ContainerTerminalDir returns the host-side directory of one terminal
+// kuketty serves: tty/terminals/<terminalID>/. It holds the terminal's
+// control socket, capture and sbsh's terminal.json. The daemon creates it
+// before the task starts (sbsh does not create an embedder-owned metadata
+// directory). Issue #1721.
+func ContainerTerminalDir(
+	baseRunPath, realmName, spaceName, stackName, cellName, containerName, terminalID string,
+) string {
+	return filepath.Join(
+		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerTerminalsDir,
+		terminalID,
+	)
+}
+
+// ContainerMainTerminalDir returns ContainerTerminalDir for the one terminal
+// kuketty serves today (consts.KukeonContainerMainTerminal).
+func ContainerMainTerminalDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return ContainerTerminalDir(
+		baseRunPath, realmName, spaceName, stackName, cellName, containerName,
+		consts.KukeonContainerMainTerminal,
+	)
+}
+
 // ContainerSocketPath returns the host-side path of the kuketty terminal
 // socket inode for a container — the bind-mount source path the kuketty
-// listener inside the container resolves to via /run/kukeon/tty/socket.
+// listener inside the container resolves to via
+// /run/kukeon/tty/terminals/main/control.sock.
 // This path can be arbitrarily long (it inherits the full metadata layout
 // depth) and is NOT safe to pass to `connect(2)`; see
 // ContainerSocketSymlinkPath for the SUN_PATH-safe handle that
 // `kuke attach` uses.
 func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
-		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		ContainerMainTerminalDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
 		consts.KukeonContainerSocketFile,
 	)
 }
@@ -205,29 +230,29 @@ func containerSocketShortID(realmName, spaceName, stackName, cellName, container
 	return hex.EncodeToString(digest[:8])
 }
 
-// ContainerCapturePath returns the host-side path of the per-container sbsh
+// ContainerCapturePath returns the host-side path of the main terminal's sbsh
 // capture file. It is the host-visible peer of the in-container path
-// /run/kukeon/tty/capture (ctr.AttachableCapturePath); both resolve to the
-// same inode because the per-container tty directory is bind-mounted into
-// the container. `kuke log` tails this path.
+// /run/kukeon/tty/terminals/main/capture.raw (ctr.AttachableCapturePath);
+// both resolve to the same inode because the per-container tty directory is
+// bind-mounted into the container. `kuke log` tails this path.
 func ContainerCapturePath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
-		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		ContainerMainTerminalDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
 		consts.KukeonContainerCaptureFile,
 	)
 }
 
-// ContainerKukettyLogPath returns the host-side path of the per-Attachable-
-// container kuketty wrapper's own slog output. It is the host-visible peer of
-// the in-container ctr.AttachableKukettyLogPath; both resolve to the same
-// inode through the per-container tty directory bind mount. The path is
-// daemon-controlled (operators do not configure it via cell YAML) so an
-// operator debugging a misbehaving attach session always knows where to
-// look. Issue #599.
-func ContainerKukettyLogPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+// ContainerSupervisorLogPath returns the host-side path of the terminal
+// supervisor's (kuketty's) own slog output at its default location,
+// tty/supervisor.log. It is the host-visible peer of the in-container
+// ctr.AttachableSupervisorLogPath; both resolve to the same inode through
+// the per-container tty directory bind mount. spec.containers[].tty.logFile
+// moves the file; `kuke log --supervisor` resolves the override. Issues
+// #599, #1721.
+func ContainerSupervisorLogPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
 		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
-		consts.KukeonContainerKukettyLogFile,
+		consts.KukeonContainerSupervisorLogFile,
 	)
 }
 

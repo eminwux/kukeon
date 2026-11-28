@@ -34,6 +34,7 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	extmodel "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"golang.org/x/sys/unix"
 )
 
 // attachableTTYDirRootMode is the mode applied to the per-container tty
@@ -96,7 +97,7 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 //   - registers a metadata renderer that fires from inside the OCI
 //     args-wrap closure once containerd has resolved the workload argv,
 //     producing the per-container api/model/v1beta1.ContainerDoc at
-//     <containerDir>/kuketty-metadata.json that the bind mount maps onto
+//     <containerDir>/container.json that the bind mount maps onto
 //     kuketty's fixed in-container metadata path.
 //
 // The tty directory is created with mode 02750 owned by root:kukeon group
@@ -126,11 +127,21 @@ func (r *Exec) attachableBuildOpts(
 		return nil, err
 	}
 
-	ttyDir := fs.ContainerTTYDir(
-		r.opts.RunPath,
-		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
-		spec.ID,
-	)
+	// The coordinates reach host paths that are created, chmodded and
+	// chowned below. The controller validates them upstream; each is
+	// repeated inline here, and the tty dir is built only from the checked
+	// values, so the filepath.IsLocal guard dominates those paths for
+	// defense in depth and for static path-injection analysis (CodeQL
+	// go/path-injection), as in WriteTeam.
+	realm, space, stack, cell, id := spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID
+	if !filepath.IsLocal(realm) || !teamPathSafe(realm) ||
+		!filepath.IsLocal(space) || !teamPathSafe(space) ||
+		!filepath.IsLocal(stack) || !teamPathSafe(stack) ||
+		!filepath.IsLocal(cell) || !teamPathSafe(cell) ||
+		!filepath.IsLocal(id) || !teamPathSafe(id) {
+		return nil, fmt.Errorf("unsafe container reference %s/%s/%s/%s/%s", realm, space, stack, cell, id)
+	}
+	ttyDir := fs.ContainerTTYDir(r.opts.RunPath, realm, space, stack, cell, id)
 	mode, gid := attachableTTYDirInitialPerms(r.opts.KukeonGroupGID)
 	if err := os.MkdirAll(ttyDir, mode); err != nil {
 		return nil, err
@@ -156,6 +167,15 @@ func (r *Exec) attachableBuildOpts(
 		if err := os.Chown(ttyDir, 0, gid); err != nil {
 			return nil, fmt.Errorf("chown %q to root:%d: %w", ttyDir, gid, err)
 		}
+	}
+	// The main terminal's directory (tty/terminals/main/) holds its control
+	// socket, capture and sbsh's terminal.json. sbsh does not create an
+	// embedder-owned metadata directory, so it must exist before kuketty
+	// claims the socket (issue #1721). Same mode and group as the tty dir;
+	// attachablePostCreateChown re-owns it, and terminals/ above it, to the
+	// container uid on every start (#850).
+	if err := ensureAttachableTerminalDir(ttyDir, mode, gid); err != nil {
+		return nil, err
 	}
 
 	// Every path that starts the task builds its options here, so this is
@@ -185,6 +205,100 @@ func (r *Exec) attachableBuildOpts(
 			RenderMetadata:    renderer,
 		}),
 	}, nil
+}
+
+// ensureAttachableTerminalDir creates tty/terminals/ and the main terminal's
+// directory under ttyDir, applying mode (and the kukeon group when gid > 0)
+// to both explicitly, like the tty dir itself.
+//
+// attachablePostCreateChown re-owns tty/ and everything under it to the
+// container uid on every start, so a workload can replace terminals/ or
+// terminals/main with a symlink (or a file) before the next start. A
+// path-based MkdirAll/Chmod/Chown would follow such a link and hand a host
+// directory to root:kukeon. Each level is therefore resolved relative to its
+// parent's descriptor with O_NOFOLLOW: a non-directory entry is unlinked and
+// replaced with a fresh directory, and the mode and owner are set through
+// the opened descriptor, never through a path.
+func ensureAttachableTerminalDir(ttyDir string, mode os.FileMode, gid int) error {
+	parent, err := openDirNoFollow(unix.AT_FDCWD, ttyDir)
+	if err != nil {
+		return fmt.Errorf("open %q: %w", ttyDir, err)
+	}
+	path := ttyDir
+	for _, name := range []string{consts.KukeonContainerTerminalsDir, consts.KukeonContainerMainTerminal} {
+		path = filepath.Join(path, name)
+		dir, dirErr := ensureDirAt(parent, name, path, mode, gid)
+		_ = parent.Close()
+		if dirErr != nil {
+			return dirErr
+		}
+		parent = dir
+	}
+	return parent.Close()
+}
+
+// ensureDirAt makes name, relative to parent, a real directory with mode
+// (and root:gid when gid > 0) and returns it opened. path is name's full
+// path, used only in error messages. An existing directory is kept along
+// with its contents; any other entry, a symlink included, is unlinked
+// without being followed.
+func ensureDirAt(parent *os.File, name, path string, mode os.FileMode, gid int) (*os.File, error) {
+	parentFD := int(parent.Fd())
+	var st unix.Stat_t
+	switch err := unix.Fstatat(parentFD, name, &st, unix.AT_SYMLINK_NOFOLLOW); {
+	case err == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR:
+	case err == nil:
+		if rmErr := unix.Unlinkat(parentFD, name, 0); rmErr != nil {
+			return nil, fmt.Errorf("remove non-directory %q: %w", path, rmErr)
+		}
+		if mkErr := mkdirAt(parentFD, name); mkErr != nil {
+			return nil, fmt.Errorf("mkdir %q: %w", path, mkErr)
+		}
+	case errors.Is(err, unix.ENOENT):
+		if mkErr := mkdirAt(parentFD, name); mkErr != nil {
+			return nil, fmt.Errorf("mkdir %q: %w", path, mkErr)
+		}
+	default:
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+	// O_NOFOLLOW|O_DIRECTORY: an entry swapped in after the check above
+	// fails the open instead of being followed.
+	dir, err := openDirNoFollow(parentFD, name)
+	if err != nil {
+		return nil, fmt.Errorf("open %q: %w", path, err)
+	}
+	if err = dir.Chmod(mode); err != nil {
+		_ = dir.Close()
+		return nil, fmt.Errorf("chmod %q to %v: %w", path, mode, err)
+	}
+	if gid > 0 {
+		if err = dir.Chown(0, gid); err != nil {
+			_ = dir.Close()
+			return nil, fmt.Errorf("chown %q to root:%d: %w", path, gid, err)
+		}
+	}
+	return dir, nil
+}
+
+// mkdirAt creates name under dirFD owner-only; the caller applies the final
+// mode through the opened descriptor. EEXIST is left to the caller's
+// O_NOFOLLOW open, which accepts only a real directory.
+func mkdirAt(dirFD int, name string) error {
+	err := unix.Mkdirat(dirFD, name, uint32(attachableTTYDirNoGroupMode))
+	if errors.Is(err, unix.EEXIST) {
+		return nil
+	}
+	return err
+}
+
+// openDirNoFollow opens name, relative to dirFD, as a directory without
+// following a symlink in its final component.
+func openDirNoFollow(dirFD int, name string) (*os.File, error) {
+	fd, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), name), nil
 }
 
 // writeKukettyDoc renders the per-container ContainerDoc and writes it
@@ -602,13 +716,12 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 	// Restart-path complement to the ttyDir chown above (#850). The leaf
 	// dir chown covers a fresh provision (MkdirAll just made the dir
 	// empty), but on a restart the dir already holds stale files from the
-	// prior run — kuketty.log (#599), sbsh's capture/metadata.json/.meta-
-	// *.tmp anchored to attachableTTYDir (#672), and any pre-#672
-	// terminals/<id>/ subtree — all root-owned because the daemon wrote
-	// them. When the work image's resolved USER is non-root (e.g. claude:
+	// prior run — supervisor.log (#599), and the terminals/main/ subtree
+	// with sbsh's capture.raw, terminal.json and its temp files (#672,
+	// #1721) — all root-owned because the daemon wrote them. When the work image's resolved USER is non-root (e.g. claude:
 	// latest → 1000), kuketty inside the container then hits EACCES at
 	// openTerminalLogger trying to O_RDWR-reopen the stale root-owned
-	// kuketty.log and exits with code 70 before claiming the socket
+	// supervisor.log and exits with code 70 before claiming the socket
 	// listener; `kuke attach` later dials the freshly-bound but
 	// listenerless socket and gets "connection refused". Walking and
 	// chowning every leaf child to the resolved container uid covers the
@@ -631,9 +744,9 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 // The walk uses Lchown so a stray symlink (none today, defense-in-depth)
 // is chowned at the link, never its target. Per-entry ENOENT is tolerated
 // (a concurrent unlink during the walk is a benign race — the inode is
-// already gone, the chown is moot). Subdirectories are walked too: any
-// pre-#672 terminals/<id>/ subtree left over from an older daemon gets
-// covered in the same pass.
+// already gone, the chown is moot). Subdirectories are walked too, so the
+// terminals/main/ directory attachableBuildOpts creates (and everything
+// sbsh wrote in it) is re-owned in the same pass (#1721).
 //
 // The root dir itself is intentionally skipped — the caller chowned it
 // explicitly with its own error surface, and re-chowning is wasteful.

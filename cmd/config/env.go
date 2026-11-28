@@ -523,6 +523,8 @@ var (
 	KUKE_LOG_CONTAINER = DefineKV("KUKE_LOG_CONTAINER", "kuke/log/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_FOLLOW = DefineKV("KUKE_LOG_FOLLOW", "kuke/log/follow", "false")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_SUPERVISOR = DefineKV("KUKE_LOG_SUPERVISOR", "kuke/log/supervisor", "false")
 
 	// Screenshot command variables.
 

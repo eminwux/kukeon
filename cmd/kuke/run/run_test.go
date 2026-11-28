@@ -1578,8 +1578,6 @@ spec:
         - "3600"
 `
 
-const testHostSocket = "/opt/kukeon/r/s/st/c/work/tty/socket"
-
 func connectSuccessFn() func(v1beta1.ContainerDoc) error {
 	return func(_ v1beta1.ContainerDoc) error {
 		return nil

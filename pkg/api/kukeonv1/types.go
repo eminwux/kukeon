@@ -721,7 +721,8 @@ type AttachContainerReply struct {
 type AttachContainerResult struct {
 	// HostSocketPath is the host path of the per-container sbsh terminal
 	// socket. Inside the container the same inode is reachable at
-	// /run/kukeon/tty/socket via the tty directory bind mount. Returned only
+	// /run/kukeon/tty/terminals/main/control.sock via the tty directory bind
+	// mount. Returned only
 	// when the target container has Attachable=true and its task is Running;
 	// the daemon errors with ErrAttachNotSupported when the target is not
 	// Attachable, or ErrAttachTaskNotRunning when the task is not Running.
@@ -839,7 +840,8 @@ type LogContainerReply struct {
 type LogContainerResult struct {
 	// HostCapturePath is the host path of the per-container sbsh capture
 	// file. Inside the container the same inode is reachable at
-	// /run/kukeon/tty/capture via the tty directory bind mount. Set only
+	// /run/kukeon/tty/terminals/main/capture.raw via the tty directory bind
+	// mount. Set only
 	// when the target container has Attachable=true.
 	HostCapturePath string
 
@@ -867,10 +869,24 @@ const (
 // the current end returns no data and leaves Next at Offset: the stream was
 // truncated or replaced, which the caller detects as Size < its cursor and
 // answers by reading again from 0.
+//
+// Stream selects which file is read: "" or ContainerLogStreamTerminal for the
+// output stream above, ContainerLogStreamSupervisor for the terminal
+// supervisor's (kuketty's) own log, tty/supervisor.log or the in-container
+// path spec.containers[].tty.logFile names (issue #1721). A kukeond that
+// predates Stream ignores it and serves the terminal stream; the result's
+// Stream echo is how a client tells the two apart.
 type ContainerLogRequest struct {
 	Offset   int64
 	MaxBytes int
+	Stream   string
 }
+
+// ContainerLogRequest.Stream values (issue #1721).
+const (
+	ContainerLogStreamTerminal   = "terminal"
+	ContainerLogStreamSupervisor = "supervisor"
+)
 
 // ContainerLogResult is one bounded chunk of a container's output stream.
 //
@@ -897,6 +913,10 @@ type ContainerLogResult struct {
 	// More reports that data beyond Next was already available when the
 	// chunk was read (a forward read that hit the bound).
 	More bool
+	// Stream echoes the stream that was resolved (ContainerLogStreamTerminal
+	// or ContainerLogStreamSupervisor), also on errors. Empty from a kukeond
+	// that predates ContainerLogRequest.Stream. Issue #1721.
+	Stream string
 }
 
 // ReadContainerLogArgs is the wire request for ReadContainerLog.

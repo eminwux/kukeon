@@ -149,7 +149,7 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 			inj := ctr.AttachableInjection{
 				KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
 				HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
-				HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
+				HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/container.json",
 				RenderMetadata: func(workloadArgv []string) error {
 					renderCalls++
 					capturedWorkload = append([]string(nil), workloadArgv...)
@@ -302,7 +302,7 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 	inj := ctr.AttachableInjection{
 		KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
 		HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
+		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/container.json",
 		RenderMetadata: func(workloadArgv []string) error {
 			renderCalls++
 			capturedWorkload = append([]string(nil), workloadArgv...)
