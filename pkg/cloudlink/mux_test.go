@@ -111,6 +111,22 @@ func TestSessionStreamRoundTripBeyondWindow(t *testing.T) {
 	_ = st.Close()
 }
 
+func TestWriteFrameRefusesOversizedPayload(t *testing.T) {
+	dialer, _ := sessionPair(t)
+	err := dialer.writeFrame(frameData, 1, make([]byte, maxFramePayload+1))
+	if !errors.Is(err, errProtocol) {
+		t.Fatalf("oversized frame: got %v, want %v", err, errProtocol)
+	}
+	select {
+	case <-dialer.done:
+		t.Fatal("refusing an oversized frame closed the session")
+	default:
+	}
+	if err = dialer.writeFrame(frameData, 1, make([]byte, maxFramePayload)); err != nil {
+		t.Fatalf("frame at the limit: %v", err)
+	}
+}
+
 func TestSessionCloseFailsOpenStreams(t *testing.T) {
 	dialer, acceptor := sessionPair(t)
 	st, err := acceptor.Open(context.Background())

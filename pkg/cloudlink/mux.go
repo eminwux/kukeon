@@ -226,6 +226,11 @@ func (s *Session) pingLoop() {
 
 // writeFrame sends one frame. A failed write closes the session.
 func (s *Session) writeFrame(kind byte, id uint32, payload []byte) error {
+	// The peer's read limit is headerLen+maxFramePayload, so a larger frame
+	// would only tear the link down; refuse it before allocating.
+	if len(payload) > maxFramePayload {
+		return fmt.Errorf("%w: frame payload %d bytes exceeds %d", errProtocol, len(payload), maxFramePayload)
+	}
 	buf := make([]byte, headerLen+len(payload))
 	buf[0] = kind
 	binary.BigEndian.PutUint32(buf[1:headerLen], id)
