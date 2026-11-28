@@ -8741,6 +8741,10 @@ test("Replay on a running cell keeps the terminal attached, follows new output a
   });
   await page.goto(`${server.url}#/workspace/dev/shared/services/api`);
   await expect(terminalTools(page).locator(".terminal-connection-state")).toContainText("Attached");
+  // "ready" can render before the session sends its size, which waits for a frame: count from after it.
+  await expect.poll(() => messages.some(message => typeof message === "string" && JSON.parse(message).type === "resize")).toBe(true);
+  let counted = -1;
+  await expect.poll(() => counted === (counted = messages.length), { intervals: [250] }).toBe(true);
   const sent = messages.length;
   await terminalTools(page).getByRole("button", { name: "Replay" }).click();
   const panel = replayPanel(page);
