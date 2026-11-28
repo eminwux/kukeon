@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath, kinds, titles } from "./routes";
 import type { Failure, Resource } from "./request";
+import { apiFetch } from "./transport";
 
 export type SetupStatus = { name?: string; index?: number; state: string; error?: string };
 export type RuntimeStatus = {
@@ -26,7 +27,7 @@ export type InventoryResource = Resource<Inventory> & {
 };
 
 async function readJSON<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal });
+  const response = await apiFetch(path, { signal });
   const body = await response.json();
   if (!response.ok) throw body.error ?? { code: "unavailable", message: `HTTP ${response.status}` };
   return body;
@@ -92,8 +93,8 @@ export function useInventory(revision: number, intervalMs: number): InventoryRes
     setDaemon(old => ({ ...old, loading: true }));
     void (async () => {
       try {
-        const configsRead = readJSON<Doc[]>("/api/catalog/configs", controller.signal).then(docs => Array.isArray(docs) ? docs : lastConfigs.current, () => lastConfigs.current);
-        const realms = await readJSON<Doc[]>("/api/realms", controller.signal);
+        const configsRead = readJSON<Doc[]>("/catalog/configs", controller.signal).then(docs => Array.isArray(docs) ? docs : lastConfigs.current, () => lastConfigs.current);
+        const realms = await readJSON<Doc[]>("/realms", controller.signal);
         if (controller.signal.aborted) return;
         setDaemon({ data: true, loading: false });
         const result: Inventory = { rows: [realms.map(doc => ({ doc, scope: [doc.metadata.name] })), [], [], []], failures: [], updatedAt: "", configs: [] };

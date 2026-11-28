@@ -54,9 +54,9 @@ test("available sources are the project, the entries, then the stored Sources no
   const list = availableSources(next, stored);
   assert.deepEqual(list.map(source => source.alias), ["project", "kukeon", "agents"]);
   assert.equal(list[2].declared, false);
-  assert.deepEqual(inspectRequest(list[0]), { path: "/api/sources/web/inspect", body: {} });
-  assert.deepEqual(inspectRequest(list[1]), { path: "/api/sources/kukeon-fork/inspect", body: {} });
-  assert.deepEqual(inspectRequest({ alias: "x", url: "github.com/x/x", refKind: "branch", ref: "dev", identity: "git-ssh" }), { path: "/api/sources/inspect", body: { url: "github.com/x/x", branch: "dev", identity: "git-ssh" } });
+  assert.deepEqual(inspectRequest(list[0]), { path: "/sources/web/inspect", body: {} });
+  assert.deepEqual(inspectRequest(list[1]), { path: "/sources/kukeon-fork/inspect", body: {} });
+  assert.deepEqual(inspectRequest({ alias: "x", url: "github.com/x/x", refKind: "branch", ref: "dev", identity: "git-ssh" }), { path: "/sources/inspect", body: { url: "github.com/x/x", branch: "dev", identity: "git-ssh" } });
 });
 
 test("roles: selecting from an inherited list starts from the defaults; dropping keeps the rest", () => {

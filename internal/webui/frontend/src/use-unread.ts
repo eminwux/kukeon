@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { applyReadings, markersKey, parseActivity, parseMarkers, pruneMarkers, unreadState, type Markers, type Readings, type Unread } from "./unread.mjs";
+import { apiFetch } from "./transport";
 
 export type { Unread } from "./unread.mjs";
 
@@ -36,7 +37,7 @@ function onStorage(event: StorageEvent) {
 }
 
 function activityURL(scopes: string[][]): string {
-  return "/api/terminal-activity?" + scopes.map(scope => `cell=${scope.map(encodeURIComponent).join("/")}`).join("&");
+  return "/terminal-activity?" + scopes.map(scope => `cell=${scope.map(encodeURIComponent).join("/")}`).join("&");
 }
 
 // readActivity asks for scopes in requests of at most 100 cells, one after the other. A failed request
@@ -45,7 +46,7 @@ async function readActivity(scopes: string[][], signal: AbortSignal): Promise<Re
   let readings: Readings = {};
   for (let i = 0; i < scopes.length && !signal.aborted; i += maxCellsPerRequest) {
     try {
-      const response = await fetch(activityURL(scopes.slice(i, i + maxCellsPerRequest)), { headers: { Accept: "application/json" }, signal });
+      const response = await apiFetch(activityURL(scopes.slice(i, i + maxCellsPerRequest)), { headers: { Accept: "application/json" }, signal });
       if (response.ok) readings = { ...readings, ...parseActivity(await response.json()) };
     } catch { /* Kept as the last reading. */ }
   }

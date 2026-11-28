@@ -39,7 +39,7 @@ export function UserMenu({ user, onGetStarted, onSignOut }: { user: string; onGe
     {open && <div className="user-menu-popup" id="user-menu-list" role="menu" aria-label="User" ref={menu} onKeyDown={menuKey}>
       <p className="user-menu-identity">Signed in as <strong>{user}</strong></p>
       <a role="menuitem" href={settingsLink()} onClick={() => setOpen(false)}>Settings</a>
-      <a role="menuitem" href={homeLink} onClick={() => { setOpen(false); onGetStarted(); }}>Get started</a>
+      <a role="menuitem" href={homeLink()} onClick={() => { setOpen(false); onGetStarted(); }}>Get started</a>
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
     </div>}
   </div>;

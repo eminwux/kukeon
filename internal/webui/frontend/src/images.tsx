@@ -6,7 +6,7 @@ type RealmImage = { name: string; ref: string; digest?: string; built?: boolean 
 // Lists the realm's spec.images with the reference and digest the daemon resolves (#1418).
 // The Realm's registry credentials are managed on the Images page; this panel counts them and links there.
 export function RealmImagesPanel({ realm, revision, credentials }: { realm: string; revision: number; credentials: number }) {
-  const images = useResource<RealmImage[]>(`/api/realms/${encodeURIComponent(realm)}/images`, revision);
+  const images = useResource<RealmImage[]>(`/realms/${encodeURIComponent(realm)}/images`, revision);
   return <section className="panel realm-images" aria-label="Realm images">
     <div className="panel-heading"><h2>Images</h2><span className="badge">{images.data ? `${images.data.length} declared` : "Realm images"}</span></div>
     <div className="panel-body">

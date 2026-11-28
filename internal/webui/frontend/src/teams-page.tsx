@@ -8,8 +8,9 @@ import { ScheduleDetails, when } from "./schedule";
 import { OutcomeNotice, PlanView } from "./team-plan";
 import { TeamWizard } from "./team-wizard";
 import { InitializePrompt } from "./initialize";
-import { configLink, deleteSummary, exportAPI, listOrigin, newTeamLink, sourcesLink, systemTeam, taskLabel, teamsAPI, teamsLink } from "./teams.mjs";
+import { deleteSummary, exportAPI, listOrigin, systemTeam, taskLabel, teamsAPI } from "./teams.mjs";
 import type { DeleteResult, RoleConnectorView, TeamDetail, TeamOutcome, TeamSummary, TeamView, ViewSource } from "./teams.mjs";
+import { configPageLink, newTeamLink, sourcesLink, teamsLink } from "./routes";
 
 // The Teams pages (#1618, #1644). The list opens the New team wizard; a
 // team's page shows the whole setup as it composes, with Edit, Export,
@@ -26,7 +27,7 @@ function RoleConnectors({ rows, configs }: { rows: RoleConnectorView[]; configs:
   return <div className="table-scroll"><table aria-label="Connectors per role"><thead><tr><th>Role</th><th>Config</th><th>Connector</th><th>Method</th><th>Identity</th><th>From</th><th>Asked by</th></tr></thead><tbody>
     {rows.map(row => { const scope = scopeOf(row.config); const unresolved = row.state !== stateResolved; return <tr key={`${row.config}/${row.connector}`}>
       <td><code>{row.role}</code></td>
-      <td>{scope ? <a className="resource-name mono-id" href={configLink(scope, row.config)}>{row.config}</a> : <span className="mono-id">{row.config}</span>}</td>
+      <td>{scope ? <a className="resource-name mono-id" href={configPageLink(scope, row.config)}>{row.config}</a> : <span className="mono-id">{row.config}</span>}</td>
       <td><a className="resource-name" href={connectorsLink(row.connector)}>{row.connector}</a></td>
       <td>{row.method || "—"}</td>
       <td>{unresolved ? <a className="badge needs-connector" href={connectorsLink(row.connector)}>Needs identity</a> : <span className="mono-id">{row.identity || "—"}</span>}</td>
@@ -38,7 +39,7 @@ function RoleConnectors({ rows, configs }: { rows: RoleConnectorView[]; configs:
 
 function TeamList({ teams, onChanged }: { teams: TeamSummary[]; onChanged: () => void }) {
   return <section className="panel" aria-label="Teams list">
-    <div className="panel-heading"><h2>Teams</h2><a className="document-action" href={newTeamLink}>New team</a></div>
+    <div className="panel-heading"><h2>Teams</h2><a className="document-action" href={newTeamLink()}>New team</a></div>
     <div className="table-scroll"><table><thead><tr><th>Team</th><th>Project</th><th>Roles</th><th>Harnesses</th><th>Configs</th></tr></thead><tbody>
       {teams.map(team => <tr key={team.name}>
         <td><a className="resource-name" href={teamsLink(team.name)}>{team.name}</a>{team.system && <> <span className="badge">system</span></>}</td>
@@ -178,7 +179,7 @@ function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView;
       <section className="panel" aria-label="Tasks">
         <div className="panel-heading"><h2>Tasks</h2><span className="badge">{view.tasks.length}</span></div>
         <div className="panel-body">{view.tasks.length ? <div className="team-tasks">{view.tasks.map(task => <section key={task.config} className="team-task" aria-label={`Task ${task.role} ${task.task}${task.harness ? ` on ${task.harness}` : ""}`}>
-          <h3>{task.role} / {task.task}{task.harness ? ` on ${task.harness}` : ""} <a className="resource-name mono-id" href={configLink(task.scope, task.config)}>{task.config}</a></h3>
+          <h3>{task.role} / {task.task}{task.harness ? ` on ${task.harness}` : ""} <a className="resource-name mono-id" href={configPageLink(task.scope, task.config)}>{task.config}</a></h3>
           {task.schedule ? <ScheduleDetails schedule={task.schedule} status={task.status} cellLink={() => undefined} /> : <p className="description">No schedule: the task runs when started by hand.{task.status?.lastScheduleTime ? <> Last run {when(task.status.lastScheduleTime)}.</> : null}</p>}
         </section>)}</div> : <p className="description">The team renders no task Config.</p>}</div>
       </section>
@@ -195,7 +196,7 @@ function TeamOverview({ name, data, onChanged }: { name: string; data: TeamView;
     </>}
     <section className="panel" aria-label="Configs">
       <div className="panel-heading"><h2>Configs</h2><span className="badge">{summary.configs.length}</span></div>
-      <div className="panel-body">{summary.configs.length ? <ul className="state-list">{summary.configs.map(config => { const scope = configScope(config); return <li key={config}>{scope ? <a className="resource-name" href={configLink(scope, config)}>{config}</a> : <span className="mono-id">{config}</span>}</li>; })}</ul> : <p className="description">none</p>}</div>
+      <div className="panel-body">{summary.configs.length ? <ul className="state-list">{summary.configs.map(config => { const scope = configScope(config); return <li key={config}>{scope ? <a className="resource-name" href={configPageLink(scope, config)}>{config}</a> : <span className="mono-id">{config}</span>}</li>; })}</ul> : <p className="description">none</p>}</div>
     </section>
     {applied && <PlanView plan={applied.plan} title="Applied" />}
     {confirming && <DeleteTeamDialog team={summary} pending={pending === "delete"} onCancel={() => setConfirming(false)} onConfirm={() => void remove()} />}

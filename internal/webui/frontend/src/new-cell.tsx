@@ -12,6 +12,8 @@ import { blocksCells, changedMethods, changedPicks, connectorStatuses, connector
 import type { Connector, ConnectorStatus, SecretRef } from "./connectors.mjs";
 import { repositoryFromSource, sourcesAPI } from "./teams.mjs";
 import type { StoredSource } from "./teams.mjs";
+import { apiFetch } from "./transport";
+import { routeHref } from "./router";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string; labels?: Record<string, string> };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string; status?: unknown };
@@ -23,7 +25,7 @@ type FormValue = Record<string, unknown>;
 function scopedName(metadata: ScopeMetadata): string[] {
   return [metadata.realm, metadata.space, metadata.stack, metadata.name].filter((value): value is string => !!value);
 }
-function catalogLink(kind: string, scope: string[], document = false): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : ""); }
+function catalogLink(kind: string, scope: string[], document = false): string { return routeHref(`/${kind}/` + scope.map(encodeURIComponent).join("/") + (document ? "?document=1" : "")); }
 function scopeLabel(scope: string[]): string { return scope.join(" / "); }
 function blueprintAPI(reference: FormValue): string | null {
   if (typeof reference.name !== "string" || typeof reference.realm !== "string") return null;
@@ -160,7 +162,7 @@ function FieldEditor({ field, value, onChange, path, errors, disabled = false }:
 }
 
 function ConfigCreation({ revision, inventory, configScope, onCreated }: { revision: number; inventory: InventoryResource; configScope?: string[]; onCreated: (cell: CellDoc, options: CreatedOptions) => void }) {
-  const configs = useResource<CatalogDoc[]>("/api/catalog/configs", revision);
+  const configs = useResource<CatalogDoc[]>("/catalog/configs", revision);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(configScope ? JSON.stringify(configScope) : "");
   // Opened from a Config, the form leads with a one-line summary of it; "Change" reveals the chooser (#1603).
@@ -174,14 +176,14 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
   const detail = useResource<CatalogDoc>(config ? catalogAPI("configs", config.scope) : null, revision + saved);
   // Each connector the Config requires starts on the identity it resolves to; a pick is for this cell only.
   const configStatuses = connectorStatuses(detail.data);
-  const connectors = useResource<Connector[]>(configStatuses.length ? "/api/connectors" : null, revision);
+  const connectors = useResource<Connector[]>(configStatuses.length ? "/connectors" : null, revision);
   // A connector with several methods may use another one for this cell only (#1551); its identity then
   // fills that method's slot, so the statuses below are the Config's with the method picks applied.
   const [methodPicks, setMethodPicks] = useState<Record<string, string | undefined>>({});
   const methods = changedMethods(configStatuses, methodPicks);
   const statuses = methodStatuses(configStatuses, connectors.data, methodPicks);
-  const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/api/catalog/secrets" : null, revision + saved);
-  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/api/connectors/logins" : null, revision + saved);
+  const secrets = useResource<unknown[]>(statuses.some(status => takesIdentity(status.delivery)) ? "/catalog/secrets" : null, revision + saved);
+  const logins = useResource<unknown[]>(statuses.some(keepsLogin) ? "/connectors/logins" : null, revision + saved);
   const [picks, setPicks] = useState<Record<string, Partial<SecretRef> | undefined>>({});
   // Harness state for this cell only (#1685): persistent or ephemeral, empty for the Config's. A cell
   // whose method keeps a login always has persistent state, so the choice is offered for token methods.
@@ -236,7 +238,7 @@ function ConfigCreation({ revision, inventory, configScope, onCreated }: { revis
       // Only the picks that differ from the Config's own identity are sent, as per-cell overrides. A create
       // after a preview sends its token and name, so what was reviewed is what gets created.
       const body = { config: { name: config.doc.metadata.name, realm: config.doc.metadata.realm, space: config.doc.metadata.space, stack: config.doc.metadata.stack }, name: name.trim(), ...(create && preview ? { resolvedName: preview.document.metadata.name, preview: preview.preview } : {}), env: env.split("\n").filter(Boolean), ignoreDiskPressure, targetSpace, targetStack, ...(Object.keys(overrides).length ? { connectors: overrides } : {}), ...(Object.keys(methods).length ? { methods } : {}), ...(state ? { state } : {}) };
-      const response = await fetch(`/api/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
+      const response = await apiFetch(`/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;
@@ -372,7 +374,7 @@ function ManualCreation({ inventory, onCreated }: { inventory: InventoryResource
     setPending(true); setStage(create ? "create" : "preview"); setError("");
     try {
       const payload = { name: String(model.name).trim(), realm, space, stack: String(model.stack ?? ""), labels: model.labels, annotations: model.annotations, spec };
-      const response = await fetch(`/api/cells/manual/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ ...payload, ...(create && preview ? { preview: preview.preview } : {}) }) });
+      const response = await apiFetch(`/cells/manual/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ ...payload, ...(create && preview ? { preview: preview.preview } : {}) }) });
       const result = await response.json();
       if (!response.ok) {
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;

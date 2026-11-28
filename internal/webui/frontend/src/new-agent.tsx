@@ -4,9 +4,9 @@ import { loginEmpty, type Connector } from "./connectors.mjs";
 import { configLogin, harnessConnector } from "./onboarding.mjs";
 import { displayNameError } from "./cells.mjs";
 import { ErrorNotice, useResource } from "./request";
-import { catalogPageLink } from "./routes";
-import { teamsLink } from "./teams.mjs";
+import { catalogPageLink, teamsLink } from "./routes";
 import { InitializePrompt } from "./initialize";
+import { apiFetch } from "./transport";
 
 // The New agent page (#1692): pick Claude or Codex, optionally name the agent, and kukeon copies that
 // harness's template Config (default-agent-<harness>, from the default team) into a new Config and
@@ -23,7 +23,7 @@ const scopeOf = (c: Coordinates) => [c.realm, c.space, c.stack, c.name].filter((
 const stepText: Record<string, string> = { "create-cell": "creating its first cell", "start-cell": "starting its first cell" };
 
 export function NewAgentPage({ revision, onCreated, onChanged }: { revision: number; onCreated: (agent: CreatedAgent) => void; onChanged: () => void }) {
-  const templates = useResource<{ templates: AgentTemplate[] }>("/api/agents/templates", revision);
+  const templates = useResource<{ templates: AgentTemplate[] }>("/agents/templates", revision);
   const list = templates.data?.templates ?? [];
   const available = list.filter(template => template.exists);
   const [picked, setPicked] = useState("");
@@ -33,9 +33,9 @@ export function NewAgentPage({ revision, onCreated, onChanged }: { revision: num
   const harness = available.some(template => template.harness === picked) ? picked : available[0]?.harness ?? "";
   // The login the chosen harness's template logs in through (#1694): while it is empty, Log in first is
   // offered next to Create. The list is re-read while a login session runs.
-  const catalog = useResource<Connector[]>("/api/connectors", revision);
+  const catalog = useResource<Connector[]>("/connectors", revision);
   const [tick, setTick] = useState(0);
-  const logins = useResource<unknown[]>("/api/connectors/logins", revision + tick);
+  const logins = useResource<unknown[]>("/connectors/logins", revision + tick);
   const loginRunning = (logins.data ?? []).some(item => !!(item as { session?: unknown } | null)?.session);
   useEffect(() => {
     if (!loginRunning) return undefined;
@@ -50,7 +50,7 @@ export function NewAgentPage({ revision, onCreated, onChanged }: { revision: num
     if (!harness || pending || nameError) return;
     setPending(true); setFailure(undefined);
     try {
-      const response = await fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ harness, ...(name.trim() ? { displayName: name.trim() } : {}) }) });
+      const response = await apiFetch("/agents", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ harness, ...(name.trim() ? { displayName: name.trim() } : {}) }) });
       let body: { error?: AgentFailure } & Partial<CreatedAgent> = {};
       try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
       if (!response.ok) { setFailure(body.error ?? { message: `Request failed (HTTP ${response.status})` }); return; }

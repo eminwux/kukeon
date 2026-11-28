@@ -4,6 +4,7 @@ import { imagesLink } from "./routes";
 import { RegistryCredentialsPanel } from "./registry-credentials";
 import { registryEntries } from "./connectors.mjs";
 import { UNAVAILABLE, formatImageCreated, formatImageSize, formatImageText, shortDigest, sortedLabels } from "./image-format.js";
+import { navigate } from "./router";
 
 // InventoryImage mirrors the kuke serve image-inventory response (#1406).
 // size and createdAt are null when containerd cannot resolve them.
@@ -14,7 +15,7 @@ type RealmDoc = { metadata: { name: string }; spec?: unknown };
 
 const pageSize = 25;
 function inventoryAPI(realm: string, ref?: string): string {
-  return `/api/realms/${encodeURIComponent(realm)}/image-inventory` + (ref ? "/" + encodeURIComponent(ref) : "");
+  return `/realms/${encodeURIComponent(realm)}/image-inventory` + (ref ? "/" + encodeURIComponent(ref) : "");
 }
 function Labels({ labels }: { labels: Record<string, string> }) {
   const entries = sortedLabels(labels);
@@ -22,9 +23,9 @@ function Labels({ labels }: { labels: Record<string, string> }) {
 }
 
 function RealmPicker({ realm, revision }: { realm: string; revision: number }) {
-  const realms = useResource<RealmDoc[]>("/api/realms", revision);
+  const realms = useResource<RealmDoc[]>("/realms", revision);
   const names = [...new Set([...(realms.data ?? []).map(doc => doc.metadata.name), realm].filter(Boolean))].sort();
-  return <label>Realm<select aria-label="Realm" value={realm} disabled={!names.length} onChange={e => { window.location.hash = imagesLink(e.target.value); }}>
+  return <label>Realm<select aria-label="Realm" value={realm} disabled={!names.length} onChange={e => { navigate(imagesLink(e.target.value)); }}>
     {!names.length && <option value="">{realms.loading ? "Loading realms…" : "No realms"}</option>}
     {names.map(name => <option key={name} value={name}>{name}</option>)}
   </select></label>;
@@ -35,7 +36,7 @@ function RealmPicker({ realm, revision }: { realm: string; revision: number }) {
 // where they take effect, rather than among the connectors of a cell.
 function RealmRegistryCredentials({ realm, revision }: { realm: string; revision: number }) {
   const [saved, setSaved] = useState(0);
-  const doc = useResource<RealmDoc>(`/api/realms/${encodeURIComponent(realm)}`, revision + saved);
+  const doc = useResource<RealmDoc>(`/realms/${encodeURIComponent(realm)}`, revision + saved);
   if (doc.loading && !doc.data) return <p role="status">Loading registry credentials…</p>;
   if (doc.error && !doc.data) return <ErrorNotice error={doc.error} />;
   if (!doc.data) return null;
@@ -104,7 +105,7 @@ function ImageDetailView({ realm, reference, revision }: { realm: string; refere
 // ImagesPage browses a realm's containerd image inventory through kukeond
 // (#1406). Read-only: loading, deleting, pruning and building stay on the CLI.
 export function ImagesPage({ scope, revision }: { scope: string[]; revision: number }) {
-  const realms = useResource<RealmDoc[]>(scope[0] ? null : "/api/realms", revision);
+  const realms = useResource<RealmDoc[]>(scope[0] ? null : "/realms", revision);
   const names = (realms.data ?? []).map(doc => doc.metadata.name);
   const realm = scope[0] || (names.includes("default") ? "default" : names.sort()[0] ?? "");
   if (!realm) {

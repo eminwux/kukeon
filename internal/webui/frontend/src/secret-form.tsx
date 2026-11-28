@@ -7,6 +7,7 @@ import { ScopeGroup, ScopePicker, SecretMaterialFields, sendJSON, toFailure } fr
 import { clearMaterial, emptySecretForm, scopeLevels, scopeParts, secretErrors, secretPayload, secretTypeOf, secretTypes } from "./connectors.mjs";
 import type { IdentityForm as FormState, Scope } from "./connectors.mjs";
 import type { InventoryResource } from "./inventory";
+import { navigate, routeHref } from "./router";
 
 type SecretDoc = { metadata: { name: string; realm?: string; space?: string; stack?: string; cell?: string }; spec?: { type?: string } };
 type SecretResult = { name: string; scope: string[]; type: string; action: string };
@@ -82,12 +83,12 @@ export function SecretForm({ scope, existing, onSaved, onCancel }: {
 export function NewSecretPage({ inventory, onChanged }: { inventory: InventoryResource; onChanged: () => void }) {
   const [scope, setScope] = useState<Scope>({ realm: "" });
   return <>
-    <div className="detail-actions"><a href="#/secrets">← Back to secrets</a></div>
+    <div className="detail-actions"><a href={routeHref("/secrets")}>← Back to secrets</a></div>
     <section className="panel new-secret-panel" aria-label="New Secret"><div className="panel-body">
       <ScopeGroup title="Stored in" description="The Realm, Space or Stack the Secret belongs to. Cells reference it there through secretRef.">
         <ScopePicker label="Secret scope" inventory={inventory} levels={scopeLevels} value={scope} onChange={setScope} />
       </ScopeGroup>
-      <SecretForm key={JSON.stringify(scopeParts(scope))} scope={scopeParts(scope)} onSaved={path => { onChanged(); window.location.hash = catalogPageLink("secrets", path); }} onCancel={() => { window.location.hash = "#/secrets"; }} />
+      <SecretForm key={JSON.stringify(scopeParts(scope))} scope={scopeParts(scope)} onSaved={path => { onChanged(); navigate(catalogPageLink("secrets", path)); }} onCancel={() => { navigate(routeHref("/secrets")); }} />
     </div></section>
   </>;
 }

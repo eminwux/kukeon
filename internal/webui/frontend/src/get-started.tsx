@@ -36,14 +36,14 @@ export function GetStarted({ revision, inventory, configs, majordomoCells, onOpe
 }) {
   const [settings, set] = useSettings();
   const active = settings.showGetStarted;
-  const teams = useResource<{ teams: TeamSummary[] }>(active ? "/api/teams" : null, revision);
-  const catalog = useResource<Connector[]>(active ? "/api/connectors" : null, revision);
-  const secrets = useResource<unknown[]>(active ? "/api/catalog/secrets" : null, revision);
-  const templates = useResource<{ templates: AgentTemplateRef[] }>(active ? "/api/agents/templates" : null, revision);
+  const teams = useResource<{ teams: TeamSummary[] }>(active ? "/teams" : null, revision);
+  const catalog = useResource<Connector[]>(active ? "/connectors" : null, revision);
+  const secrets = useResource<unknown[]>(active ? "/catalog/secrets" : null, revision);
+  const templates = useResource<{ templates: AgentTemplateRef[] }>(active ? "/agents/templates" : null, revision);
   // While a login session runs the login identities are re-read, so the Log in
   // step completes in place when the identity cell ends.
   const [tick, setTick] = useState(0);
-  const logins = useResource<unknown[]>(active ? "/api/connectors/logins" : null, revision + tick);
+  const logins = useResource<unknown[]>(active ? "/connectors/logins" : null, revision + tick);
   const loginRunning = (logins.data ?? []).some(item => !!(item as { session?: unknown } | null)?.session);
   useEffect(() => {
     if (!loginRunning) return undefined;

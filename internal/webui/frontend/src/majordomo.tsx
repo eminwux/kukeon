@@ -12,6 +12,7 @@ import { configLabel } from "./cells.mjs";
 import { InitializePrompt } from "./initialize";
 import { startLogin } from "./connector-ui";
 import { connectorStatuses, connectorTitle, keepsLogin, loginEmpty, loginIdentitiesFor, loginLoggedIn, sameRef, type ConnectorStatus } from "./connectors.mjs";
+import { apiFetch } from "./transport";
 
 // Majordomo is found by label, never by name: its configs and cells carry the kuke team and the
 // majordomo role, and a task config additionally names its task.
@@ -90,7 +91,7 @@ function createdAt(row: Row): number {
 }
 
 export function useMajordomo(inventory: InventoryResource, revision: number): Majordomo {
-  const configs = useResource<ConfigDoc[]>("/api/catalog/configs", revision);
+  const configs = useResource<ConfigDoc[]>("/catalog/configs", revision);
   // The choice survives inventory refreshes: only the user, or the loss of the chosen cell, changes it.
   const [chosen, setChosen] = useState(() => stored(activeKey) ?? "");
   const select = useMemo(() => (key: string) => { setChosen(key); save(activeKey, key); }, []);
@@ -237,7 +238,7 @@ export function MajordomoToolbarButton({ dock }: { dock: MajordomoDock }) {
 }
 
 async function postJSON(path: string, body?: unknown): Promise<{ ok: boolean; status: number; body: { error?: { code?: string; message?: string }; [key: string]: unknown } }> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     method: "POST",
     headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -297,7 +298,7 @@ function MajordomoLogin({ status, asking = false, busy = false, onContinue, onCh
   const [failure, setFailure] = useState("");
   const [watching, setWatching] = useState(false);
   const [tick, setTick] = useState(0);
-  const logins = useResource<unknown[]>(watching ? "/api/connectors/logins" : null, tick);
+  const logins = useResource<unknown[]>(watching ? "/connectors/logins" : null, tick);
   const seen = useRef(false);
   const misses = useRef(0);
   useEffect(() => {
@@ -440,10 +441,10 @@ export function MajordomoPanel({ major, dock, inventory, manager, theme, revisio
     const name = major.cells.length ? config.metadata.name : cellName;
     try {
       const request = { config: { name: config.metadata.name, realm: config.metadata.realm, space: config.metadata.space, stack: config.metadata.stack }, name, env: [], ignoreDiskPressure: false };
-      const preview = await postJSON("/api/cells/from-config/preview", request);
+      const preview = await postJSON("/cells/from-config/preview", request);
       if (!preview.ok) throw new Error(preview.body.error?.message ?? `HTTP ${preview.status}`);
       const document = preview.body.document as Doc | undefined;
-      const created = await postJSON("/api/cells/from-config/create", { ...request, resolvedName: document?.metadata.name, preview: preview.body.preview });
+      const created = await postJSON("/cells/from-config/create", { ...request, resolvedName: document?.metadata.name, preview: preview.body.preview });
       if (!created.ok) throw new Error(created.body.error?.message ?? `HTTP ${created.status}`);
       const cell = created.body as unknown as Doc;
       inventory.upsertCell(cell);

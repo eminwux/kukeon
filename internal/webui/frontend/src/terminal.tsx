@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkSessionAfterSocketFailure } from "./auth";
+import { apiSocket } from "./transport";
 import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -274,7 +275,7 @@ export function TerminalSession({ session, active, expanded, theme, update, pend
     if (session.state === "disconnected" || session.state === "interrupted") return;
     let connection: WebSocket;
     try {
-      connection = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${endpoint?.path ?? `${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`}`);
+      connection = apiSocket(endpoint?.path ?? `${apiPath(session.scope)}/containers/${encodeURIComponent(session.container)}/attach`);
     } catch {
       update(session.id, session.generation, "disconnected", "Terminal connection failed. Check the server and retry.");
       return;

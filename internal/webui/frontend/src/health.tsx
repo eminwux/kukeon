@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { systemTeam, teamsLink } from "./teams.mjs";
+import { systemTeam } from "./teams.mjs";
 import { useResource, ErrorNotice } from "./request";
 import { AskMajordomo, configScope, harnessLabel, majordomoRole, oneLine, sweepTask, type ConfigDoc, type Majordomo } from "./majordomo";
 import { ScheduleDetails, cellLinker, when } from "./schedule";
@@ -8,6 +8,9 @@ import { DaemonNav } from "./daemon";
 import { connectorsLink } from "./connector-ui";
 import { InitializePrompt } from "./initialize";
 import { connectorStatuses, stateResolved, type Connector } from "./connectors.mjs";
+import { apiFetch } from "./transport";
+import { routeHref } from "./router";
+import { teamsLink } from "./routes";
 
 // The connector issue filing uses (#1649, D9): kuke health report submit --file-issues reads GH_TOKEN, so
 // filing is GitHub-only. This is a fact about kuke health, not about the connector catalog.
@@ -30,7 +33,7 @@ type Report = {
 };
 export type Summary = { id: string; createdAt: string; since: string; until: string; summary: string; findings: number; recurring: number; filed: number };
 
-function configLink(scope: string[]): string { return "#/configs/" + scope.map(encodeURIComponent).join("/"); }
+function configLink(scope: string[]): string { return routeHref("/configs/" + scope.map(encodeURIComponent).join("/")); }
 const classTone: Record<string, string> = { kukeon: "error", workload: "warning", unclear: "neutral" };
 
 function FindingItem({ finding }: { finding: Finding }) {
@@ -120,11 +123,11 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
   const [selected, setSelected] = useState("latest");
   const [running, setRunning] = useState("");
   const [sweepResult, setSweepResult] = useState<{ tone: "success" | "error"; message: string } | null>(null);
-  const list = useResource<Summary[]>("/api/health/reports", revision + reads);
-  const connectors = useResource<Connector[]>("/api/connectors", 0);
+  const list = useResource<Summary[]>("/health/reports", revision + reads);
+  const connectors = useResource<Connector[]>("/connectors", 0);
   const filing = connectors.data?.find(connector => connector.name === filingConnector);
   const hasReports = !!list.data?.length;
-  const report = useResource<Report>(hasReports ? `/api/health/reports/${encodeURIComponent(selected)}` : null, revision + reads);
+  const report = useResource<Report>(hasReports ? `/health/reports/${encodeURIComponent(selected)}` : null, revision + reads);
   // A report dropped by retention falls back to the newest one.
   useEffect(() => {
     if (selected !== "latest" && list.data && !list.data.some(item => item.id === selected)) setSelected("latest");
@@ -134,7 +137,7 @@ export function HealthPage({ revision, major, inventory, onChanged, onSeen }: { 
     if (running) return;
     setRunning(config.metadata.name); setSweepResult(null);
     try {
-      const response = await fetch("/api/health/sweep", {
+      const response = await apiFetch("/health/sweep", {
         method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({ config: { name: config.metadata.name, realm: config.metadata.realm, space: config.metadata.space, stack: config.metadata.stack } }),
       });

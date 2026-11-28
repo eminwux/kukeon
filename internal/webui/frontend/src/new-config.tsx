@@ -12,6 +12,8 @@ import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, FormSe
 import { ConnectorIdentities, IdentitySelect, LoginIdentitySelect, connectorsLink } from "./connector-ui";
 import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, loginIdentitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorStatus } from "./connectors.mjs";
+import { apiFetch } from "./transport";
+import { routeHref } from "./router";
 
 type ScopeMetadata = { name: string; realm?: string; space?: string; stack?: string };
 type CatalogDoc = { metadata: ScopeMetadata; spec?: Record<string, unknown>; kind?: string };
@@ -29,7 +31,7 @@ const signingTypes = ["ssh-key"];
 function scopedName(metadata: ScopeMetadata): string[] {
   return [metadata.realm, metadata.space, metadata.stack, metadata.name].filter((value): value is string => !!value);
 }
-function catalogLink(kind: string, scope: string[]): string { return `#/${kind}/` + scope.map(encodeURIComponent).join("/"); }
+function catalogLink(kind: string, scope: string[]): string { return routeHref(`/${kind}/` + scope.map(encodeURIComponent).join("/")); }
 function fieldId(...parts: string[]): string { return "config-" + parts.join("-").replace(/[^a-zA-Z0-9_-]/g, "-"); }
 function choiceKey(ref: Partial<SecretRef> | undefined): string {
   return ref?.name ? JSON.stringify([ref.realm ?? "", ref.space ?? "", ref.stack ?? "", ref.cell ?? "", ref.name]) : "";
@@ -180,16 +182,16 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     const hasStack = hasSpace && inventory.data.rows[2].some(row => row.scope[0] === first.scope[0] && row.scope[1] === "default" && row.scope[2] === "default");
     setRealm(first.scope[0]); setSpace(hasSpace ? "default" : ""); setStack(hasStack ? "default" : "");
   }, [inventory.data, realm, realms]);
-  const secrets = useResource<unknown[]>("/api/catalog/secrets", revision);
-  const logins = useResource<unknown[]>("/api/connectors/logins", revision);
-  const images = useResource<ImageList>(realm ? `/api/realms/${encodeURIComponent(realm)}/image-inventory` : null, revision);
+  const secrets = useResource<unknown[]>("/catalog/secrets", revision);
+  const logins = useResource<unknown[]>("/connectors/logins", revision);
+  const images = useResource<ImageList>(realm ? `/realms/${encodeURIComponent(realm)}/image-inventory` : null, revision);
   // Connector components (#1548): one method per group, and an identity picker per connector that
   // shows the default the Config's scope would inherit. Nothing is fetched for a blueprint without them.
   const hasConnectors = form.components.some(component => component.connector);
   const { groups, ungrouped: optional } = useMemo(() => groupComponents(form.components), [form]);
-  const connectors = useResource<Connector[]>(hasConnectors ? "/api/connectors" : null, revision);
+  const connectors = useResource<Connector[]>(hasConnectors ? "/connectors" : null, revision);
   const target = targetScope({ realm, space, stack });
-  const defaults = useResource<ConnectorDefault[]>(hasConnectors && realm ? `/api/connectors/defaults?${scopeQuery(target)}` : null, revision);
+  const defaults = useResource<ConnectorDefault[]>(hasConnectors && realm ? `/connectors/defaults?${scopeQuery(target)}` : null, revision);
   // A group starts on the method the catalog marks default until the operator chooses one.
   const effective = useMemo<Answers>(() => ({ ...answers, groups: { ...defaultGroupChoices(form.components, connectors.data), ...answers.groups } }), [answers, form, connectors.data]);
   const mode = previewMode(form, effective, requestedMode);
@@ -206,7 +208,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
     const scope = [realm, space, stack, name.trim()].filter(Boolean);
     try {
       const body = { config: { name: name.trim(), realm, ...(space ? { space } : {}), ...(stack ? { stack } : {}) }, spec: buildSpec(blueprintRef, form, effective), ...(mode ? { mode } : {}), ...(create && preview ? { preview: preview.preview } : {}) };
-      const response = await fetch(`/api/configs/from-blueprint/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
+      const response = await apiFetch(`/configs/from-blueprint/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
       const result = await response.json();
       if (!response.ok) {
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;
@@ -373,7 +375,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
 // NewConfigPage creates a CellConfig from a blueprint using only the form the
 // blueprint document describes (#1472, step 16).
 export function NewConfigPage({ revision, inventory, blueprintScope, onCreated }: { revision: number; inventory: InventoryResource; blueprintScope?: string[]; onCreated: () => void }) {
-  const blueprints = useResource<CatalogDoc[]>("/api/catalog/blueprints", revision);
+  const blueprints = useResource<CatalogDoc[]>("/catalog/blueprints", revision);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(blueprintScope?.length ? JSON.stringify(blueprintScope) : "");
   const rows = (blueprints.data ?? []).map(doc => ({ doc, scope: scopedName(doc.metadata) }));

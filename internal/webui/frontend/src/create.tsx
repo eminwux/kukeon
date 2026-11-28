@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { apiFetch } from "./transport";
+import { navigate, routeHref } from "./router";
 
 type Config = { name: string; realm?: string; space?: string; stack?: string };
 type Cell = { metadata: { name: string }; spec: { realmId: string; spaceId: string; stackId: string } };
@@ -13,13 +15,13 @@ export function CreateCell({ config, onCreated }: { config: Config; onCreated: (
   async function submit(create: boolean) {
     setPending(true); setError("");
     try {
-      const response = await fetch(`/api/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: { name: config.name, realm: config.realm, space: config.space, stack: config.stack }, name, env: env.split("\n").filter(Boolean), ignoreDiskPressure: ignore, preview: preview?.preview ?? "" }) });
+      const response = await apiFetch(`/cells/from-config/${create ? "create" : "preview"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: { name: config.name, realm: config.realm, space: config.space, stack: config.stack }, name, env: env.split("\n").filter(Boolean), ignoreDiskPressure: ignore, preview: preview?.preview ?? "" }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message ?? result.error?.message ?? "Request failed");
       if (create) {
         const cell = result as Cell;
         onCreated();
-        window.location.hash = "#/resource/" + [cell.spec.realmId, cell.spec.spaceId, cell.spec.stackId, cell.metadata.name].map(encodeURIComponent).join("/");
+        navigate(routeHref("/resource/" + [cell.spec.realmId, cell.spec.spaceId, cell.spec.stackId, cell.metadata.name].map(encodeURIComponent).join("/")));
       } else setPreview(result);
     } catch (failure) { setError((failure as Error).message); if (create) setPreview(undefined); }
     finally { setPending(false); }

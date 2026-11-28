@@ -146,7 +146,7 @@ export function SidebarRail({ view, inventory, selectedScope, connection, onExpa
     return <li key={JSON.stringify(row.scope)}><a className={`rail-cell tone-${stateTone(state)}${unreadBytes ? " has-unread" : ""}`} href={workspaceLink(row.scope)} aria-label={label} title={label} aria-current={isCurrent(row) ? "page" : undefined}><span className="state-dot" aria-hidden="true" /></a></li>;
   };
   return <div className="sidebar-rail">
-    <a className="rail-brand" href={homeLink} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
+    <a className="rail-brand" href={homeLink()} aria-label="kukeon home" title="kukeon"><BrandMark /></a>
     <SidebarToggle collapsed onToggle={onExpand} />
     {majordomo}
     {view !== "workbench" ? <div className="rail-spacer" /> : <nav className="rail-cells" aria-label="Cell shortcuts">

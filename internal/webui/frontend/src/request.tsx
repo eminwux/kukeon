@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "./transport";
 
 export type Failure = { code: string; message: string };
 export type Resource<T> = { data?: T; loading: boolean; error?: Failure };
@@ -18,7 +19,7 @@ export function useResource<T>(path: string | null, revision: number): Resource<
     setState((old) => ({ data: old.data, loading: true }));
     void (async () => {
       try {
-        const response = await fetch(path, { signal: controller.signal });
+        const response = await apiFetch(path, { signal: controller.signal });
         const body = await response.json();
         if (!response.ok) throw body.error ?? { code: "http_error", message: `HTTP ${response.status}` };
         if (!controller.signal.aborted) setState({ data: body, loading: false });

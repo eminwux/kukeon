@@ -4,6 +4,7 @@ import { daemonLink, healthLink, overviewLink } from "./routes";
 import type { InventoryResource } from "./inventory";
 import { MAX_CHARS, MAX_LINES, applyChunk, emptyLogBuffer, healthLabel, healthTone, type LogBuffer, type LogChunk } from "./log-buffer.js";
 import { AskMajordomo, oneLine } from "./majordomo";
+import { apiFetch } from "./transport";
 
 // DaemonHealth mirrors GET /api/daemon/health (issue #1386, step 6). It only
 // reports whether kukeond answered a Ping over the configured socket.
@@ -48,7 +49,7 @@ function daemonQuestion(data: DaemonHealth): string {
 
 export function DaemonHealthPage({ revision, inventory }: { revision: number; inventory: InventoryResource }) {
   const [checks, setChecks] = useState(0);
-  const health = useResource<DaemonHealth>("/api/daemon/health", revision + checks);
+  const health = useResource<DaemonHealth>("/daemon/health", revision + checks);
   const data = health.data;
   const versionsDiffer = !!data?.daemonVersion && displayVersion(data.daemonVersion) !== displayVersion(data.serverVersion);
   return <>
@@ -74,13 +75,13 @@ export function DaemonHealthPage({ revision, inventory }: { revision: number; in
     </section>
     <section className="panel" aria-label="Health scope">
       <div className="panel-heading"><h2>What this check covers</h2></div>
-      <div className="panel-body"><p className="description">Connectivity means kukeond answered a ping on the selected socket using this server's permissions. It does not report the health of cells, containers, cgroups, networking or other subsystems. Review cell states in <a className="text-link" href={overviewLink}>Overview</a>, read the <a className="text-link" href={daemonLink("logs")}>daemon logs</a>, or run <code>kuke status</code> for host pre-flight and state-consistency checks.</p></div>
+      <div className="panel-body"><p className="description">Connectivity means kukeond answered a ping on the selected socket using this server's permissions. It does not report the health of cells, containers, cgroups, networking or other subsystems. Review cell states in <a className="text-link" href={overviewLink()}>Overview</a>, read the <a className="text-link" href={daemonLink("logs")}>daemon logs</a>, or run <code>kuke status</code> for host pre-flight and state-consistency checks.</p></div>
     </section>
   </>;
 }
 
 async function readChunk(offset: number, signal: AbortSignal): Promise<LogChunk> {
-  const response = await fetch(`/api/daemon/logs?offset=${offset}&maxBytes=${TAIL_BYTES}`, { signal, headers: { Accept: "application/json" } });
+  const response = await apiFetch(`/daemon/logs?offset=${offset}&maxBytes=${TAIL_BYTES}`, { signal, headers: { Accept: "application/json" } });
   let body: { error?: Failure } & LogChunk = {};
   try { body = await response.json(); } catch { /* Use the HTTP status below. */ }
   if (!response.ok) throw body.error ?? { code: "http_error", message: `HTTP ${response.status}` };

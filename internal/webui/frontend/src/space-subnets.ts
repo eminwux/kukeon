@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiPath } from "./routes";
 import type { Resource } from "./request";
 import type { SpaceNetwork } from "./network-format.js";
+import { apiFetch } from "./transport";
 
 // At most this many Space network reads run at once, as the inventory's own fan-out.
 const concurrency = 6;
@@ -33,7 +34,7 @@ export function useSpaceSubnets(scopes: string[][], refresh: string | number): R
     const read = async (scope: string[]) => {
       const id = JSON.stringify(scope);
       try {
-        const response = await fetch(`${apiPath(scope)}/network`, { signal: controller.signal, headers: { Accept: "application/json" } });
+        const response = await apiFetch(`${apiPath(scope)}/network`, { signal: controller.signal, headers: { Accept: "application/json" } });
         const body = await response.json();
         if (!response.ok) throw body.error ?? { code: "http_error", message: `HTTP ${response.status}` };
         // Anything but a detail with a space section is not a subnet read.
