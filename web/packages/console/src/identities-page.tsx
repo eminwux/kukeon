@@ -4,7 +4,7 @@ import { useNotify } from "./notifications";
 import type { InventoryResource } from "./inventory";
 import { CatalogDeleteConfirmation } from "./catalog";
 import { catalogDeleteAPI } from "./catalog-url.mjs";
-import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, levelLabel, newIdentityLink, newLoginIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure, volumeLink } from "./connector-ui";
+import { IdentityForm, IdentitySelect, LoginButton, LoginStateBadge, ScopeGroup, ScopePicker, ScopeRadio, connectorAPI, connectorCatalogLink, identitiesLink, identityPageLink, levelLabel, newIdentityLink, newLoginIdentityLink, rotateIdentityLink, sendJSON, startLogin, toFailure } from "./connector-ui";
 import { Disclosure } from "@kukeon/ui";
 import { connectorSetUp, notSetUpText } from "./onboarding.mjs";
 import {
@@ -14,16 +14,16 @@ import {
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, Scope, SecretRef } from "./connectors.mjs";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
 import { navigate, routeHref } from "./router";
-import { defaultRole, defaultTeam, filterRows, identityRows, kindLogin, kindSecret, loginMethodOf, markDefaults, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
+import { defaultRole, defaultTeam, filterRows, findRow, identityRows, kindLogin, loginMethodOf, markDefaults, pageKind, pageLogin, pageSecret, pinnedFor, scopeLabel, systemDefaults, usedByCount } from "./identities.mjs";
 import type { IdentityRow, SystemDefault } from "./identities.mjs";
 import { AssignmentsTab } from "./assignments-tab";
+import { IdentityDetailPage } from "./identity-page";
 
 // The Identities page (#1790): every credential a cell uses, from the connector catalog
 // (GET /api/connectors), the tagged Secrets and the login identities. A connector added as one
 // connector.yaml is listed, given identities and defaulted here with no change to this file. The
 // catalog itself is read-only on the Daemon page's Connectors tab.
 
-function identityLink(identity: SecretRef): string { return routeHref("/secrets/" + [...refScope(identity), identity.name].map(encodeURIComponent).join("/")); }
 function configLink(config: { name: string; realm?: string; space?: string; stack?: string }): string {
   return routeHref("/configs/" + [config.realm, config.space, config.stack, config.name].filter((value): value is string => !!value).map(encodeURIComponent).join("/"));
 }
@@ -128,8 +128,9 @@ function IdentityCells({ row }: { row: IdentityRow }) {
   </>;
 }
 
+// IdentityName links to the identity's page (#1805), a login identity not created yet included.
 function IdentityName({ row }: { row: IdentityRow }) {
-  return <>{row.kind === kindSecret ? <a className="resource-name" href={identityLink(row.ref)}>{row.name}</a> : row.exists ? <a className="resource-name" href={volumeLink(row.ref)}>{row.name}</a> : <span className="resource-name">{row.name}</span>}
+  return <><a className="resource-name" href={identityPageLink(row.connector, pageKind(row), row.ref)}>{row.name}</a>
     {row.kind === kindLogin && !row.exists && <> <span className="badge">Not created yet</span></>}
     {row.session && <> <span className="badge">Login running</span></>}</>;
 }
@@ -490,8 +491,8 @@ function IdentitiesNav({ current }: { current: "identities" | "assignments" }) {
 }
 
 // IdentitiesPage is #/identities, filtered on a connector with ?connector=, its Assignments tab
-// #/identities/assignments, and the identity forms #/identities/<name>/new-identity, …/new-login and
-// …/rotate-identity.
+// #/identities/assignments, the identity forms #/identities/<name>/new-identity, …/new-login and
+// …/rotate-identity, and the page of one identity …/identity and …/login (#1805).
 export function IdentitiesPage({ connector: filter, section, target, action, identity, revision, inventory, onChanged, onTitle }: { connector?: string; section?: string; target?: string[]; action?: string; identity?: string[]; revision: number; inventory: InventoryResource; onChanged: () => void; onTitle?: (connector: { name: string; title: string }) => void }) {
   const catalog = useResource<Connector[]>("/connectors", revision);
   const usage = useResource<ConnectorUsage[]>("/connectors/status", revision);
@@ -520,6 +521,12 @@ export function IdentitiesPage({ connector: filter, section, target, action, ide
   const rows = useMemo(() => markDefaults(identityRows({ connectors, secrets: secrets.data, logins: logins.data, configs, scopes }), realmDefaults.data), [connectors, secrets.data, logins.data, configs, scopes, realmDefaults.data]);
   const unknown = catalog.data && filter && !connector;
   if (section === "assignments") return <><IdentitiesNav current="assignments" /><AssignmentsTab revision={revision} onChanged={onChanged} /></>;
+  if (action === pageSecret || action === pageLogin) {
+    const row = findRow(rows, action, filter, identity);
+    const loading = (catalog.loading && !catalog.data) || (secrets.loading && !secrets.data) || (logins.loading && !logins.data) || (inventory.loading && !inventory.data);
+    const pinned = hasDefaultRealm ? pinnedFor(systemDefaults({ connectors, rows, realmDefaults: realmDefaults.data }), row) : [];
+    return <IdentityDetailPage key={`${action}:${filter}:${JSON.stringify(identity ?? [])}`} connector={connector} row={row} pinned={pinned} loading={!!loading} wanted={identity} revision={revision} inventory={inventory} onChanged={onChanged} />;
+  }
   if (action === "new-login" && connector && loginMethods(connector).length) return <NewLoginIdentityPage key={connector.name} connector={connector} logins={logins.data} target={scope} inventory={inventory} onChanged={onChanged} />;
   if (action && action !== "new-login" && connector && defaultTargets(connector).length > 0) return <IdentityPage key={`${connector.name}:${action}`} connector={connector} connectors={catalog.data ?? []} action={action} identity={identity} target={scope} identities={identitiesFor(secrets.data, connector.name)} secrets={secrets.data} secretsLoading={secrets.loading && !secrets.data} inventory={inventory} onChanged={onChanged} />;
   const shown = connector ? [connector] : filter ? [] : connectors;

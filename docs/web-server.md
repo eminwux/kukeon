@@ -1065,6 +1065,23 @@ existing teams at it.
 An identity no Config and no Realm, Space or Stack default uses is marked
 **Unused**, so an old per-role Volume can be found and deleted.
 
+An identity's name opens its page: `#/identities/<name>/identity?identity=[realm,
+space?, stack?, name]` for a Secret and `#/identities/<name>/login?identity=[…]`
+for a login identity — a connector can hold both under the same name and
+scope, so the route says which. A login identity no cell created yet has a page
+too. The page is built from the rows the list reads, with no request of its
+own. It shows the name with its **System default**, **Unused**, **Not created
+yet** and **Login running** badges; the connector (linked to the list filtered
+on it), the method or Secret type, what it is delivered as, its scope, the
+login status with its date, and a link to the Secret or Volume that stores it;
+the readable fields of a Secret; the connector × method it is the System
+default for and each Realm, Space or Stack default naming it; the team roles
+using it; and **Used by**, a table of the Configs using it — name linked, role
+and scope — with the Config and team count, in pages of 25. Its actions are
+**Log in** / **Log in again**, **Rotate**, **Delete** — which returns to the
+list — and a link to **Assignments**. An identity that does not exist says
+**Identity not found** with a link back to the list.
+
 **New identity** asks for the connector first — for a connector with both a
 token or key method and a login method, which kind — then opens the
 connector's form: `#/identities/<name>/new-identity` for a Secret, or

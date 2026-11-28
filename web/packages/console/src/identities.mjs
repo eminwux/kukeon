@@ -165,3 +165,67 @@ export function usedByCount(row) {
 
 // scopeLabel words a row's scope as realm / space / stack.
 export function scopeLabel(row) { return list(row?.scope).join(" / "); }
+
+// The identity page (#1805) is the page of one row, opened from its name in the list. The route's kind
+// says which one: a connector can hold a Secret and a login identity of the same name and scope.
+export const pageSecret = "identity";
+export const pageLogin = "login";
+export function pageKind(row) { return row?.kind === kindLogin ? pageLogin : pageSecret; }
+
+// findRow finds the row a page route names: its kind (pageSecret or pageLogin), connector and
+// [realm, space?, stack?, name].
+export function findRow(rows, page, connector, parts) {
+  const path = list(parts).filter(value => typeof value === "string");
+  if (path.length < 2) return undefined;
+  const [realm, space, stack] = path.slice(0, -1);
+  const key = refKey({ name: path.at(-1), realm, space, stack });
+  const kind = page === pageLogin ? kindLogin : kindSecret;
+  return list(rows).find(row => row.kind === kind && row.connector === connector && refKey(row.ref) === key);
+}
+
+// pinnedFor lists the system defaults a row is: the connector × method rows pinning it.
+export function pinnedFor(pinned, row) {
+  return row ? list(pinned).filter(item => item.row?.key === row.key) : [];
+}
+
+// unpinnedRows drops the rows a system default pins: those are listed once, pinned first.
+export function unpinnedRows(rows, pinned) {
+  const keys = new Set(list(pinned).map(item => item.row?.key).filter(Boolean));
+  return list(rows).filter(row => !keys.has(row.key));
+}
+
+// searchRows keeps the rows whose name contains query, case-insensitively; an empty query keeps all.
+export function searchRows(rows, query) {
+  const wanted = text(query).trim().toLowerCase();
+  return wanted ? list(rows).filter(row => text(row.name).toLowerCase().includes(wanted)) : list(rows);
+}
+
+export const pageSize = 25;
+// pageOf is one page of items: the items shown, the page clamped to the last one, and the 1-based
+// range shown ("26–50 of 103").
+export function pageOf(items, page, size = pageSize) {
+  const all = list(items);
+  const last = Math.max(0, Math.ceil(all.length / size) - 1);
+  const current = Math.min(Math.max(0, Math.trunc(Number(page) || 0)), last);
+  const shown = all.slice(current * size, (current + 1) * size);
+  return { items: shown, page: current, last, first: shown.length ? current * size + 1 : 0, end: current * size + shown.length, total: all.length };
+}
+
+// defaultLabel words a scope default naming an identity: "Realm default default".
+export function defaultLabel(item) {
+  const level = text(item?.level);
+  return `${level ? level[0].toUpperCase() + level.slice(1) : "Scope"} default ${list(item?.scope).join(" / ")}`.trim();
+}
+
+// usedBySummary words a row's Used by cell: "103 Configs · 5 teams", the defaults naming it when no
+// Config does, or "" for an unused row.
+export function usedBySummary(row) {
+  if (!row || row.unused) return "";
+  const { configs, teams } = usedByCount(row);
+  const parts = [];
+  if (configs) parts.push(`${configs} ${configs === 1 ? "Config" : "Configs"}`);
+  if (teams.length) parts.push(`${teams.length} ${teams.length === 1 ? "team" : "teams"}`);
+  const defaults = list(row.defaults).length;
+  if (defaults) parts.push(configs ? `${defaults} ${defaults === 1 ? "default" : "defaults"}` : list(row.defaults).map(defaultLabel).join(", "));
+  return parts.join(" · ");
+}

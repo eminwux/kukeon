@@ -4627,7 +4627,8 @@ test("Identities lists the login identities with the Secrets, creates one, logs 
   await expect(row("kukeon-dev-demo-state")).toContainText("dev / shared / services");
   await expect(row("kukeon-dev-demo-state").getByRole("link", { name: "teams" })).toHaveAttribute("href", "#/configs/dev/shared/services/teams");
   await expect(row("kukeon-dev-demo-state").getByText("Unused")).toHaveCount(0);
-  await expect(row("demo-personal").getByRole("link", { name: "demo-personal" })).toHaveAttribute("href", "#/volumes/dev/demo-personal");
+  // A name opens the identity's page (#1805).
+  await expect(row("demo-personal").getByRole("link", { name: "demo-personal" })).toHaveAttribute("href", `#/identities/demo/login?identity=${encodeURIComponent(JSON.stringify(["dev", "demo-personal"]))}`);
   // A plain Volume is no identity, and no login content is ever part of the page.
   await expect(table).not.toContainText("scratch");
   // The catalog list counts them with the Secret identities.
@@ -4804,6 +4805,142 @@ test("Identities pins a System default row per connector × method on a fresh re
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(token.getByRole("cell").nth(1)).toContainText("example-shared");
   await expect(token.getByRole("link", { name: /^Rotate Example identity example-shared/ })).toBeVisible();
+});
+
+// #1805 Part 2: the page of one identity, opened from its name in the list and built from the row the list
+// computes: its fields, roles, the defaults naming it, its Configs in pages of 25, and the row actions.
+const identityHref = (connector, kind, parts) => `#/identities/${connector}/${kind}?identity=${encodeURIComponent(JSON.stringify(parts))}`;
+test("an identity page shows a Secret's fields, roles and Configs in pages of 25, and rotates and deletes it", async ({ page }) => {
+  const world = await mockConnectors(page);
+  // 30 Configs of two teams fill Example with example-default.
+  for (let i = 0; i < 30; i++) {
+    const name = `user-${String(i).padStart(2, "0")}`;
+    world.configs.push({ apiVersion: "v1beta1", kind: "CellConfig", metadata: { name, realm: "dev", space: "shared", stack: "services", labels: { "kukeon.io/team": i % 2 ? "kukeon" : "kuke", "kukeon.io/role": i % 2 ? "dev" : "pm" } }, spec: { blueprint: { name: "demo", realm: "dev" }, components: ["example-token"], secrets: { "example-token": { secretRef: { name: "example-default", realm: "dev" } } } } });
+  }
+  await page.goto(`${server.url}#/identities`);
+  const table = page.getByRole("table", { name: "Identities", exact: true });
+  await table.getByRole("link", { name: "example-default", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${identityHref("example-token", "identity", ["dev", "example-default"]).replace(/[?[\]]/g, "\\$&")}$`));
+  await expect(page.locator(".page-heading h1")).toHaveText("example-default");
+  await expect(page.locator(".page-heading .page-context")).toHaveText("Example");
+  await expect(page.getByRole("navigation", { name: "Resource scope" }).getByRole("link", { name: "Identities" })).toHaveAttribute("href", "#/identities");
+  const details = page.getByRole("region", { name: "Example identity example-default — dev" });
+  const grid = details.getByRole("definition");
+  await expect(details.getByRole("link", { name: "Example", exact: true })).toHaveAttribute("href", "#/identities?connector=example-token");
+  await expect(grid.nth(1)).toHaveText("opaque");
+  await expect(grid.nth(2)).toHaveText("token: environment variable EXAMPLE_TOKEN");
+  await expect(grid.nth(3)).toHaveText("dev");
+  await expect(details.getByRole("link", { name: "Secret example-default" })).toHaveAttribute("href", "#/secrets/dev/example-default");
+  await expect(details.locator(".identity-unused")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Fields" })).toContainText("accountacme");
+  await expect(page.getByRole("region", { name: "Roles" }).locator(".label-badge")).toHaveText(["kuke/pm", "kukeon/dev"]);
+  await expect(page.getByRole("region", { name: "Defaults" })).toContainText("No default names this identity.");
+  // Used by: a table of the Configs, 25 a page.
+  const used = page.getByRole("region", { name: "Used by" });
+  await expect(used.locator(".panel-heading")).toContainText("30 Configs · 2 teams");
+  const configs = used.getByRole("table", { name: "Configs using this identity" });
+  await expect(configs.locator("tbody tr")).toHaveCount(25);
+  await expect(configs.getByRole("link", { name: "user-00" })).toHaveAttribute("href", "#/configs/dev/shared/services/user-00");
+  await expect(configs.locator("tbody tr").first().getByRole("cell")).toHaveText(["user-00", "kuke/pm", "dev / shared / services"]);
+  await expect(used.locator(".pagination")).toContainText("1–25 of 30");
+  await used.getByRole("button", { name: "Next" }).click();
+  await expect(configs.locator("tbody tr")).toHaveCount(5);
+  await expect(used.locator(".pagination")).toContainText("26–30 of 30");
+  await expect(used.getByRole("button", { name: "Next" })).toBeDisabled();
+  // Reading the page wrote nothing.
+  expect(world.requests).toHaveLength(0);
+  // Rotate opens the existing form.
+  await details.getByRole("link", { name: "Rotate Example identity example-default — dev" }).click();
+  await expect(page).toHaveURL(/#\/identities\/example-token\/rotate-identity\?identity=/);
+  await expect(page.getByRole("form", { name: "Rotate Example identity example-default" })).toBeVisible();
+
+  // Delete from the page goes through the catalog delete route and returns to the list.
+  await page.goto(`${server.url}${identityHref("example-token", "identity", ["dev", "shared", "services", "example-other"])}`);
+  const other = page.getByRole("region", { name: "Example identity example-other — dev / shared / services" });
+  await expect(other.locator(".identity-unused")).toHaveText("Unused");
+  await expect(page.getByRole("region", { name: "Used by" })).toContainText("No Config uses this identity.");
+  await other.getByRole("button", { name: "Delete Example identity example-other — dev / shared / services" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete secret" });
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(toasts(page).filter({ hasText: "Example identity example-other deleted." })).toBeVisible();
+  expect(world.requests.at(-1)).toEqual({ path: "/api/catalog/secrets/example-other/delete?realm=dev&space=shared&stack=services", body: {} });
+  await expect(page).toHaveURL(/#\/identities$/);
+  await expect(table.getByRole("link", { name: "example-other", exact: true })).toHaveCount(0);
+});
+
+test("a login identity has a page, one not created yet too, apart from a Secret of the same name, and logs in from it", async ({ page }) => {
+  const world = await mockConnectors(page);
+  // A Secret of the same connector, name and scope as a login identity, and a Config whose state volume
+  // no cell created yet.
+  world.secrets.push({ name: "demo-personal", realm: "dev", connector: "demo" });
+  world.configs.push({ apiVersion: "v1beta1", kind: "CellConfig", metadata: { name: "solo", realm: "dev", space: "shared", stack: "services", labels: { "kukeon.io/team": "kukeon", "kukeon.io/role": "qa" } }, spec: { blueprint: { name: "demo", realm: "dev" }, components: ["demo-login"], values: { STATE_VOLUME: "solo-state", STATE_VOLUME_REALM: "dev" } } });
+  await page.goto(`${server.url}#/identities?connector=demo`);
+  const table = page.getByRole("table", { name: "Demo identities" });
+  const links = table.getByRole("link", { name: "demo-personal", exact: true });
+  await expect(links).toHaveCount(2);
+  const hrefs = await links.evaluateAll(items => items.map(item => item.getAttribute("href")).sort());
+  expect(hrefs).toEqual([identityHref("demo", "identity", ["dev", "demo-personal"]), identityHref("demo", "login", ["dev", "demo-personal"])]);
+  // The Secret's page and the login identity's page are two pages.
+  await page.goto(`${server.url}${identityHref("demo", "identity", ["dev", "demo-personal"])}`);
+  const secretPage = page.getByRole("region", { name: "Demo identity demo-personal — dev" });
+  await expect(secretPage.getByRole("definition").nth(1)).toHaveText("opaque");
+  await expect(secretPage.getByRole("link", { name: /^Rotate / })).toBeVisible();
+  await expect(secretPage.getByRole("button", { name: /^Log in/ })).toHaveCount(0);
+  await page.goto(`${server.url}${identityHref("demo", "login", ["dev", "demo-personal"])}`);
+  const loginPage = page.getByRole("region", { name: "Demo login identity demo-personal — dev" });
+  await expect(loginPage.getByRole("definition").nth(1)).toHaveText("login");
+  await expect(loginPage.getByRole("definition").nth(2)).toContainText("login kept in a login identity");
+  await expect(loginPage.getByRole("definition").nth(4)).toHaveText("Empty");
+  await expect(loginPage.getByRole("link", { name: "Volume demo-personal" })).toHaveAttribute("href", "#/volumes/dev/demo-personal");
+  await expect(loginPage.getByRole("link", { name: /^Rotate / })).toHaveCount(0);
+
+  // A login identity not created yet: listed, linked, and its page says so, with nothing to delete.
+  await page.goto(`${server.url}#/identities?connector=demo`);
+  await table.getByRole("link", { name: "solo-state", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${identityHref("demo", "login", ["dev", "solo-state"]).replace(/[?[\]]/g, "\\$&")}$`));
+  const solo = page.getByRole("region", { name: "Demo login identity solo-state — dev" });
+  await expect(solo.locator(".panel-heading .badge")).toHaveText(["Not created yet"]);
+  await expect(solo).toContainText("Not created yet: Log in");
+  await expect(solo.getByRole("button", { name: /^Delete/ })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Roles" })).toContainText("kukeon/qa");
+  await expect(page.getByRole("region", { name: "Used by" }).getByRole("link", { name: "solo" })).toHaveAttribute("href", "#/configs/dev/shared/services/solo");
+
+  // Log in from the page: the identity cell's terminal; back on the page the status follows the session.
+  await page.goto(`${server.url}${identityHref("demo", "login", ["dev", "demo-personal"])}`);
+  await loginPage.getByRole("button", { name: "Log in: Demo identity demo-personal — dev" }).click();
+  await expect.poll(() => world.posts("/api/connectors/demo/login").length).toBe(1);
+  expect(world.posts("/api/connectors/demo/login")[0].body).toEqual({ name: "demo-personal", scope: { realm: "dev" }, method: "login" });
+  await expect(page).toHaveURL(/#\/workspace\/dev\/default\/default\/login-demo-personal$/);
+  await page.goto(`${server.url}${identityHref("demo", "login", ["dev", "demo-personal"])}`);
+  await expect(loginPage.locator(".panel-heading")).toContainText("Login running");
+  world.sessions = {};
+  world.volumes.find(volume => volume.name === "demo-personal").state = "logged in";
+  await expect(loginPage.getByRole("definition").nth(4)).toHaveText("Logged in", { timeout: 10000 });
+  await expect(loginPage.locator(".panel-heading")).not.toContainText("Login running");
+  await expect(loginPage.getByRole("button", { name: "Log in again: Demo identity demo-personal — dev" })).toBeVisible();
+  await expect(loginPage.getByRole("link", { name: "Assignments" })).toHaveAttribute("href", "#/identities/assignments");
+
+  // Deleting a login identity from its page deletes its Volume.
+  await loginPage.getByRole("button", { name: "Delete Demo login identity demo-personal — dev" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete volume" });
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Confirm Delete" }).click();
+  await expect(toasts(page).filter({ hasText: "Demo login identity demo-personal deleted." })).toBeVisible();
+  expect(world.requests.at(-1)).toEqual({ path: "/api/catalog/volumes/demo-personal/delete?realm=dev", body: {} });
+  await expect(page).toHaveURL(/#\/identities$/);
+  // No login content or Secret value is in any page or response it read.
+  expect(await page.content()).not.toContain("marker");
+});
+
+test("an unknown identity's page says Identity not found with a link back to the list", async ({ page }) => {
+  await mockConnectors(page);
+  for (const href of [identityHref("demo", "login", ["dev", "nope"]), identityHref("example-token", "identity", ["dev", "demo-personal"]), identityHref("missing", "identity", ["dev", "x"])]) {
+    await page.goto(`${server.url}${href}`);
+    const alert = page.getByRole("alert").filter({ hasText: "Identity not found" });
+    await expect(alert).toBeVisible();
+    await expect(alert.getByRole("link", { name: "Back to Identities" })).toHaveAttribute("href", "#/identities");
+  }
 });
 
 test("a Config no team owns picks a login identity, and a Volume page shows its tag and login status", async ({ page }) => {
