@@ -4,7 +4,6 @@ import { apiFetch } from "./transport";
 
 export type { Unread } from "./unread.mjs";
 
-const pollMs = 5000;
 // The route takes at most 100 cell parameters; more cells are asked for in further requests, one at a time.
 const maxCellsPerRequest = 100;
 
@@ -54,8 +53,12 @@ async function readActivity(scopes: string[][], signal: AbortSignal): Promise<Re
 }
 
 // useUnread polls GET /api/terminal-activity for scopes (the cells the Workbench sidebar lists) while
-// enabled and the browser tab is visible: an immediate pass, then one every 5 seconds. A tick is
-// skipped while a request is in flight, and everything aborts on unmount, like useCellScreens.
+// enabled and the browser tab is visible: an immediate pass, then one every pollMs (the Unread check
+// interval setting, #1770). A new pollMs restarts the timer. A tick is skipped while a request is in
+// flight, and everything aborts on unmount, like useCellScreens.
+//
+// quietMs is how long a terminal must be quiet before its new output marks the cell (Mark unread
+// after quiet for); 0 marks it on the first new byte.
 //
 // reading is the cell key whose terminal the operator is looking at: its session is the one shown, it
 // is attached, and the tab is visible. Every reading of that cell moves its marker to the terminal's
@@ -65,7 +68,7 @@ async function readActivity(scopes: string[][], signal: AbortSignal): Promise<Re
 //
 // inventoryKeys are the keys of every cell of a complete inventory, or null while it is loading or
 // incomplete: markers of the cells not in it are pruned.
-export function useUnread(scopes: string[][], reading: string | null, enabled: boolean, inventoryKeys: string[] | null): Record<string, Unread> {
+export function useUnread(scopes: string[][], reading: string | null, enabled: boolean, inventoryKeys: string[] | null, pollMs: number, quietMs: number): Record<string, Unread> {
   const stored = useSyncExternalStore(subscribe, () => markers);
   const [readings, setReadings] = useState<Readings>({});
   const [leaving, setLeaving] = useState<string[]>([]);
@@ -122,7 +125,7 @@ export function useUnread(scopes: string[][], reading: string | null, enabled: b
       controller.abort();
       pass.current = null;
     };
-  }, [enabled]);
+  }, [enabled, pollMs]);
 
   // A listed cell with no reading yet (the first inventory, a new cell) is read now, not on the next tick.
   useEffect(() => {
@@ -158,7 +161,7 @@ export function useUnread(scopes: string[][], reading: string | null, enabled: b
     if (Object.keys(next).length !== Object.keys(markers).length) writeMarkers(next);
   }, [inventoryId]);
 
-  return useMemo(() => unreadState(stored, readings, beingRead), [stored, readings, beingRead]);
+  return useMemo(() => unreadState(stored, readings, beingRead, quietMs), [stored, readings, beingRead, quietMs]);
 }
 
 // useTabVisible follows document.visibilityState.

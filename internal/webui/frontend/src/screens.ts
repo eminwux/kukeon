@@ -6,16 +6,16 @@ import { apiFetch } from "./transport";
 // whether the last refresh failed so the text shown is old.
 export type Screen = { text?: string; unavailable?: boolean; stale?: boolean };
 
-const refreshMs = 5000;
 const maxInFlight = 4;
 const key = (scope: string[]) => JSON.stringify(scope);
 
 // useCellScreens polls GET …/screenshot for the cells whose tiles are on screen (scopes): an immediate
-// pass, then one every 5 seconds while enabled and the browser tab is visible. A tick is skipped while
-// a pass is still running, at most four requests are in flight, and everything aborts on unmount or
-// when enabled turns false. A screenshot never attaches, so it does not count against terminal
+// pass, then one every refreshMs (the Thumbnail refresh interval setting, #1770) while enabled and the
+// browser tab is visible. A new refreshMs restarts the timer. A tick is skipped while a pass is still
+// running, at most four requests are in flight, and everything aborts on unmount or when enabled turns
+// false. A screenshot never attaches, so it does not count against terminal
 // connections.
-export function useCellScreens(scopes: string[][], enabled: boolean): Record<string, Screen> {
+export function useCellScreens(scopes: string[][], enabled: boolean, refreshMs: number): Record<string, Screen> {
   const [screens, setScreens] = useState<Record<string, Screen>>({});
   const latest = useRef(scopes);
   latest.current = scopes;
@@ -60,7 +60,7 @@ export function useCellScreens(scopes: string[][], enabled: boolean): Record<str
       controller.abort();
       pass.current = null;
     };
-  }, [enabled]);
+  }, [enabled, refreshMs]);
 
   // A tile that scrolls onto the screen without a screen yet is read now, not on the next tick.
   useEffect(() => {

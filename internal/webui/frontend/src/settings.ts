@@ -1,8 +1,12 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { configLabel } from "./cells.mjs";
-import { defaultRefreshSeconds, parseRefreshSeconds, parseShowGetStarted, parseSwitch, type RefreshSeconds } from "./settings-values.mjs";
+import {
+  defaultGridScreenSeconds, defaultRefreshSeconds, defaultUnreadPollSeconds, defaultUnreadQuietSeconds,
+  parseGridScreenSeconds, parseRefreshSeconds, parseShowGetStarted, parseSwitch, parseUnreadPollSeconds, parseUnreadQuietSeconds,
+  type GridScreenSeconds, type RefreshSeconds, type UnreadPollSeconds, type UnreadQuietSeconds,
+} from "./settings-values.mjs";
 
-// Per-browser UI preferences (#1652, #1686, #1745). Each setting is one row of
+// Per-browser UI preferences (#1652, #1686, #1745, #1770). Each setting is one row of
 // this table: a localStorage key, a label, and a default. A missing or unreadable
 // key reads as the default, and a failed write keeps the value for this page
 // only. Nothing is stored in kukeond.
@@ -30,6 +34,9 @@ type SettingTypes = {
   showGridGroupBy: boolean;
   autoAttach: boolean;
   refreshSeconds: RefreshSeconds;
+  unreadPollSeconds: UnreadPollSeconds;
+  gridScreenSeconds: GridScreenSeconds;
+  unreadQuietSeconds: UnreadQuietSeconds;
   showGetStarted: boolean;
 };
 export type SettingName = keyof SettingTypes;
@@ -84,7 +91,28 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
   // How often the inventory is read while the tab is visible.
   refreshSeconds: {
     key: "kukeon-refresh-seconds", label: "Refresh interval", defaultValue: defaultRefreshSeconds,
+    note: "How often the inventory is read while this tab is visible.",
     parse: parseRefreshSeconds,
+    format: value => String(value),
+  },
+  // The other Workbench timers (#1770): each is its own setting and does not follow Refresh interval.
+  unreadPollSeconds: {
+    key: "kukeon-unread-poll-seconds", label: "Unread check interval", defaultValue: defaultUnreadPollSeconds,
+    note: "How often terminal output is checked for the unread marks in the sidebar, the collapsed rail and the grid tile badges.",
+    parse: parseUnreadPollSeconds,
+    format: value => String(value),
+  },
+  gridScreenSeconds: {
+    key: "kukeon-grid-screen-seconds", label: "Thumbnail refresh interval", defaultValue: defaultGridScreenSeconds,
+    note: "How often the Workbench grid tiles' terminal thumbnails are read.",
+    parse: parseGridScreenSeconds,
+    format: value => String(value),
+  },
+  // 0 is Off: a cell is marked on its first new unread byte.
+  unreadQuietSeconds: {
+    key: "kukeon-unread-quiet-seconds", label: "Mark unread after quiet for", defaultValue: defaultUnreadQuietSeconds,
+    note: "How long a terminal must be quiet before its new output marks the cell. Off marks it on the first new byte.",
+    parse: parseUnreadQuietSeconds,
     format: value => String(value),
   },
   // The Workbench's Get started card (#1694): On until dismissed. The key once held a card mode, which
@@ -100,7 +128,7 @@ export const settingDefinitions: { [K in SettingName]: Definition<SettingTypes[K
 export const profileGroups: readonly { title: string; settings: readonly SettingName[] }[] = [
   { title: "Appearance", settings: ["theme"] },
   { title: "Terminal", settings: ["autoAttach"] },
-  { title: "Refresh", settings: ["refreshSeconds"] },
+  { title: "Refresh", settings: ["refreshSeconds", "unreadPollSeconds", "gridScreenSeconds", "unreadQuietSeconds"] },
   { title: "Workbench", settings: ["showGetStarted"] },
   { title: "Cell list", settings: ["cellListStyle", "defaultGroupBy"] },
   { title: "Sidebar", settings: ["showCellScope", "showTerminalStatus", "showUnreadBytes", "showSidebarSearch", "showSidebarGroupBy"] },

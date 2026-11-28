@@ -50,7 +50,7 @@ function GridControls({ filter, keys, showSearch, showGroupBy }: { filter: CellF
 // filtered and grouped by the grid's own search and Group by (#1686), attention first inside each group.
 // In agent style the sections are the agents (Configs) with their instance tiles, Other cells last, and
 // no Group by is offered.
-export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, terminalStates, listStyle = "default", showSearch = true, showGroupBy = true, unread = {}, showUnreadBytes = false }: {
+export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, terminalStates, listStyle = "default", showSearch = true, showGroupBy = true, unread = {}, showUnreadBytes = false, screenSeconds = 5 }: {
   inventory: InventoryResource;
   filter: CellFilter;
   dockedCells: string[];
@@ -61,6 +61,7 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
   showGroupBy?: boolean;
   unread?: Record<string, Unread>;
   showUnreadBytes?: boolean;
+  screenSeconds?: number;
 }) {
   const agentStyle = listStyle === "agent";
   const all = inventory.data?.rows[3] ?? [];
@@ -104,7 +105,7 @@ export function WorkbenchGrid({ inventory, filter, dockedCells, onOpenDock, term
   }, [tileKeys, filter.groupBy, listStyle]);
   const polled = useMemo(() => filtered.filter(row => visible.includes(key(row.scope)) && !unavailableStates.has(row.doc.status?.state ?? "")).map(row => row.scope), [filtered, visible]);
   // Mounted only on the workbench view, so polling stops on every other page.
-  const screens = useCellScreens(polled, true);
+  const screens = useCellScreens(polled, true, screenSeconds * 1000);
 
   return <section className="workbench" aria-label="Cell terminals">
     {!!cells.length && <GridControls filter={filter} keys={keys} showSearch={showSearch} showGroupBy={showGroupBy && !agentStyle} />}

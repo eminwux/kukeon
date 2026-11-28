@@ -1,12 +1,13 @@
 // Unread terminal output (#1696): the read markers this browser keeps per cell, compared with the
 // terminal counters GET /api/terminal-activity reports. A marker is the terminal run (startedAt) and
 // how many of its output bytes the operator has seen. A cell is marked once its terminal produced
-// bytes past the marker and has then been quiet for unreadQuietMs.
+// bytes past the marker and has then been quiet for quietMs.
 // No DOM, no network — unit-tested with node --test.
 import { formatBytes } from "./cgroup-format.js";
 
-// How long a terminal must have produced no output before its unread output marks the cell. An agent
-// TUI redraws while it works, so marking on any new byte would light every busy cell; 0 does that.
+// The quiet wait isMarked and unreadState use when given none: how long a terminal must have produced
+// no output before its unread output marks the cell. The Workbench always passes the Profile's Mark
+// unread after quiet for setting (#1770), which defaults to 0 (Off): any new byte marks the cell.
 export const unreadQuietMs = 3000;
 
 // The localStorage key of the markers: { [cellKey]: { startedAt, bytes } }, cellKey JSON.stringify(scope).
