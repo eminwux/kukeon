@@ -127,11 +127,21 @@ func (r *Exec) attachableBuildOpts(
 		return nil, err
 	}
 
-	ttyDir := fs.ContainerTTYDir(
-		r.opts.RunPath,
-		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
-		spec.ID,
-	)
+	// The coordinates reach host paths that are created, chmodded and
+	// chowned below. The controller validates them upstream; each is
+	// repeated inline here, and the tty dir is built only from the checked
+	// values, so the filepath.IsLocal guard dominates those paths for
+	// defense in depth and for static path-injection analysis (CodeQL
+	// go/path-injection), as in WriteTeam.
+	realm, space, stack, cell, id := spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID
+	if !filepath.IsLocal(realm) || !teamPathSafe(realm) ||
+		!filepath.IsLocal(space) || !teamPathSafe(space) ||
+		!filepath.IsLocal(stack) || !teamPathSafe(stack) ||
+		!filepath.IsLocal(cell) || !teamPathSafe(cell) ||
+		!filepath.IsLocal(id) || !teamPathSafe(id) {
+		return nil, fmt.Errorf("unsafe container reference %s/%s/%s/%s/%s", realm, space, stack, cell, id)
+	}
+	ttyDir := fs.ContainerTTYDir(r.opts.RunPath, realm, space, stack, cell, id)
 	mode, gid := attachableTTYDirInitialPerms(r.opts.KukeonGroupGID)
 	if err := os.MkdirAll(ttyDir, mode); err != nil {
 		return nil, err
