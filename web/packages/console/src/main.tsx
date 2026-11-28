@@ -48,6 +48,7 @@ import { NewSecretPage } from "./secret-form";
 import { DriftDiff } from "./drift-diff";
 import { configureRouter, navigate, onRouteChange, routeHref, type Router } from "./router";
 import { apiFetch, configureTransport, type Transport } from "@kukeon/api-client";
+import { CellDetailsTabs, ExtensionPage, ExtensionsProvider, OverviewCards, TopBarStart, findExtensionRoute, useExtensionMenuItems, useExtensions, type ConsoleExtension } from "./extensions";
 
 const failureStates = ["Failed", "Error", "Degraded"];
 
@@ -115,7 +116,7 @@ function Dashboard({ inventory, reports }: { inventory: Resource<Inventory>; rep
       {attention.length ? <ul className="attention-list">{attention.map(row => <li key={JSON.stringify(row.scope)}><a className="resource-name" href={resourceLink(row.scope)}>{row.doc.metadata.name}</a><span className="mono-id">{row.scope.slice(0, 3).join(" / ")}</span><span className="attention-badges"><StateBadge state={row.doc.status?.state} /><DriftBadge status={row.doc.status} /></span>{hasDrift(row.doc.status) && <p className="attention-reason">{driftReason(row.doc.status)}</p>}</li>)}</ul>
         : <p className="attention-empty" role="status">{inventory.loading && !inventory.data ? "Loading cell states…" : partial ? "Cell states could not be fully loaded." : cells.length ? <><StateBadge state="Ready" /> All cells Ready</> : "No cells found."}</p>}
     </section>
-    <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}<HealthCard reports={reports} /></div>
+    <div className="summary-grid">{card(3)}{[0, 1, 2].map(card)}<HealthCard reports={reports} /><OverviewCards /></div>
   </>;
 }
 // SpaceCIDR renders one Space's subnet: allocated, legacy conflist and unallocated read differently, and a
@@ -400,7 +401,7 @@ function CellDetailsScreen({ title, view, scope, revision, inventory, manager, t
     <section className="cell-terminal-view" aria-label="Cell terminal" hidden={!terminalView}>
       <TerminalWorkspace scope={scope} revision={revision} inventory={inventory} manager={manager} theme={theme} autoAttach={autoAttach} visible={terminalView && !!scope} controlsHost={terminalToolsHost} onExpandedChange={setTerminalExpanded} inPanel={inPanel} onOpenInPanel={onOpenInPanel} operation={operation} onLifecycleAction={onLifecycleAction} />
     </section>
-    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</section>
+    <section className="cell-overview-content" aria-label="Cell details" hidden={terminalView}><CellDetailsTabs scope={scope ?? []} active={!!scope && !terminalView}>{detail.error && <ErrorNotice error={detail.error} kind="Cell" />}{detail.error && detail.data && <p className="stale">Stale resource details — refresh failed.</p>}{status}{containerPanel}{overview}{scope && !terminalView && <NetworkPanel scope={scope} revision={revision} detail={network} />}{scope && !terminalView && <CgroupPanel scope={scope} revision={revision} />}</CellDetailsTabs></section>
   </div>;
 }
 
@@ -751,7 +752,12 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     navigate(workspaceLink(scope));
   }
   // Workbench (terminals) or Manage (resources), derived from the route and never stored (#1635).
-  const view = viewOf(route);
+  // An extension route (#1754) shows beside the sidebar its route names: Manage unless Settings.
+  const extensions = useExtensions();
+  const extensionMenuItems = useExtensionMenuItems();
+  const extensionView = route.view === "extension";
+  const extensionRoute = extensionView ? findExtensionRoute(extensions, route.extension, route.extensionPath) : undefined;
+  const view = extensionView ? extensionRoute?.route.section === "settings" ? "settings" : "manage" : viewOf(route);
   const isWorkspace = route.view === "workspace";
   const cellScreenScope = (isWorkspace || route.view === "resource" && !route.document) && route.scope.length === 4 ? route.scope : null;
   // cellRead flows as an ordinary scrolling page; only cellTerminal pins the shell to the viewport.
@@ -790,7 +796,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const connectorHeading = connectorsView && route.scope[0] ? connectorTitle?.name === route.scope[0] ? connectorTitle.title : route.scope[0] : undefined;
   // The identity pages of a connector: #/connectors/<name>/new-identity and …/rotate-identity.
   const identityAction = connectorsView && route.scope[0] && route.action ? route.action === "rotate-identity" ? "Rotate identity" : "New identity" : undefined;
-  const heading = route.view === "settings" ? "Settings" : connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? teamAction ?? route.scope[0] ?? "Teams" : route.view === "new-team" ? "New team" : sourcesView ? route.scope[0] ?? "Sources" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-agent" ? "New agent" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : route.view === "workbench" ? "Workbench" : "Overview";
+  const heading = extensionView ? extensionRoute?.route.title ?? "Page not found" : route.view === "settings" ? "Settings" : connectorsView ? identityAction ?? connectorHeading ?? "Connectors" : teamsView ? teamAction ?? route.scope[0] ?? "Teams" : route.view === "new-team" ? "New team" : sourcesView ? route.scope[0] ?? "Sources" : route.view === "health" ? "Health" : route.view === "daemon" ? "Daemon" : route.view === "daemon-logs" ? "Daemon logs" : isWorkspace ? route.scope.at(-1) ?? "Cell" : route.view === "new-cell" ? "New Cell" : route.view === "new-agent" ? "New agent" : route.view === "new-config" ? "New Config" : route.view === "new-secret" ? "New Secret" : images ? route.scope[1] ?? "Images" : catalog ? route.scope.at(-1) ?? catalogTitles[route.view] : route.view === "resource" ? route.scope.at(-1) : depth >= 0 ? titles[depth] : route.view === "workbench" ? "Workbench" : "Overview";
   // Only a scope path or realm qualifies the title; generic subtitles were dropped.
   const headingContext = teamAction ? route.scope[0] : connectorsView ? identityAction ? connectorHeading ?? "" : connectorHeading && connectorHeading !== route.scope[0] ? route.scope[0] : "" : isWorkspace ? route.scope.join(" / ") : images ? route.scope[1] ? route.scope[0] : "" : route.view === "resource" || (catalog && route.scope.length > 0) ? route.scope.join(" / ") : "";
   const daemonStatus = inventory.daemon.error?.code === "permission_denied" ? "Permission denied" : inventory.daemon.error ? "Unavailable" : inventory.daemon.loading ? "Checking…" : "Connected";
@@ -824,7 +830,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           <SidebarToggle collapsed={false} onToggle={() => sidebar.setCollapsed(true)} />
         </div>
         <MajordomoSidebarEntry major={major} dock={dock} onChanged={refresh} />
-        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} filter={sidebarFilter} listStyle={settings.cellListStyle} showSearch={settings.showSidebarSearch} showGroupBy={settings.showSidebarGroupBy} showScope={settings.showCellScope} showTerminalStatus={settings.showTerminalStatus} unread={unread} showUnreadBytes={settings.showUnreadBytes} /> : view === "settings" ? <SettingsNav onNavigate={() => setMenuOpen(false)} /> : <ManageNav route={route} />}
+        {view === "workbench" ? <CellSidebar inventory={inventory} selectedScope={cellScreenScope ?? []} terminalStates={terminals.cellStates} filter={sidebarFilter} listStyle={settings.cellListStyle} showSearch={settings.showSidebarSearch} showGroupBy={settings.showSidebarGroupBy} showScope={settings.showCellScope} showTerminalStatus={settings.showTerminalStatus} unread={unread} showUnreadBytes={settings.showUnreadBytes} /> : view === "settings" ? <SettingsNav route={route} onNavigate={() => setMenuOpen(false)} /> : <ManageNav route={route} />}
         <section className="connection" aria-label="Daemon connection">
           <div className="connection-heading">
             <p className="status" role="status"><span className={`dot ${daemonTone}`} aria-hidden="true" />{daemonStatus}</p>
@@ -843,26 +849,27 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     <main className="workspace" id="main-content" tabIndex={-1} inert={menuOpen && mobile}>
       <header className="toolbar">
         <button ref={menuToggle} className="menu-toggle" aria-label="Toggle sidebar" aria-expanded={menuOpen} aria-controls="cell-sidebar" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+        <TopBarStart />
         <span className="toolbar-connectivity" role="status" aria-label={`Daemon: ${daemonStatus}`} title={`Daemon: ${daemonStatus}`}><span className={`dot ${daemonTone}`} aria-hidden="true" /></span>
         <InventoryIndicator inventory={inventory} />
         <nav className="view-switch" aria-label="View">
           <a href={homeLink()} aria-current={view === "workbench" ? "true" : undefined}><Icon name="terminal" /><span className="view-switch-label">Workbench</span></a>
           <a href={overviewLink()} aria-current={view === "manage" ? "true" : undefined} aria-label={attention.length ? `Manage: ${attention.join("; ")}` : undefined} title={attention.length ? attention.join("; ") : undefined}><Icon name="manage" /><span className="view-switch-label">Manage</span>{attention.length > 0 && <span className="view-switch-dot" aria-hidden="true" />}</a>
         </nav>
-        <nav className="breadcrumbs" aria-label="Resource scope">{route.view === "settings" ? <><a href={settingsLink()}>Settings</a><span>Profile</span></> : isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a>{teamAction ? <><a href={teamsLink(route.scope[0])}>{route.scope[0]}</a><span>{teamAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Teams</span> : route.view === "new-team" ? <><a href={teamsLink()}>Teams</a><span>New team</span></> : sourcesView ? route.scope[0] ? <><a href={sourcesLink()}>Sources</a><span>{route.scope[0]}</span></> : <span>Sources</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={routeHref(`/${route.view}`)}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
+        <nav className="breadcrumbs" aria-label="Resource scope">{route.view === "settings" ? <><a href={settingsLink()}>Settings</a><span>Profile</span></> : extensionView && view === "settings" ? <><a href={settingsLink()}>Settings</a><span>{heading}</span></> : isWorkspace || route.view === "resource" ? <>{crumbRoot}{route.scope.map((name, i) => <a key={i} aria-label={`${kinds[i]}: ${name}`} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}</> : <>{crumbRoot}{connectorsView ? route.scope[0] ? <><a href={connectorsLink()}>Connectors</a>{identityAction ? <><a href={connectorsLink(route.scope[0], route.target ? { realm: route.target[0], space: route.target[1], stack: route.target[2] } : undefined)}>{connectorHeading}</a><span>{identityAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Connectors</span> : teamsView ? route.scope[0] ? <><a href={teamsLink()}>Teams</a>{teamAction ? <><a href={teamsLink(route.scope[0])}>{route.scope[0]}</a><span>{teamAction}</span></> : <span>{route.scope[0]}</span>}</> : <span>Teams</span> : route.view === "new-team" ? <><a href={teamsLink()}>Teams</a><span>New team</span></> : sourcesView ? route.scope[0] ? <><a href={sourcesLink()}>Sources</a><span>{route.scope[0]}</span></> : <span>Sources</span> : route.view === "health" ? <><a href={daemonLink()}>Daemon</a><span>Health</span></> : daemonView ? route.view === "daemon" ? <span>Daemon</span> : <><a href={daemonLink()}>Daemon</a><span>Logs</span></> : images ? <><a href={imagesLink()}>Images</a>{route.scope[0] && (route.scope[1] ? <a href={imagesLink(route.scope[0])}>{route.scope[0]}</a> : <span>{route.scope[0]}</span>)}{route.scope[1] && <span>{route.scope[1]}</span>}</> : catalog ? <><a href={routeHref(`/${route.view}`)}>{catalogTitles[route.view]}</a>{route.scope.slice(0, -1).map((name, i) => <a key={i} href={resourceLink(route.scope.slice(0, i + 1))}>{name}</a>)}{route.scope.length > 0 && <span>{route.scope.at(-1)}</span>}</> : route.view !== "dashboard" && route.view !== "workbench" && <span>{heading}</span>}</>}</nav>
         <div className="toolbar-actions">
           <a className="header-action new-cell-toolbar-action" href={newCellLink()}>New Cell</a>
           <MajordomoToolbarButton dock={dock} />
           <button className="icon-button refresh-button" type="button" aria-label="Refresh" title={inventory.loading ? "Refreshing…" : "Refresh"} aria-busy={inventory.loading} onClick={() => setRevision(value => value + 1)}>
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10" /><path d="M3 4v6h6" /><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14" /><path d="M21 20v-6h-6" /></svg>
           </button>
-          <UserMenu user={user} onGetStarted={() => setSetting("showGetStarted", true)} onSignOut={onSignOut} />
+          <UserMenu user={user} items={extensionMenuItems} onGetStarted={() => setSetting("showGetStarted", true)} onSignOut={onSignOut} />
         </div>
       </header>
       <div className={`workspace-content ${isWorkspace ? "cell-workspace-content" : ""}${cellTerminalActive ? " cell-screen-content" : ""}`}>
         {!cellScreenScope && <div className="page-heading"><h1 tabIndex={-1}>{heading}</h1>{headingContext && <p className="page-context mono-id">{headingContext}</p>}{route.view === "workbench" && <a className="header-action page-heading-action" href={newAgentLink()}>New agent</a>}</div>}
         <CellDetailsScreen title={heading ?? "Cell"} view={cellView} scope={cellScreenScope} revision={revision} inventory={inventory} manager={terminals} theme={theme} autoAttach={settings.autoAttach} operations={operations} onLifecycleAction={runCellLifecycle} inPanel={!!cellScreenScope && panelCells.includes(cellId(cellScreenScope))} onOpenInPanel={openInPanel} onChanged={() => setRevision(value => value + 1)} />
-        {isWorkspace ? null : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink()} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} screenSeconds={settings.gridScreenSeconds} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
+        {isWorkspace ? null : extensionView ? <ExtensionPage id={route.extension} path={route.extensionPath} /> : route.view === "settings" ? <SettingsPage inventory={inventory} /> : route.view === "new-cell" ? <Suspense fallback={<p role="status">Loading Cell creation form…</p>}><NewCellPage key={JSON.stringify(route.config ?? [])} revision={revision} inventory={inventory} configScope={route.config} onCreated={handleCellCreated} /></Suspense> : route.view === "new-agent" ? <Suspense fallback={<p role="status">Loading the New agent page…</p>}><NewAgentPage revision={revision} onCreated={handleAgentCreated} onChanged={refresh} /></Suspense> : route.view === "new-config" ? <Suspense fallback={<p role="status">Loading Config creation form…</p>}><NewConfigPage key={JSON.stringify(route.blueprint ?? [])} revision={revision} inventory={inventory} blueprintScope={route.blueprint} onCreated={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-secret" ? <NewSecretPage inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : connectorsView ? <Suspense fallback={<p role="status">Loading connectors…</p>}><ConnectorsPage name={route.scope[0]} target={route.target} action={route.action} identity={route.identity} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onTitle={setConnectorTitle} /></Suspense> : teamsView ? <Suspense fallback={<p role="status">Loading teams…</p>}><TeamsPage name={route.scope[0]} section={route.action} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "new-team" ? <Suspense fallback={<p role="status">Loading the team wizard…</p>}><NewTeamPage key={newTeamLink()} onChanged={() => setRevision(value => value + 1)} /></Suspense> : sourcesView ? <Suspense fallback={<p role="status">Loading sources…</p>}><SourcesPage name={route.scope[0]} revision={revision} onChanged={() => setRevision(value => value + 1)} /></Suspense> : route.view === "health" ? <HealthPage revision={revision} major={major} inventory={inventory} onChanged={() => setRevision(value => value + 1)} onSeen={markReportSeen} /> : route.view === "daemon" ? <DaemonHealthPage revision={revision} inventory={inventory} /> : route.view === "daemon-logs" ? <DaemonLogsPage revision={revision} /> : images ? <ImagesPage scope={route.scope} revision={revision} /> : catalog ? <CatalogPage kind={route.view} scope={route.scope} document={route.document} edit={!!route.edit} revision={revision} inventory={inventory} onChanged={() => setRevision(value => value + 1)} /> : route.view === "resource" ? route.scope.length === 4 && !route.document ? null : <ResourceDetails key={JSON.stringify(route.scope)} route={route} revision={revision} /> : route.view === "workbench" ? <><GetStarted revision={revision} inventory={inventory} configs={major.configs.data} majordomoCells={major.cells.length} onOpenMajordomo={() => dock.setOpen(true)} onChanged={refresh} /><WorkbenchGrid inventory={inventory} filter={gridFilter} listStyle={settings.cellListStyle} showSearch={settings.showGridSearch} showGroupBy={settings.showGridGroupBy} terminalStates={terminals.cellStates} unread={unread} showUnreadBytes={settings.showUnreadBytes} screenSeconds={settings.gridScreenSeconds} /></> : depth >= 0 ? <ResourceList key={route.view + JSON.stringify(route.parent) + (route.state ?? "")} depth={depth} inventory={inventory} parent={route.parent} state={route.state} operations={operations} onLifecycleAction={runCellLifecycle} onParentAction={runParentAction} /> : <Dashboard inventory={inventory} reports={reports} />}
         <footer>Daemon inventory · {inventory.data ? <>Last refreshed <time dateTime={inventory.data.updatedAt}>{new Date(inventory.data.updatedAt).toLocaleTimeString()}</time></> : "Not refreshed yet"} · Refreshes every {settings.refreshSeconds} s.</footer>
       </div>
     </main>
@@ -873,7 +880,7 @@ function App({ user, onSignOut }: { user: string; onSignOut: () => void }) {
 // Root shows the sign-in screen until the session is known and valid (#1652), so no inventory,
 // screenshot or terminal request runs before sign-in; signing out unmounts the app and with it
 // every terminal connection. The theme applies to the sign-in screen too.
-function Root() {
+function Root({ extensions }: { extensions: ConsoleExtension[] }) {
   const [settings] = useSettings();
   const { session, retry, signedIn, signOut } = useSession();
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
@@ -881,28 +888,30 @@ function Root() {
     const { SignIn } = auth();
     return <SignIn checking={session.phase === "checking"} notice={session.phase === "unavailable" ? session.error : undefined} onRetry={() => void retry()} onSignedIn={signedIn} />;
   }
-  return <NotificationProvider><App user={session.user} onSignOut={() => void signOut()} /></NotificationProvider>;
+  return <NotificationProvider><ExtensionsProvider extensions={extensions}><App user={session.user} onSignOut={() => void signOut()} /></ExtensionsProvider></NotificationProvider>;
 }
 
 // ConsoleOptions are the seams a host injects (#1752); each defaults to what kuke serve uses: the
-// same-origin /api transport, hash routing and the local root sign-in.
+// same-origin /api transport, hash routing and the local root sign-in. extensions (#1754) are what the
+// host adds to the console; kuke serve mounts none.
 export type ConsoleOptions = {
   transport?: Partial<Transport>;
   router?: Router;
   auth?: AuthAdapter;
+  extensions?: ConsoleExtension[];
 };
 
 // KukeonConsole is the console as a component (#1753). It configures the seams on its first render,
 // before any page reads them; the seams are module-wide, so one console per page, and props that
 // change after mounting are ignored.
-export function KukeonConsole({ transport, router, auth: adapter }: ConsoleOptions) {
-  useState(() => {
+export function KukeonConsole({ transport, router, auth: adapter, extensions }: ConsoleOptions) {
+  const [mounted] = useState(() => {
     configureTransport(transport);
     configureRouter(router);
     configureAuth(adapter);
-    return null;
+    return extensions ?? [];
   });
-  return <Root />;
+  return <Root extensions={mounted} />;
 }
 
 // mountConsole renders the console into element.

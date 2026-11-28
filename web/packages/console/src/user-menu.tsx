@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { homeLink, settingsLink } from "./routes";
+import type { ResolvedMenuItem } from "./extensions";
 
 // UserMenu is the top-bar avatar button (#1652): its menu names the signed-in
 // user, reopens the Workbench's Get started card (#1694), links to the
 // Settings page (#1686) and signs out. Escape closes the menu and returns
-// focus to the button.
-export function UserMenu({ user, onGetStarted, onSignOut }: { user: string; onGetStarted: () => void; onSignOut: () => void }) {
+// focus to the button. The mounted extensions' userMenuItems (#1754) sit before Sign out.
+export function UserMenu({ user, items = [], onGetStarted, onSignOut }: { user: string; items?: ResolvedMenuItem[]; onGetStarted: () => void; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -40,6 +41,9 @@ export function UserMenu({ user, onGetStarted, onSignOut }: { user: string; onGe
       <p className="user-menu-identity">Signed in as <strong>{user}</strong></p>
       <a role="menuitem" href={settingsLink()} onClick={() => setOpen(false)}>Settings</a>
       <a role="menuitem" href={homeLink()} onClick={() => { setOpen(false); onGetStarted(); }}>Get started</a>
+      {items.map(item => item.href !== undefined
+        ? <a key={item.key} role="menuitem" href={item.href} onClick={() => { setOpen(false); item.onSelect?.(); }}>{item.label}</a>
+        : <button key={item.key} type="button" role="menuitem" onClick={() => { setOpen(false); item.onSelect?.(); }}>{item.label}</button>)}
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
     </div>}
   </div>;

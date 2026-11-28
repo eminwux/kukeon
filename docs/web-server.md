@@ -1305,6 +1305,7 @@ All endpoints use same-origin HTTP GET and return JSON:
 | Path                 | Result                                                                  |
 | -------------------- | ----------------------------------------------------------------------- |
 | `/api/connection`    | Configured daemon `endpoint`; this is configuration, not a health probe |
+| `/api/capabilities`  | The `kuke` version and the API features this server provides (below)    |
 | `/api/daemon/health` | Connectivity check result; always HTTP 200 (see below)                  |
 | `/api/daemon/logs`   | One bounded chunk of kukeond's own log stream (see below)               |
 | `/api/realms`        | Realm documents from kukeond (passwords blanked), or `[]` when empty    |
@@ -1335,6 +1336,33 @@ containerd namespace (`images` is `[]` when empty). Append
 `createdAt`, `digest`, `mediaType`, and `labels`; `size` and `createdAt` are
 `null` when containerd cannot resolve them. See [Images](#images). Separately,
 `/api/realms/{name}/images` lists the realm's declared `spec.images`.
+
+`/api/capabilities` returns `{ "version", "features" }`: `version` is the
+`kuke` build serving the UI, and `features` lists a stable identifier for each
+API area it serves. The answer depends only on the build: it never contacts
+kukeond. Like every other route it needs a signed-in session.
+
+| Feature         | API area                                                                      |
+| --------------- | ----------------------------------------------------------------------------- |
+| `resources.v1`  | Realm, space, stack, cell, and container reads, creation, and lifecycle       |
+| `catalog.v1`    | Blueprints, configs, volumes, and secrets                                     |
+| `images.v1`     | Realm images, the image inventory, and registry credentials                   |
+| `connectors.v1` | The connector catalog, identities, and defaults                               |
+| `teams.v1`      | Stored teams, the team form, and team actions                                 |
+| `sources.v1`    | Stored Sources                                                                |
+| `agents.v1`     | Agent templates and New agent                                                 |
+| `attach.v1`     | The [attach](#attach-to-a-terminal) WebSocket, screenshots, terminal activity |
+| `exec.v1`       | [Exec in a container](#exec-in-a-container)                                   |
+| `health.v1`     | Majordomo's health reports and sweeps                                         |
+| `daemon.v1`     | The daemon connectivity check and its logs                                    |
+
+An identifier never changes meaning: an incompatible change to an area ships
+as a new identifier (`attach.v2`) beside the old one. A console that embeds
+`@kukeon/console` with extensions reads this list once per sign-in and hides
+each extension whose `requires` names a feature the host does not list; its
+routes show an "Update this host" notice instead. A host from before this
+route answers it 404, which the console treats as listing no features.
+`kuke serve` mounts no extensions and does not read it.
 
 `/api/daemon/health` returns `{ "status", "endpoint", "daemonVersion",
 "serverVersion", "checkedAt", "latencyMs", "error" }`. `status` is `reachable`,

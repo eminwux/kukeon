@@ -8247,3 +8247,20 @@ test("an unread mark reaches every tab of the browser, and reading the cell in o
   await expect(row(other)).not.toHaveClass(/has-unread/, { timeout: 12_000 });
   await other.close();
 });
+
+// kuke serve mounts the console with no extensions (#1754): it reads no capabilities and renders none of
+// the extension seams' markup.
+test("the embedded console mounts no extensions and reads no capabilities", async ({ page }) => {
+  const apiPaths = [];
+  page.on("request", request => { const { pathname } = new URL(request.url()); if (pathname.startsWith("/api/")) apiPaths.push(pathname); });
+  await mock(page);
+  await page.goto(`${server.url}#/resources`);
+  await expect(nav(page).getByRole("link", { name: "Daemon" })).toBeVisible();
+  await expect(content(page).locator(".summary-grid .summary-card")).toHaveCount(5);
+  await page.goto(`${server.url}#/resource/dev/shared/services/api`);
+  await expect(content(page).getByRole("heading", { name: "Containers" })).toBeVisible();
+  await expect(content(page).getByRole("tablist", { name: "Cell details sections" })).toHaveCount(0);
+  await expect(page.locator(".toolbar-extensions, .extension-card")).toHaveCount(0);
+  expect(apiPaths).toContain("/api/realms");
+  expect(apiPaths).not.toContain("/api/capabilities");
+});

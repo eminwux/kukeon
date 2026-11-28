@@ -4,3 +4,17 @@ export { KukeonConsole, mountConsole, type ConsoleOptions } from "./main";
 export type { Transport } from "@kukeon/api-client";
 export type { Router } from "./router";
 export type { AuthAdapter, Session, SessionCheck, SignInProps } from "./auth";
+export type {
+  Capabilities,
+  CellDetailsTab,
+  CellDetailsTabProps,
+  ConsoleExtension,
+  ExtensionContext,
+  ExtensionNav,
+  ExtensionNavEntry,
+  ExtensionRoute,
+  ExtensionSlots,
+  OverviewCard,
+  TopBarItem,
+  UserMenuItem,
+} from "./extensions";
