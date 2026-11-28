@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -663,9 +664,12 @@ func TestRenderCellFromConfig_StampsBlueprintRevision(t *testing.T) {
 // TestReconcileCells_OutOfSync_NamesTheInputThatMoved covers cases 13 and 14
 // (AC11): a blueprint content change under the same name or a Config
 // repointed at another blueprint names the blueprint; a Config document
-// change alone says "config changed"; a fill-value change through a level
-// default says "values changed". Reasons come in the fixed order.
+// change says "config changed"; a fill-value change through a level default
+// says "values changed". Reasons come in the fixed order. Each edit changes
+// the rendered cell: one that does not leaves the cell Synced
+// (TestReconcileCells_OutOfSync_RevisionOnlyDriftStaysSynced, issue #1772).
 func TestReconcileCells_OutOfSync_NamesTheInputThatMoved(t *testing.T) {
+	nextRegion := "blueprint-region-next"
 	for _, tc := range []struct {
 		name       string
 		change     func(t *testing.T, mock *fakeRunner, scope *renderScope)
@@ -676,10 +680,10 @@ func TestReconcileCells_OutOfSync_NamesTheInputThatMoved(t *testing.T) {
 			name: "blueprint content changed, same name",
 			change: func(t *testing.T, mock *fakeRunner, _ *renderScope) {
 				bp := renderBlueprint()
-				bp.Spec.Prefix = "renamed" // content only; the rendered spec is unchanged
+				bp.Spec.Parameters[0].Default = &nextRegion
 				serveBlueprint(t, mock, bp)
 			},
-			wantExact: "blueprint dev changed",
+			wantExact: "blueprint dev changed; spec differs at containers[main].env",
 		},
 		{
 			name: "config repointed at another blueprint",
@@ -689,18 +693,19 @@ func TestReconcileCells_OutOfSync_NamesTheInputThatMoved(t *testing.T) {
 				serveConfig(t, mock, cfg)
 				bp := renderBlueprint()
 				bp.Metadata.Name = "dev-next"
+				bp.Spec.Parameters[0].Default = &nextRegion
 				serveBlueprint(t, mock, bp)
 			},
-			wantPrefix: "blueprint dev-next changed; config changed",
+			wantPrefix: "blueprint dev-next changed; config changed; ",
 		},
 		{
-			name: "config document changed only",
+			name: "config document changed",
 			change: func(t *testing.T, mock *fakeRunner, _ *renderScope) {
 				cfg := renderConfig()
-				cfg.Metadata.Annotations = map[string]string{"owner": "ops"} // not copied onto the cell
+				cfg.Spec.Values["REGION"] = "eu"
 				serveConfig(t, mock, cfg)
 			},
-			wantExact: "config changed",
+			wantPrefix: "config changed; ",
 		},
 		{
 			name: "fill values changed through a level default",
@@ -764,11 +769,117 @@ func TestReconcileCells_OutOfSync_CellWithoutBlueprintStampDoesNotFlap(t *testin
 
 	// Once stamped, a blueprint change is named.
 	backfilled := *captured
-	bp.Spec.Prefix = "renamed-again"
+	nextRegion := "blueprint-region-next"
+	bp.Spec.Parameters[0].Default = &nextRegion
 	serveBlueprint(t, mock, bp)
 	_, captured = runRenderTick(t, mock, backfilled)
-	if captured == nil || captured.Status.OutOfSyncReason != "blueprint dev changed" {
-		t.Errorf("after back-fill, blueprint change verdict = %+v, want blueprint dev changed", captured)
+	want := "blueprint dev changed; spec differs at containers[main].env"
+	if captured == nil || captured.Status.OutOfSyncReason != want {
+		t.Errorf("after back-fill, blueprint change verdict = %+v, want %q", captured, want)
+	}
+}
+
+// TestReconcileCells_OutOfSync_RevisionOnlyDriftStaysSynced pins issue #1772:
+// a blueprint or Config edit that leaves the rendered cell as it was (the spec
+// diff is empty and the render digest matches) keeps the running cell Synced.
+// The tick records the new revisions on the cell with a metadata patch and
+// never stops, starts or recreates it; the next tick then writes nothing.
+func TestReconcileCells_OutOfSync_RevisionOnlyDriftStaysSynced(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, mock *fakeRunner)
+		// moved are the provenance annotations the edit changes.
+		moved []string
+	}{
+		{
+			name: "blueprint content changed, same name",
+			change: func(t *testing.T, mock *fakeRunner) {
+				bp := renderBlueprint()
+				bp.Spec.Prefix = "renamed" // content only; the rendered cell is unchanged
+				serveBlueprint(t, mock, bp)
+			},
+			moved: []string{cellconfig.AnnotationRenderBlueprintRevision},
+		},
+		{
+			name: "config repointed at an identical blueprint",
+			change: func(t *testing.T, mock *fakeRunner) {
+				cfg := renderConfig()
+				cfg.Spec.Blueprint.Name = "dev-next"
+				serveConfig(t, mock, cfg)
+				bp := renderBlueprint()
+				bp.Metadata.Name = "dev-next"
+				serveBlueprint(t, mock, bp)
+			},
+			moved: []string{
+				cellconfig.AnnotationRenderBlueprintRevision, cellconfig.AnnotationRenderConfigRevision,
+			},
+		},
+		{
+			name: "config document changed only",
+			change: func(t *testing.T, mock *fakeRunner) {
+				cfg := renderConfig()
+				cfg.Metadata.Annotations = map[string]string{"owner": "ops"} // not copied onto the cell
+				serveConfig(t, mock, cfg)
+			},
+			moved: []string{cellconfig.AnnotationRenderConfigRevision},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newRenderRunner(t, &renderScope{}, renderConfig())
+			ctrl := setupTestController(t, mock)
+			live := renderLiveCell(t, ctrl)
+			live.Status.State = intmodel.CellStateReady
+
+			tc.change(t, mock)
+			fresh := renderLiveCell(t, ctrl)
+			digest := cellconfig.AnnotationRenderDigest
+			if fresh.Metadata.Annotations[digest] != live.Metadata.Annotations[digest] {
+				t.Fatalf("fixture: the edit changed the render digest")
+			}
+			for _, key := range tc.moved {
+				if fresh.Metadata.Annotations[key] == live.Metadata.Annotations[key] {
+					t.Fatalf("fixture: the edit left %s unchanged", key)
+				}
+			}
+
+			restarted := func(verb string) {
+				t.Errorf("revision-only drift %s the cell", verb)
+			}
+			mock.StopCellFn = func(c intmodel.Cell) (intmodel.Cell, error) { restarted("stopped"); return c, nil }
+			mock.StartCellFn = func(c intmodel.Cell) (intmodel.Cell, error) { restarted("started"); return c, nil }
+			mock.RecreateCellFn = func(c intmodel.Cell) (intmodel.Cell, error) {
+				restarted("recreated")
+				return c, nil
+			}
+
+			res, captured := runRenderTick(t, mock, live)
+			if captured == nil {
+				t.Fatal("new revisions were not recorded on the cell")
+			}
+			if st := captured.Status; st.OutOfSync || st.OutOfSyncReason != "" || st.OutOfSyncError != "" {
+				t.Errorf("revision-only drift marked the cell out of sync: %+v", st)
+			}
+			if captured.Status.State != intmodel.CellStateReady {
+				t.Errorf("state = %v, want Ready kept", captured.Status.State)
+			}
+			for _, key := range tc.moved {
+				if got, want := captured.Metadata.Annotations[key], fresh.Metadata.Annotations[key]; got != want {
+					t.Errorf("%s = %q, want the new revision %q", key, got, want)
+				}
+			}
+			if !reflect.DeepEqual(captured.Spec, live.Spec) {
+				t.Errorf("metadata-only sync changed the spec:\n got %+v\nwant %+v", captured.Spec, live.Spec)
+			}
+			if res.CellsUpdated != 1 {
+				t.Errorf("CellsUpdated = %d, want 1 for the revision back-fill", res.CellsUpdated)
+			}
+
+			// The stamps now match: the next tick has nothing to write.
+			res, again := runRenderTick(t, mock, *captured)
+			if again != nil || res.CellsUpdated != 0 {
+				t.Errorf("second tick wrote %+v (CellsUpdated %d), want no write", again, res.CellsUpdated)
+			}
+		})
 	}
 }
 
