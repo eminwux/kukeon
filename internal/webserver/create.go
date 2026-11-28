@@ -116,7 +116,10 @@ func registerCreateRoutes(mux *http.ServeMux, dial Dial) {
 				if !created.Created {
 					return nil, errdefs.ErrCellAlreadyExists
 				}
-				return redactCell(created.Cell), nil
+				return createdCell{
+					CellDoc:  redactCell(created.Cell),
+					Warnings: connectorWarnings(created.Connectors),
+				}, nil
 			}),
 		)
 	}
@@ -347,6 +350,37 @@ type configRender struct {
 	// Connectors is how each connector the Config requires resolved.
 	Connectors []v1beta1.ConnectorStatus
 	Request    kukeonv1.CellFromConfigRequest
+}
+
+// createdCell is the response of a create from a Config: the created cell's
+// document and the warnings its connectors resolved with, such as a login
+// identity another role uses (issue #1789). Warnings is omitted when there are
+// none, so the response is then the plain document.
+type createdCell struct {
+	v1beta1.CellDoc
+
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// savedConfig is the response of a Config save: the stored document and the
+// warnings the daemon raised for it (issue #1789). Warnings is omitted when
+// there are none, so the response is then the plain document.
+type savedConfig struct {
+	v1beta1.CellConfigDoc
+
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// connectorWarnings is the warning of every connector of a render that has
+// one, in connector order.
+func connectorWarnings(statuses []v1beta1.ConnectorStatus) []string {
+	var out []string
+	for _, status := range statuses {
+		if status.Warning != "" {
+			out = append(out, status.Warning)
+		}
+	}
+	return out
 }
 
 // connectorStatuses is the connector resolution of a render as a JSON array

@@ -382,6 +382,21 @@ export function linkedGitIdentity(secrets, connector, identity) {
   if (!offer || !ref) return undefined;
   return identitiesFor(secrets, offer.connector).find(item => item.identity[identityTokenFrom] === formatSecretReference(ref));
 }
+// sharedLoginNote is how a login identity relates to roles (#1789): each role
+// has its own by default, and another role may share one at the operator's
+// risk. The daemon warns, naming both roles, when that happens.
+export const sharedLoginNote = "A login identity normally serves one role; another role may share it at your risk (its start rewrites role content in the state directory, and a Codex refresh token is single-use).";
+// responseWarnings are the warnings a save or create response carries beside
+// its document (#1791): risks the daemon accepted, such as a login identity
+// another role uses. Anything that is not a non-empty string is dropped.
+export function responseWarnings(result) {
+  return Array.isArray(result?.warnings) ? result.warnings.filter(item => typeof item === "string" && item.trim() !== "") : [];
+}
+// connectorWarnings are the warnings of a render's connector statuses, one
+// per connector that has one (#1791).
+export function connectorWarnings(statuses) {
+  return list(statuses).map(status => text(status?.warning)).filter(item => item.trim() !== "");
+}
 // staleGitNotice is the warning for a token stored with git off while a git
 // identity is linked to it (#1707): the server names that git identity in the
 // result's staleGit, and it still holds the previous token.

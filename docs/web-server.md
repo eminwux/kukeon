@@ -1651,7 +1651,8 @@ submitted material.
   what was not.
 - `POST /api/configs/connector` picks an identity for one Config, or clears the
   pick with a `null` identity. Body `{ "config", "connector", "identity" }`. A
-  team-owned Config is refused.
+  team-owned Config is refused. The response is the saved Config, plus
+  `warnings` when the daemon stored it with one.
 
 The POST endpoints require the exact same Origin and
 `Content-Type: application/json`, and reject unknown fields. An identity of
@@ -1665,6 +1666,19 @@ identities picked for that cell only, keyed by connector name, and `methods`:
 the connector methods picked for that cell only, keyed by connector name (an
 unknown method returns `connector_invalid`); their preview returns the
 resolution of every connector under `connectors`.
+
+A login identity another role uses can be picked or saved at the operator's
+risk ([Sharing login volumes across roles](site/concepts/connectors.md#sharing-login-volumes-across-roles)).
+The daemon then warns and names both roles, and the web UI shows that warning.
+It does not block anything. For a cell, the preview's connector status carries
+it as `warning`. A connector with a warning shows it next to its picker on
+**New Cell** and in the preview's Connectors table. The response of
+`/api/cells/from-config/create` is the created Cell plus `warnings`, and the
+created-cell notice repeats them. A Config saved by **Pick for this Config** or
+by `/api/configs/from-blueprint/create` returns the daemon's `warnings` beside
+the document. The UI shows them in the save notice or on **Config created**.
+`warnings` is left out when there are none, so those responses stay the plain
+document.
 
 ### Teams HTTP API
 

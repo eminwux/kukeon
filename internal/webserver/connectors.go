@@ -772,7 +772,8 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 	}
 	cfg.APIVersion, cfg.Kind = v1beta1.APIVersionV1Beta1, v1beta1.KindCellConfig
 	cfg.Status = nil
-	if _, err = scopedefaults.ApplyDocument(ctx, c, cfg, v1beta1.KindCellConfig); err != nil {
+	_, warnings, err := scopedefaults.ApplyDocumentWarnings(ctx, c, cfg, v1beta1.KindCellConfig)
+	if err != nil {
 		return nil, err
 	}
 	updated, err := c.GetConfig(ctx, v1beta1.CellConfigDoc{Metadata: md})
@@ -782,12 +783,12 @@ func (a connectorAPI) pickForConfig(ctx context.Context, c kukeonv1.Client, r *h
 	if !updated.MetadataExists {
 		return nil, errdefs.ErrConfigNotFound
 	}
-	return updated.Config, nil
+	return savedConfig{CellConfigDoc: updated.Config, Warnings: warnings}, nil
 }
 
 // checkLoginIdentity checks that a Volume picked as the login identity of a
-// Config exists and is not another connector's. The daemon checks the same,
-// and the one-role rule, when it renders a cell.
+// Config exists and is not another connector's. The daemon checks the same
+// when it renders a cell, and warns when another role uses the Volume.
 func checkLoginIdentity(
 	ctx context.Context, c kukeonv1.Client, connectorName string, ref v1beta1.ContainerSecretRef,
 ) error {

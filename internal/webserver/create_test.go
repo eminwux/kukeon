@@ -48,6 +48,7 @@ type creationClient struct {
 	lastRequest        kukeonv1.CellFromConfigRequest
 	doc                v1beta1.CellDoc
 	materializedCell   v1beta1.CellDoc
+	connectors         []v1beta1.ConnectorStatus
 }
 
 func (c *creationClient) GetConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
@@ -130,7 +131,10 @@ func (c *creationClient) renderFromConfig(
 	return kukeonv1.PreviewCellFromConfigResult{
 		Cell:   doc,
 		Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data)),
-		Values: []v1beta1.RenderedValue{{Kind: v1beta1.RenderKindValue, Key: "TAG", Value: "secret", Origin: "realm"}},
+		Values: []v1beta1.RenderedValue{
+			{Kind: v1beta1.RenderKindValue, Key: "TAG", Value: "secret", Origin: "realm"},
+		},
+		Connectors: c.connectors,
 	}, nil
 }
 
@@ -160,7 +164,9 @@ func (c *creationClient) CreateCellFromConfig(
 	if err != nil {
 		return kukeonv1.CreateCellFromConfigResult{}, err
 	}
-	return kukeonv1.CreateCellFromConfigResult{CreateCellResult: created, Digest: preview.Digest}, nil
+	return kukeonv1.CreateCellFromConfigResult{
+		CreateCellResult: created, Digest: preview.Digest, Connectors: preview.Connectors,
+	}, nil
 }
 
 func TestConfigCreation(t *testing.T) {
@@ -323,6 +329,75 @@ func TestConfigCreationAutomaticNamePreviewMatchesCreatedCell(t *testing.T) {
 			client.doc.Metadata.Name,
 			preview.Document.Metadata.Name,
 		)
+	}
+}
+
+// TestConfigCreationReturnsConnectorWarnings pins issue #1791: a cell that
+// picked a login identity another role uses is still created, and both the
+// preview (per connector) and the create response (as warnings beside the
+// document) carry the daemon's warning so the web UI can show it.
+func TestConfigCreationReturnsConnectorWarnings(t *testing.T) {
+	const warning = `volume team-dev-claude@default is also the login identity of role dev; ` +
+		`role kuke/majordomo shares it at the operator's risk`
+	client := &creationClient{materializeCreated: true, connectors: []v1beta1.ConnectorStatus{
+		{Connector: "claude", Component: "claude-login", State: v1beta1.ConnectorResolved, Warning: warning},
+		{Connector: "github", Component: "github", State: v1beta1.ConnectorResolved},
+	}}
+	handler := testCreateHandler(t, client)
+	input := createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "realm"}, Name: "shared"}
+
+	previewResponse := postCreate(t, handler, "/api/cells/from-config/preview", input)
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("preview: %d %s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var preview struct {
+		Preview    string                    `json:"preview"`
+		Connectors []v1beta1.ConnectorStatus `json:"connectors"`
+	}
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Connectors) != 2 || preview.Connectors[0].Warning != warning {
+		t.Fatalf("preview connectors = %+v, want the claude warning", preview.Connectors)
+	}
+
+	input.ResolvedName, input.Preview = "shared", preview.Preview
+	createdResponse := postCreate(t, handler, "/api/cells/from-config/create", input)
+	if createdResponse.Code != http.StatusOK || client.created != 1 {
+		t.Fatalf("create: %d %s", createdResponse.Code, createdResponse.Body.String())
+	}
+	var created struct {
+		v1beta1.CellDoc
+
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Metadata.Name != "shared" {
+		t.Fatalf("created name = %q, want the document beside the warnings", created.Metadata.Name)
+	}
+	if len(created.Warnings) != 1 || created.Warnings[0] != warning {
+		t.Fatalf("create warnings = %q, want [%q]", created.Warnings, warning)
+	}
+}
+
+// TestConfigCreationOmitsWarningsWithoutOne keeps the create response the
+// plain cell document when no connector warned.
+func TestConfigCreationOmitsWarningsWithoutOne(t *testing.T) {
+	client := &creationClient{materializeCreated: true}
+	handler := testCreateHandler(t, client)
+	input := createConfigRequest{Config: v1beta1.CellConfigMetadata{Name: "cfg", Realm: "realm"}, Name: "plain"}
+	w := postCreate(t, handler, "/api/cells/from-config/create", input)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["warnings"]; ok {
+		t.Fatalf("create response = %s, want no warnings key", w.Body.String())
 	}
 }
 

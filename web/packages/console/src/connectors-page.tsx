@@ -10,7 +10,7 @@ import { Disclosure } from "@kukeon/ui";
 import { connectorSetUp, notSetUpText } from "./onboarding.mjs";
 import {
   allowedLevels, connectorLevels, defaultRow, defaultScopeName, defaultTargets, deliveryEnv, deliveryFile, deliveryGit, deliveryRegistry, deliveryStateVolume, identitiesFor, importPayload, importsFromHost,
-  isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, targetScope, usageFor,
+  isRegistry, listedConnectors, loginBody, tokenConnectors, tokenForGit, loginIdentitiesFor, loginMethods, loginNameError, refKey, refLabel, refScope, scopeAt, scopeFromParts, scopeLevel, scopeLevels, scopeParts, scopeQuery, secretRef, sharedLoginNote, targetScope, usageFor,
 } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorUsage, DefaultTarget, Identity, ImportForm, ImportResult, LoginIdentity, Scope, SecretRef } from "./connectors.mjs";
 import { BulkActions, SelectAllBox, SelectRowBox, countNoun, useSelection, type BulkAction, type BulkRow } from "./bulk-ui";
@@ -241,7 +241,7 @@ function LoginIdentitiesPanel({ connector, logins, loginsError, inventory, targe
   return <section className="panel connector-logins" aria-label={`${title} login identities`}>
     <div className="panel-heading"><h2>Login identities</h2><span className="badge">{logins.length} stored</span><button type="button" className="document-action" aria-expanded={creating} onClick={() => { setCreating(value => !value); setError(undefined); }}>{creating ? "Hide new login identity" : "New login identity"}</button></div>
     <div className="panel-body">
-      <p className="description">A login identity is a Volume tagged <code>{connector.name}</code>: the harness keeps its login in its state directory, and that directory is the Volume. <strong>Log in</strong> opens a short-lived identity cell that mounts only that Volume and runs the {title} login; the cell is deleted when the login ends. Only whether a login is present is shown — never the login itself. One login identity serves one role.</p>
+      <p className="description">A login identity is a Volume tagged <code>{connector.name}</code>: the harness keeps its login in its state directory, and that directory is the Volume. <strong>Log in</strong> opens a short-lived identity cell that mounts only that Volume and runs the {title} login; the cell is deleted when the login ends. Only whether a login is present is shown — never the login itself. {sharedLoginNote}</p>
       {loginsError && <p className="stale">Login identities could not be listed: {loginsError.message}</p>}
       {creating && <form className="creation-form identity-form" aria-label={`New ${title} login identity`} method="post" autoComplete="off" onSubmit={event => void create(event, false)}>
         <h3>New {title} login identity</h3>

@@ -9,8 +9,8 @@ import { catalogAPI } from "./catalog-url.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, imageChoices, imageStatus, missingAnswers, offersState, previewMode, requiredCapabilities, secretChoices, stateChoice } from "./config-form.mjs";
 import type { Answers, BlueprintForm, CredentialAnswer, DefaultGitAnswer, FormSection, Identity, InventoryImage, Parameter, RenderedValue, RepoAnswer, RepoGitAnswer, RepoSlot, SecretChoice, SecretRef, SecretSlot, SigningAnswer } from "./config-form.mjs";
 
-import { ConnectorIdentities, IdentitySelect, LoginIdentitySelect, connectorsLink } from "./connector-ui";
-import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, loginIdentitiesFor, originLabel, refLabel, scopeParts, scopeQuery, secretRef as identityRef, takesIdentity, targetScope } from "./connectors.mjs";
+import { ConnectorIdentities, ConnectorWarning, IdentitySelect, LoginIdentitySelect, connectorsLink } from "./connector-ui";
+import { defaultGroupChoices, defaultRow, deliveryStateVolume, groupComponents, harnessEphemeral, harnessPersistent, harnessStates, identitiesFor, loginIdentitiesFor, originLabel, refLabel, responseWarnings, scopeParts, scopeQuery, secretRef as identityRef, sharedLoginNote, takesIdentity, targetScope } from "./connectors.mjs";
 import type { Connector, ConnectorDefault, ConnectorStatus } from "./connectors.mjs";
 import { apiFetch } from "@kukeon/api-client";
 import { routeHref } from "./router";
@@ -156,6 +156,8 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   const [requestedMode, setRequestedMode] = useState("");
   const [preview, setPreview] = useState<Preview>();
   const [created, setCreated] = useState<string[]>();
+  // Risks the daemon accepted when it stored the Config (#1791), such as a login identity another role uses.
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [stage, setStage] = useState<"preview" | "create">("preview");
   const [error, setError] = useState("");
@@ -214,7 +216,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
         const message = result.error?.message ?? result.message ?? `Request failed (HTTP ${response.status})`;
         throw new Error(create && (result.error?.code === "unavailable" || response.status >= 500) ? `The creation outcome could not be confirmed. Refresh the Configs list before retrying. ${message}` : message);
       }
-      if (create) { setCreated(scope); setPreview(undefined); onCreated(); }
+      if (create) { setCreated(scope); setWarnings(responseWarnings(result)); setPreview(undefined); onCreated(); }
       else setPreview(result as Preview);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "The request could not reach the web server.";
@@ -287,7 +289,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
           const title = connector.title || connector.name;
           const picked = identityRef(answers.connectors[component]);
           return <LoginIdentitySelect key={`login:${component}`} label={`${title} login identity`} identities={loginIdentitiesFor(logins.data, connector.name)} value={answers.connectors[component]} emptyLabel="The state volume named in this form" disabled={pending} onChange={ref => { const next = { ...answers.connectors }; if (ref) next[component] = ref; else delete next[component]; change({ connectors: next }); }}
-            help={<>The login is kept in a login identity — a Volume mounted as the harness state directory. {picked ? <>Cells of this Config keep their state in <code>{refLabel(picked)}</code>; the state volume values below are set from it.</> : <>Pick one to reuse a login, or leave it and name a state volume of the Config's own below.</>} One login identity serves one role. <a href={connectorsLink(connector.name, target)}>Create or log in to a {title} login identity</a>.</>} />;
+            help={<>The login is kept in a login identity — a Volume mounted as the harness state directory. {picked ? <>Cells of this Config keep their state in <code>{refLabel(picked)}</code>; the state volume values below are set from it.</> : <>Pick one to reuse a login, or leave it and name a state volume of the Config's own below.</>} {sharedLoginNote} <a href={connectorsLink(connector.name, target)}>Create or log in to a {title} login identity</a>.</>} />;
         })()}
         {section.connector && section.connector.harness && section.connector.delivery !== deliveryStateVolume && offersState(form, effective) && <label className="schema-field"><span>Harness state</span><select aria-label={`${section.connector.title || section.connector.name} harness state`} value={stateChoice(form, effective) || harnessPersistent} disabled={pending} onChange={event => change({ state: event.target.value === harnessEphemeral ? harnessEphemeral : "" })}>{harnessStates.map(item => <option key={item} value={item}>{item}{item === harnessPersistent ? " (default)" : ""}</option>)}</select><small>{stateChoice(form, effective) === harnessEphemeral ? "Ephemeral: cells mount no state volume; the harness state directory lives and dies with each cell, which authenticates from its Secret." : "Persistent: cells mount the state volume named in this form, so sessions and settings survive a cell."}</small></label>}
         {!(section.connector && takesIdentity(section.connector.delivery)) && section.secrets.map((slot: SecretSlot) => <SecretPicker key={slot.name} label={`${slot.name} secret`} invalid={flagged(fieldId("secret", `${slot.name} secret`))} required={slot.required} value={answers.secrets[slot.name]} choices={secretChoices(secrets.data, ["opaque"])} disabled={pending} help={slot.envName ? `Delivered as ${slot.envName}.` : undefined} onChange={ref => { const next = { ...answers.secrets }; if (ref) next[slot.name] = ref; else delete next[slot.name]; change({ secrets: next }); }} />)}
@@ -335,6 +337,7 @@ function ConfigForm({ blueprint, blueprintScope, form, revision, inventory, onCr
   }
   if (created) return <section className="panel" aria-label="Config created"><div className="panel-heading"><h2>Config created</h2><span className="badge">{created.slice(0, -1).join(" / ")}</span></div><div className="panel-body creation-form">
     <p className="creation-success" role="status"><span>CellConfig <strong>{created.at(-1)}</strong> was saved. It answers the <strong>{blueprint.metadata.name}</strong> blueprint's form; no cell was created.</span></p>
+    {warnings.map(warning => <ConnectorWarning key={warning} warning={warning} />)}
     <p><a className="resource-name" href={catalogLink("configs", created)}>Open Config {created.at(-1)}</a></p>
     <a className="new-cell-action config-create-action" href={newCellLink(created)}>Create a Cell from it <span aria-hidden="true">→</span></a>
     <button type="button" className="subtle-button" onClick={() => { setCreated(undefined); setName(""); }}>Create another Config from this Blueprint</button>

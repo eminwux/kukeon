@@ -5,7 +5,7 @@ import {
   groupComponents, identitiesFor, listedConnectors, identityErrors, identityFields, identityPayload, importPayload, importsFromHost, isRegistry, loginMethods, methodChoices, methodStatuses, originLabel, refKey, refLabel,
   emptySecretForm, registryEntries, sameRef, scopeAt, scopeFromParts, scopeLevel, scopeQuery, secretErrors, secretPayload, secretRef, secretTypeOf, storesNoValue, takesIdentity, targetScope, teamOf, unresolvedConnectors, usageFor,
   harnessEphemeral, harnessPersistent, keepsLogin, loginBody, loginEmpty, loginIdentitiesFor, loginLoggedIn, loginNameError, loginStateText, loginTone, picksIdentity, sessionScope, stateText, statusIdentity,
-  emptyGitForm, joinPerson, personError, splitPerson, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, staleGitNotice, tokenConnectors, tokenForGit, tokenGitErrors, tokenGitPayload,
+  emptyGitForm, joinPerson, personError, splitPerson, identityDefaultOn, identityTokenFrom, linkedGitIdentity, scopeAtLevel, scopeChoices, secretTypeChoices, staleGitNotice, tokenConnectors, responseWarnings, connectorWarnings, sharedLoginNote, tokenForGit, tokenGitErrors, tokenGitPayload,
 } from "./connectors.mjs";
 import { blueprintForm, buildSpec, componentsWithoutIdentity, connectorsWithoutIdentity, emptyAnswers, formSections, groupChoice, missingAnswers } from "./config-form.mjs";
 
@@ -575,4 +575,22 @@ test("Make this the default starts on when no default resolves for the target", 
   assert.equal(identityDefaultOn([row({ name: "x", realm: "dev" })], example, target), false);
   assert.equal(identityDefaultOn(undefined, example, target), true);
   assert.equal(identityDefaultOn([], example, undefined), false);
+});
+
+// #1791: a login identity another role uses is warned about, never refused. A
+// save or create response carries the daemon's warnings beside its document,
+// and a render's connector statuses each carry their own.
+test("responseWarnings and connectorWarnings read the daemon's warnings", () => {
+  const warning = "volume team-dev-claude@default is also the login identity of role dev; role kuke/majordomo shares it at the operator's risk";
+  assert.deepEqual(responseWarnings({ metadata: { name: "cell" }, warnings: [warning, "", "  ", 7, null] }), [warning]);
+  assert.deepEqual(responseWarnings({ metadata: { name: "cell" } }), []);
+  assert.deepEqual(responseWarnings({ warnings: "not a list" }), []);
+  assert.deepEqual(responseWarnings(undefined), []);
+  assert.deepEqual(connectorWarnings([{ connector: "claude", warning }, { connector: "github" }, { connector: "codex", warning: " " }]), [warning]);
+  assert.deepEqual(connectorWarnings(undefined), []);
+});
+
+test("sharedLoginNote no longer says the one-role rule is absolute", () => {
+  assert.doesNotMatch(sharedLoginNote, /^One login identity serves one role/);
+  assert.match(sharedLoginNote, /may share it at your risk/);
 });

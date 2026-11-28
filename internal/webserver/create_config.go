@@ -121,7 +121,7 @@ func registerConfigRoutes(mux *http.ServeMux, dial Dial) {
 						doc.Metadata.Name,
 					)
 				}
-				return created.Config, nil
+				return savedConfig{CellConfigDoc: created.Config, Warnings: created.Warnings}, nil
 			}),
 		)
 	}

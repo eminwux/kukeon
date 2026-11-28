@@ -18,6 +18,7 @@ package webserver
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -334,9 +335,32 @@ func TestPickLoginIdentityForConfig(t *testing.T) {
 		return w.Code
 	}
 
-	if code := pick(`{"name":"personal-max","realm":"dev"}`); code != http.StatusOK {
-		t.Fatalf("pick status=%d", code)
+	// The daemon stores a pick another role uses, with a warning (#1789); the
+	// warning comes back beside the saved Config for the web UI to show.
+	const warning = `config "mine": volume "personal-max" is also the login identity of role dev`
+	c.applyWarnings = map[string][]string{string(v1beta1.KindCellConfig): {warning}}
+	w := connectorRequest(
+		t,
+		handler,
+		http.MethodPost,
+		"/api/configs/connector",
+		`{"config":{"name":"mine","realm":"dev"},"connector":"`+name+`","identity":{"name":"personal-max","realm":"dev"}}`,
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("pick status=%d %s", w.Code, w.Body)
 	}
+	var saved struct {
+		v1beta1.CellConfigDoc
+
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Metadata.Name != "mine" || len(saved.Warnings) != 1 || saved.Warnings[0] != warning {
+		t.Fatalf("pick response = %s, want the Config and [%q]", w.Body, warning)
+	}
+	c.applyWarnings = nil
 	values := c.configs[0].Spec.Values
 	want := map[string]string{
 		"KEEP": "me", "STATE_VOLUME": "personal-max", "STATE_VOLUME_REALM": "dev",
