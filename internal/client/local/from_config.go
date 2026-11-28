@@ -59,6 +59,7 @@ func (c *Client) CreateCellFromConfig(
 		CreateCellResult: created,
 		Digest:           res.Digest,
 		Values:           res.Values,
+		Connectors:       res.Connectors,
 	}, nil
 }
 

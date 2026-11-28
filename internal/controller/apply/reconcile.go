@@ -937,11 +937,12 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
-	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
-		return result, roleErr
-	}
 	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
+	}
+
+	if warning := LoginIdentityRoleWarning(r, cfgDoc, bpDoc); warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 	}
 
 	created, writeErr := r.WriteConfig(desired)
@@ -982,9 +983,6 @@ func ValidateConfig(r runner.Runner, desired intmodel.CellConfig) error {
 	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
 	if bpErr != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
-	}
-	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
-		return roleErr
 	}
 	return validateConfigAgainstBlueprint(cfgDoc, bpDoc)
 }
@@ -1032,11 +1030,12 @@ func CreateConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult
 		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
 	}
 
-	if roleErr := validateLoginIdentityRole(r, cfgDoc, bpDoc); roleErr != nil {
-		return result, roleErr
-	}
 	if slotErr := validateConfigAgainstBlueprint(cfgDoc, bpDoc); slotErr != nil {
 		return result, slotErr
+	}
+
+	if warning := LoginIdentityRoleWarning(r, cfgDoc, bpDoc); warning != "" {
+		result.Warnings = append(result.Warnings, warning)
 	}
 
 	if writeErr := r.WriteConfigIfAbsent(desired); writeErr != nil {
@@ -1116,6 +1115,9 @@ type ReconcileResult struct {
 	Resource interface{}       // The reconciled resource (internal model)
 	Changes  []string          // List of changed fields
 	Details  map[string]string // Detailed change descriptions
+	// Warnings are risks the operator accepted by applying the resource; it
+	// was stored regardless (issue #1789).
+	Warnings []string
 }
 
 // cellNeedsRematerialize reports whether a spec-equal cell still needs

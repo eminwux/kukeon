@@ -462,6 +462,10 @@ type CreateCellFromConfigResult struct {
 
 	Digest string
 	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved for the
+	// cell; a connector's Warning names a risk the cell was created with
+	// (issue #1789).
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // CreateCellFromConfigReply is the wire response for CreateCellFromConfig.

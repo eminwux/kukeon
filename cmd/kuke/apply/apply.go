@@ -325,6 +325,13 @@ func printApplyResult(cmd *cobra.Command, result kukeonv1.ApplyDocumentsResult) 
 				cmd.Printf("  Error: %s\n", resource.Error)
 			}
 		}
+		// A warned resource was applied: the warning names a risk the
+		// operator accepted by applying it (issue #1789).
+		for _, warning := range resource.Warnings {
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning); err != nil {
+				return err
+			}
+		}
 	}
 
 	if hasFailures {

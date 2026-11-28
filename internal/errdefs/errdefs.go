@@ -734,8 +734,9 @@ var (
 	// that is not a clean path relative to the volume (issue #1685).
 	ErrVolumeConnectorInvalid = errors.New("volume connector tag is invalid")
 	// ErrVolumeIdentity is returned when a Volume cannot be the login
-	// identity a cell asks for: it does not exist, it is tagged for another
-	// connector, or Configs of another role already use it (issue #1685).
+	// identity a cell asks for: it does not exist or it is tagged for another
+	// connector (issue #1685). One another role already uses is accepted
+	// with a warning, not this error (issue #1789).
 	ErrVolumeIdentity = errors.New("volume is not a login identity of the connector")
 	ErrWriteVolume    = errors.New("failed to write volume")
 	ErrVolumeNotFound = errors.New("volume not found")

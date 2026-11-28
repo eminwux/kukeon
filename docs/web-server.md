@@ -584,8 +584,8 @@ login, shows no line.
   which creates and starts the cell as usual. Its harness then asks for the
   login in majordomo's terminal.
 
-Majordomo's login is its own: one login identity serves one role, so logging
-in for agents (the Get started step) does not log majordomo in.
+Majordomo's login is its own: each role has its own login identity by default,
+so logging in for agents (the Get started step) does not log majordomo in.
 
 ### Docked panel
 

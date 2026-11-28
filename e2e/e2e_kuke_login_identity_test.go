@@ -34,9 +34,9 @@ import (
 // `logged in` — without the daemon reading it; `kuke connector list` and
 // `kuke get volumes -o wide` list it; a Config that logs in through it reports
 // it; a Volume tagged for another connector is refused as a state volume; and
-// a login identity Configs of another role already use is refused with an
-// error naming both roles. Nothing here starts a container, so no image is
-// pulled.
+// a login identity a Config of another role already uses is shared with a
+// warning naming both roles, whether a Config binds it or a cell picks it
+// (issue #1789). Nothing here starts a container, so no image is pulled.
 //
 //nolint:gocyclo,cyclop // one login identity followed through a flat list of independent checks.
 func TestKuke_LoginIdentity(t *testing.T) {
@@ -271,24 +271,59 @@ metadata:
 		t.Errorf("a Config of the same role was refused (exit %d):\n%s", code, out)
 	}
 
-	// Another role binding the same login identity is refused when its Config
-	// is applied, naming both roles — so nothing is stored, and the role that
-	// already uses the identity keeps rendering.
+	// Another role may bind the same login identity at the operator's risk
+	// (issue #1789): its Config is stored with a warning naming both roles,
+	// resolves on the identity, and both roles keep rendering.
 	pmPath := filepath.Join(t.TempDir(), "pm.yaml")
 	if err := os.WriteFile(pmPath, []byte(configManifest("pm", "pm", "agent-login")), 0o600); err != nil {
 		t.Fatalf("write pm.yaml: %v", err)
 	}
 	code, out := try("apply", "-f", pmPath)
-	if code == 0 {
-		t.Fatalf("a Config of another role was stored on the same login identity:\n%s", out)
+	if code != 0 {
+		t.Fatalf("a Config of another role on the same login identity was refused (exit %d):\n%s", code, out)
 	}
-	for _, want := range []string{"e2e/dev", "e2e/pm", volume} {
+	for _, want := range []string{`CellConfig "pm": created`, "warning:", "e2e/dev", "e2e/pm", volume} {
 		if !strings.Contains(out, want) {
-			t.Errorf("role guard error does not mention %q:\n%s", want, out)
+			t.Errorf("apply output does not mention %q:\n%s", want, out)
 		}
 	}
-	if code, out = dryRun("dev"); code != 0 {
-		t.Errorf("the first role stopped rendering after the refused apply (exit %d):\n%s", code, out)
+	pmStatus := getConfig("pm").Status
+	if pmStatus == nil || len(pmStatus.Connectors) != 1 ||
+		pmStatus.Connectors[0].State != v1beta1.ConnectorResolved {
+		t.Errorf("config pm status = %+v, want its connector resolved", pmStatus)
+	}
+	for _, cfg := range []string{"dev", "pm"} {
+		if code, out = dryRun(cfg); code != 0 {
+			t.Errorf("config %s stopped rendering after the shared apply (exit %d):\n%s", cfg, code, out)
+		}
+	}
+
+	// A cell of a third role picks the identity: it renders resolved, with
+	// the login state and the same warning.
+	config("orchestrator", "orchestrator", "agent-login")
+	code, out = try(append([]string{
+		"create", "cell", "probe", "--from-config", "orchestrator",
+		"--connector", "agent=" + volume + "@" + realm + "/" + space + "/" + stack, "--dry-run",
+	}, scope...)...)
+	if code != 0 {
+		t.Fatalf("a cell of another role picking the login identity was refused (exit %d):\n%s", code, out)
+	}
+	for _, want := range []string{"warning:", "e2e/orchestrator", volume} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cell pick output does not mention %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "e2e/dev") && !strings.Contains(out, "e2e/pm") {
+		t.Errorf("cell pick warning names no role already using the identity:\n%s", out)
+	}
+
+	// A cell's pick of a Volume that does not exist is still refused.
+	code, out = try(append([]string{
+		"create", "cell", "probe", "--from-config", "orchestrator",
+		"--connector", "agent=nope@" + realm + "/" + space + "/" + stack, "--dry-run",
+	}, scope...)...)
+	if code == 0 || !strings.Contains(out, "does not exist") {
+		t.Errorf("a cell picking a missing volume was accepted, or does not say why (exit %d):\n%s", code, out)
 	}
 
 	// A Volume tagged for one connector is refused as the state volume of

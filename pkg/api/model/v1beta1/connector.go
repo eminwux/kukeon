@@ -187,6 +187,9 @@ type ConnectorStatus struct {
 	HarnessState string `json:"harnessState,omitempty" yaml:"harnessState,omitempty"`
 	// Message says why the connector is unresolved.
 	Message string `json:"message,omitempty"      yaml:"message,omitempty"`
+	// Warning names a risk of a resolved connector the cell is created with
+	// anyway: a login identity another role already uses (issue #1789).
+	Warning string `json:"warning,omitempty"      yaml:"warning,omitempty"`
 }
 
 // Fill says what fills the connector, as kuke get configs -o wide prints it

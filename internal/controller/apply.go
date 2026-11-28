@@ -53,28 +53,33 @@ type ResourceResult struct {
 	Error   error
 	Changes []string
 	Details map[string]string
+	// Warnings are risks the operator accepted by applying the resource
+	// (issue #1789); a warned resource was still applied.
+	Warnings []string
 }
 
 // resourceResultJSON is a helper type for JSON/YAML serialization.
 type resourceResultJSON struct {
-	Index   int               `json:"index"             yaml:"index"`
-	Kind    string            `json:"kind"              yaml:"kind"`
-	Name    string            `json:"name"              yaml:"name"`
-	Action  string            `json:"action"            yaml:"action"`
-	Error   *string           `json:"error,omitempty"   yaml:"error,omitempty"`
-	Changes []string          `json:"changes,omitempty" yaml:"changes,omitempty"`
-	Details map[string]string `json:"details,omitempty" yaml:"details,omitempty"`
+	Index    int               `json:"index"              yaml:"index"`
+	Kind     string            `json:"kind"               yaml:"kind"`
+	Name     string            `json:"name"               yaml:"name"`
+	Action   string            `json:"action"             yaml:"action"`
+	Error    *string           `json:"error,omitempty"    yaml:"error,omitempty"`
+	Changes  []string          `json:"changes,omitempty"  yaml:"changes,omitempty"`
+	Details  map[string]string `json:"details,omitempty"  yaml:"details,omitempty"`
+	Warnings []string          `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler for ResourceResult.
 func (r ResourceResult) MarshalJSON() ([]byte, error) {
 	result := resourceResultJSON{
-		Index:   r.Index,
-		Kind:    r.Kind,
-		Name:    r.Name,
-		Action:  r.Action,
-		Changes: r.Changes,
-		Details: r.Details,
+		Index:    r.Index,
+		Kind:     r.Kind,
+		Name:     r.Name,
+		Action:   r.Action,
+		Changes:  r.Changes,
+		Details:  r.Details,
+		Warnings: r.Warnings,
 	}
 	if r.Error != nil {
 		errMsg := r.Error.Error()
@@ -86,12 +91,13 @@ func (r ResourceResult) MarshalJSON() ([]byte, error) {
 // MarshalYAML implements yaml.Marshaler for ResourceResult.
 func (r ResourceResult) MarshalYAML() (interface{}, error) {
 	result := resourceResultJSON{
-		Index:   r.Index,
-		Kind:    r.Kind,
-		Name:    r.Name,
-		Action:  r.Action,
-		Changes: r.Changes,
-		Details: r.Details,
+		Index:    r.Index,
+		Kind:     r.Kind,
+		Name:     r.Name,
+		Action:   r.Action,
+		Changes:  r.Changes,
+		Details:  r.Details,
+		Warnings: r.Warnings,
 	}
 	if r.Error != nil {
 		errMsg := r.Error.Error()
@@ -408,6 +414,7 @@ func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult,
 			resourceResult.Action = reconcileResult.Action
 			resourceResult.Changes = reconcileResult.Changes
 			resourceResult.Details = reconcileResult.Details
+			resourceResult.Warnings = reconcileResult.Warnings
 		}
 
 		result.Resources = append(result.Resources, resourceResult)

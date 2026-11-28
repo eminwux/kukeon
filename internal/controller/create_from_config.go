@@ -103,6 +103,9 @@ type CellFromConfigResult struct {
 
 	Digest string
 	Values []v1beta1.RenderedValue
+	// Connectors is how each connector the Config requires resolved for the
+	// cell, warnings included (issue #1789).
+	Connectors []v1beta1.ConnectorStatus
 }
 
 // PreviewCellFromConfig renders the cell a CreateCellFromConfig with the same
@@ -205,7 +208,9 @@ func (b *Exec) CreateCellFromConfig(req CellFromConfigRequest) (CellFromConfigRe
 	if err != nil {
 		return CellFromConfigResult{}, err
 	}
-	return CellFromConfigResult{CreateCellResult: created, Digest: preview.Digest, Values: preview.Values}, nil
+	return CellFromConfigResult{
+		CreateCellResult: created, Digest: preview.Digest, Values: preview.Values, Connectors: preview.Connectors,
+	}, nil
 }
 
 // lookupRequestConfig reads the CellConfig a request names.

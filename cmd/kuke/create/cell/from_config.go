@@ -102,6 +102,9 @@ func createFromConfig(
 		if err != nil {
 			return err
 		}
+		if err = PrintConnectorWarnings(cmd.ErrOrStderr(), preview.Connectors); err != nil {
+			return err
+		}
 		if explain {
 			return PrintRenderExplain(cmd.OutOrStdout(), preview.Cell, preview.Digest, preview.Values)
 		}
@@ -112,9 +115,27 @@ func createFromConfig(
 	if err != nil {
 		return err
 	}
+	if err = PrintConnectorWarnings(cmd.ErrOrStderr(), result.Connectors); err != nil {
+		return err
+	}
 	printCellResult(cmd, result.CreateCellResult)
 	if explain {
 		return PrintRenderExplain(cmd.OutOrStdout(), result.Cell, result.Digest, result.Values)
+	}
+	return nil
+}
+
+// PrintConnectorWarnings writes one `warning:` line per connector that
+// resolved with a warning — a login identity another role already uses
+// (issue #1789). The cell is rendered regardless.
+func PrintConnectorWarnings(w io.Writer, statuses []v1beta1.ConnectorStatus) error {
+	for _, status := range statuses {
+		if status.Warning == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "warning: connector %q: %s\n", status.Connector, status.Warning); err != nil {
+			return err
+		}
 	}
 	return nil
 }

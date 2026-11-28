@@ -1040,13 +1040,16 @@ type ApplyDocumentsResult struct {
 // matches the sibling `kuke delete -f -o json` contract on
 // [DeleteResourceResult] (the wire is gob and ignores these tags).
 type ApplyResourceResult struct {
-	Index   int               `json:"index"             yaml:"index"`
-	Kind    string            `json:"kind"              yaml:"kind"`
-	Name    string            `json:"name"              yaml:"name"`
-	Action  string            `json:"action"            yaml:"action"`
-	Error   string            `json:"error,omitempty"   yaml:"error,omitempty"`
-	Changes []string          `json:"changes,omitempty" yaml:"changes,omitempty"`
-	Details map[string]string `json:"details,omitempty" yaml:"details,omitempty"`
+	Index   int               `json:"index"              yaml:"index"`
+	Kind    string            `json:"kind"               yaml:"kind"`
+	Name    string            `json:"name"               yaml:"name"`
+	Action  string            `json:"action"             yaml:"action"`
+	Error   string            `json:"error,omitempty"    yaml:"error,omitempty"`
+	Changes []string          `json:"changes,omitempty"  yaml:"changes,omitempty"`
+	Details map[string]string `json:"details,omitempty"  yaml:"details,omitempty"`
+	// Warnings are risks the operator accepted by applying the resource; a
+	// warned resource was still applied (issue #1789).
+	Warnings []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 // ---- Delete ----

@@ -79,6 +79,28 @@ spec:
 			wantOutput: `Realm "r1": created`,
 		},
 		{
+			// A warned resource was applied: the warning is printed after it
+			// and the apply succeeds (issue #1789).
+			name: "warning printed with the applied resource",
+			args: []string{"-f", writeTempYAML(t, validYAML)},
+			fake: &fakeClient{
+				applyFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					return kukeonv1.ApplyDocumentsResult{
+						Resources: []kukeonv1.ApplyResourceResult{
+							{
+								Kind: "CellConfig", Name: "pm", Action: "created",
+								Warnings: []string{
+									`config "pm": volume "dev-state" is also the login identity of role e2e/dev`,
+								},
+							},
+						},
+					}, nil
+				},
+			},
+			wantOutput: `CellConfig "pm": created` + "\n" +
+				`warning: config "pm": volume "dev-state" is also the login identity of role e2e/dev`,
+		},
+		{
 			name: "client returns error",
 			args: []string{"-f", writeTempYAML(t, validYAML)},
 			fake: &fakeClient{
