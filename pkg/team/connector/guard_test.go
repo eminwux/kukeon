@@ -81,17 +81,17 @@ func sameWord() []sameWordEntry {
 		{"internal/connector/gitimport/gitconfig.go", "git", "the git program"},
 		{"pkg/team/config/yaml.go", "git", "the removed spec.git field, named in its decode error"},
 		{"internal/team/gitremote/", "git", "the git program"},
-		{"internal/webui/frontend/src/connectors.mjs", "git", "delivery handler kind"},
-		{"internal/webui/frontend/src/connectors.mjs", "registry", "delivery handler kind"},
-		{"internal/webui/frontend/src/config-form.mjs", "git", "rendered-value kind"},
-		{"internal/webui/frontend/src/creation-schema.mjs", "git", "the `git` block of a spec"},
-		{"internal/webui/frontend/src/new-config.tsx", "git", "default SSH user, as a placeholder"},
+		{"web/packages/console/src/connectors.mjs", "git", "delivery handler kind"},
+		{"web/packages/console/src/connectors.mjs", "registry", "delivery handler kind"},
+		{"web/packages/console/src/config-form.mjs", "git", "rendered-value kind"},
+		{"web/packages/console/src/creation-schema.mjs", "git", "the `git` block of a spec"},
+		{"web/packages/console/src/new-config.tsx", "git", "default SSH user, as a placeholder"},
 		// A command-line word.
 		{"team/harnesses/cmd/images/", "registry", "flag name"},
 		// kuke health files issues on GitHub only (cmd/kuke/health/filing.go
 		// reads GH_TOKEN): the Health page names the connector that filing
 		// needs, a fact about kuke health, not about the catalog (#1649, D9).
-		{"internal/webui/frontend/src/health.tsx", "github", "the connector issue filing reads its token from"},
+		{"web/packages/console/src/health.tsx", "github", "the connector issue filing reads its token from"},
 	}
 }
 
@@ -294,12 +294,13 @@ func (g *guard) scanGo() {
 // scanWebUI checks the quoted literals of the web UI's sources: the UI renders
 // what GET /api/connectors returns.
 func (g *guard) scanWebUI() {
-	const webUI = "internal/webui/frontend/src/"
+	// The sources of every package and app of the web/ workspace (#1753).
+	const webUI = "web/"
 	quoted := regexp.MustCompile("(['\"`])([^'\"`\\n]*)(['\"`])")
 	comment := regexp.MustCompile(`^\s*(//|\*|/\*)`)
 	checked := 0
 	for _, rel := range sources(g.t, ".ts", ".tsx", ".mts", ".mjs", ".js", ".jsx") {
-		if !strings.HasPrefix(rel, webUI) {
+		if !strings.HasPrefix(rel, webUI) || !strings.Contains(rel, "/src/") {
 			continue
 		}
 		checked++
@@ -319,7 +320,7 @@ func (g *guard) scanWebUI() {
 		}
 	}
 	if checked == 0 {
-		g.t.Fatalf("no web UI sources found under %s", webUI)
+		g.t.Fatalf("no web UI sources found under %s*/*/src/", webUI)
 	}
 }
 

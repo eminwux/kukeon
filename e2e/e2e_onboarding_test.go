@@ -55,7 +55,7 @@ const onboardingTimeout = 25 * time.Minute
 // host where only `kuke init` ran, a browser signs in to `kuke serve`, follows
 // the Workbench's Get started checklist — Initialize, a GitHub token that also
 // serves git, a login, a first agent — and enables majordomo, against a real
-// kukeond. The browser side is internal/webui/frontend/tests/onboarding.spec.mjs;
+// kukeond. The browser side is web/apps/local/tests/onboarding.spec.mjs;
 // this test owns the daemon: it bootstraps the runtime the way the installer
 // does, hands the spec the daemon's endpoint and tears everything down.
 //
@@ -92,10 +92,13 @@ func TestOnboarding_WebUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve E2E_BIN_DIR: %v", err)
 	}
-	frontend := filepath.Join(binDir, "internal", "webui", "frontend")
-	if _, statErr := os.Stat(filepath.Join(frontend, "node_modules")); statErr != nil {
-		t.Fatalf("%s has no node_modules; run 'npm ci' there (make e2e-onboarding does): %v", frontend, statErr)
+	// The npm workspace installs every dependency into web/node_modules; the
+	// spec runs from the app that holds it.
+	workspace := filepath.Join(binDir, "web")
+	if _, statErr := os.Stat(filepath.Join(workspace, "node_modules")); statErr != nil {
+		t.Fatalf("%s has no node_modules; run 'npm ci' there (make e2e-onboarding does): %v", workspace, statErr)
 	}
+	frontend := filepath.Join(workspace, "apps", "local")
 
 	requireInitEgressRemoved(t)
 	runPath := getRandomRunPath(t)

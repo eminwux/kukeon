@@ -1,0 +1,27 @@
+{
+  "name": "@kukeon/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "workspaces": [
+    "packages/api-client",
+    "packages/ui",
+    "packages/console",
+    "apps/local"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces && node scripts/check-published-esm.mjs",
+    "typecheck": "npm run typecheck --workspaces",
+    "test:unit": "npm run test:unit --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.6"
+  }
+}

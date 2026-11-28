@@ -296,12 +296,12 @@ test-e2e: e2e-image
 
 # First-run onboarding against a real daemon (issue #1694): `kuke init` with
 # the image e2e-image built, `kuke serve`, and a browser that follows the
-# Workbench's Get started checklist (internal/webui/frontend/tests/onboarding.spec.mjs,
+# Workbench's Get started checklist (web/apps/local/tests/onboarding.spec.mjs,
 # started by TestOnboarding_WebUI in e2e/). It has the prerequisites of
 # `make e2e` (root, a standalone containerd, CNI plugins) plus Node.js with
-# the frontend's node_modules (`make web-ui`, or `npm ci` in
-# internal/webui/frontend), the Playwright Chromium (`npx playwright install
-# chromium` there), git, and network access to github.com and ghcr.io: team
+# the web workspace's node_modules (`make web-ui`, or `npm ci` in web), the
+# Playwright Chromium (`npx playwright install chromium` in web/apps/local),
+# git, and network access to github.com and ghcr.io: team
 # init fetches the kukeon source at the revision `kuke` was built from, and
 # the agent and majordomo cells pull the claude harness image.
 #
@@ -370,29 +370,34 @@ install.sh:
 
 # Built assets are committed so ordinary Go and Docker builds need no Node.js.
 # Run explicitly after frontend edits; CI verifies the committed output.
+# `npm run build` in the web/ workspace builds every package in order: the
+# published @kukeon/api-client, @kukeon/ui and @kukeon/console (with its type
+# declarations, so a declaration error fails here), then apps/local, the
+# console kuke serve embeds, into internal/webui/dist.
 .PHONY: web-ui web-ui-check
 web-ui:
-	cd internal/webui/frontend && npm ci --no-audit --no-fund && npm run build
+	cd web && npm ci --no-audit --no-fund && npm run build
 
 web-ui-check: web-ui
 	git diff --exit-code -- internal/webui/dist
 	@test -z "$$(git ls-files --others --exclude-standard -- internal/webui/dist)" || \
 		{ echo "Untracked generated web assets; regenerate and commit internal/webui/dist" >&2; exit 1; }
 
-# Browser dependencies are installed by web-ui (or npm ci); install Chromium
-# once with `cd internal/webui/frontend && npx playwright install chromium`.
+# Browser dependencies are installed by web-ui (or npm ci in web); install
+# Chromium once with `cd web/apps/local && npx playwright install chromium`.
 .PHONY: web-ui-test web-ui-smoke
 web-ui-test: kuke
-	cd internal/webui/frontend && npm test
+	cd web/apps/local && npm test
 
-# Node unit tests of the frontend; needs node_modules (make web-ui or npm ci).
+# Type checks and Node unit tests of every web/ workspace package; needs
+# node_modules (make web-ui or npm ci in web).
 .PHONY: web-ui-unit
 web-ui-unit:
-	cd internal/webui/frontend && npm run test:unit
+	cd web && npm run typecheck && npm run test:unit
 
 # Requires KUKE_WEB_SMOKE_HOST=unix:///path/to/a/running/kukeond.sock.
 web-ui-smoke: kuke
-	cd internal/webui/frontend && npm run test:smoke
+	cd web/apps/local && npm run test:smoke
 
 # kuke team targets (harness checks, role materialization, live team checks).
 # Optional so builds that copy only this Makefile (the Dockerfile) still parse.

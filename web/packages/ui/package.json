@@ -1,0 +1,32 @@
+{
+  "name": "@kukeon/ui",
+  "version": "0.0.0",
+  "description": "React primitives of the kukeon web console: icons, row actions, disclosures, state badges and focus helpers.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eminwux/kukeon.git",
+    "directory": "web/packages/ui"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "@kukeon/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
