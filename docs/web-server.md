@@ -1400,6 +1400,25 @@ kuke serve --listen 0.0.0.0:5129
 kuke serve --listen 0.0.0.0:5129 --url http://localhost:5129
 ```
 
+## Cloud link
+
+`kuke serve --cloud-link <url>` also serves the API to a cloud relay over an
+outbound, mutually authenticated WSS link, so the relay reaches this host with
+no inbound port (issue #1755). Enroll the host first with
+`kuke cloud enroll <token>`, which stores the credential as Secret
+`cloud-link@kuke-system`; `kuke cloud status` shows the enrollment and the link
+state. The full reference is [kuke cloud](site/cli/kuke-cloud.md).
+
+Over the link the server answers the same `/api` routes as locally, the attach
+and exec WebSockets included, minus `POST /api/login` and `POST /api/logout`;
+`GET /api/session` answers the relay's user. The static UI is not served over
+the link. There is no local sign-in and no Host/Origin pin on link requests:
+instead each request must carry a user identity signed by the relay's key, and
+one with a missing or invalid signature gets `401 unauthenticated`. Each served
+request is logged on stderr with the relay's user (`cloud link request
+user=<user> method=<method> path=<path>`), and each refused one as `cloud link
+request rejected` with the reason.
+
 ## Read-only API
 
 All endpoints use same-origin HTTP GET and return JSON:

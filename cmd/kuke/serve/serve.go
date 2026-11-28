@@ -21,10 +21,12 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/cloudhost"
 	"github.com/eminwux/kukeon/internal/webserver"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
@@ -34,7 +36,7 @@ import (
 const defaultListen = "localhost:5129"
 
 func NewServeCmd() *cobra.Command {
-	var listen, browserURL string
+	var listen, browserURL, cloudLink string
 	cmd := &cobra.Command{
 		Use: "serve", Short: "Serve the local browser UI in the foreground", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -50,14 +52,23 @@ func NewServeCmd() *cobra.Command {
 				return err
 			}
 			_ = client.Close()
+			var link *webserver.CloudLink
+			if cmd.Flags().Changed("cloud-link") {
+				link = &webserver.CloudLink{URL: cloudLink}
+				if config.HomeDirKnown() {
+					link.StatusFile = filepath.Join(config.DefaultKukeDir(), cloudhost.StatusFileName)
+				}
+			}
 			return webserver.Run(ctx, listen, browserURL, host, func(ctx context.Context) (kukeonv1.Client, error) {
 				return kukeonv1.Dial(ctx, host)
-			}, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			}, cmd.OutOrStdout(), cmd.ErrOrStderr(), link)
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", defaultListen,
 		"Bind address as host:port: localhost, a literal IPv4, or a bracketed IPv6 (port 0 selects an available port)")
 	cmd.Flags().StringVar(&browserURL, "url", "",
 		"The only browser origin accepted, e.g. http://localhost:5129 (default: accept any Host and Origin)")
+	cmd.Flags().StringVar(&cloudLink, "cloud-link", "",
+		"Also serve the API to a cloud relay over an outbound wss:// link (enroll first with `kuke cloud enroll`)")
 	return cmd
 }

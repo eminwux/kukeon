@@ -126,6 +126,7 @@ nav:
       - cli/kuke-source.md
       - cli/kuke-connector.md
       - cli/kuke-serve.md
+      - cli/kuke-cloud.md
       - cli/kuke-uninstall.md
       - cli/kuke-update.md
       - cli/kuke-autocomplete.md

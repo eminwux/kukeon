@@ -249,7 +249,7 @@ func TestRunWarnsOnNonLoopbackBind(t *testing.T) {
 			var stderr bytes.Buffer
 			done := make(chan error, 1)
 			go func() {
-				done <- Run(ctx, tc.listen, tc.url, "", nil, stdout, &stderr)
+				done <- Run(ctx, tc.listen, tc.url, "", nil, stdout, &stderr, nil)
 			}()
 			var lines []string
 			for len(lines) < 3 {
@@ -294,7 +294,7 @@ func TestRunRejectsInvalidFlagsBeforeBinding(t *testing.T) {
 		{"localhost", ""},
 		{"localhost:0", "http://localhost:5129/path"},
 	} {
-		err := Run(context.Background(), tc.listen, tc.url, "", nil, io.Discard, io.Discard)
+		err := Run(context.Background(), tc.listen, tc.url, "", nil, io.Discard, io.Discard, nil)
 		if !errors.Is(err, errdefs.ErrConfig) {
 			t.Errorf("%+v: err=%v", tc, err)
 		}

@@ -285,6 +285,12 @@ const (
 	WebUIAdminSecretName = "web-ui-admin"
 	WebUIAdminUser       = "root"
 
+	// CloudLinkSecretName names the host's cloud link credential (issue
+	// #1755): an opaque Secret in KukeSystemRealmName holding the JSON
+	// cloudlink.Credential. `kuke cloud enroll` writes it and `kuke serve
+	// --cloud-link` reads it.
+	CloudLinkSecretName = "cloud-link"
+
 	// KukeonSystemUser and KukeonSystemGroup name the system identity created
 	// by `kuke init` so a non-root operator added to the kukeon group can
 	// dial the kukeond socket without sudo. Writes under /opt/kukeon still

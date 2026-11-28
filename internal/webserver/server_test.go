@@ -326,7 +326,7 @@ func TestRunLifecycle(t *testing.T) {
 	output := make(urlWriter, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, "127.0.0.1:0", "", "unix:///missing", func(context.Context) (kukeonv1.Client, error) { return nil, io.EOF }, output, io.Discard)
+		done <- Run(ctx, "127.0.0.1:0", "", "unix:///missing", func(context.Context) (kukeonv1.Client, error) { return nil, io.EOF }, output, io.Discard, nil)
 	}()
 	var url string
 	select {
@@ -377,7 +377,7 @@ func TestRunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runErr := Run(ctx, net.JoinHostPort("127.0.0.1", port), "", "", nil, io.Discard, io.Discard); runErr == nil {
+	if runErr := Run(ctx, net.JoinHostPort("127.0.0.1", port), "", "", nil, io.Discard, io.Discard, nil); runErr == nil {
 		t.Fatal("accepted occupied port")
 	}
 	cancel()
